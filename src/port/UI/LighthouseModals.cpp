@@ -1,6 +1,5 @@
 #include "LighthouseModals.h"
 #include <imgui.h>
-#include <spdlog/spdlog.h>
 #include <vector>
 #include <string>
 #include "UIWidgets.hpp"
@@ -20,13 +19,6 @@ std::vector<LighthouseModal> modals;
 bool closePopup = false;
 
 void LighthouseModalWindow::Draw() {
-    // TEMP DIAGNOSTIC (iOS black-screen investigation) -- remove once resolved.
-    static int sDrawCalls = 0;
-    if (sDrawCalls < 3 || sDrawCalls % 300 == 0) {
-        SPDLOG_INFO("[modal] Draw #{} visible={} queued={}", sDrawCalls, IsVisible(), modals.size());
-    }
-    sDrawCalls++;
-
     if (!IsVisible()) {
         return;
     }
@@ -50,19 +42,10 @@ void LighthouseModalWindow::DrawElement() {
             modals.erase(modals.begin());
             closePopup = false;
         }
-        const bool popupBegan = ImGui::BeginPopupModal(curModal.title_.c_str(), NULL,
-                                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize |
-                                                           ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-                                                           ImGuiWindowFlags_NoSavedSettings);
-        // TEMP DIAGNOSTIC (iOS black-screen investigation) -- remove once resolved.
-        static int sBeginCalls = 0;
-        if (sBeginCalls < 3 || sBeginCalls % 300 == 0) {
-            SPDLOG_INFO("[modal] '{}' began={} isOpen={}", curModal.title_, popupBegan,
-                        ImGui::IsPopupOpen(curModal.title_.c_str()));
-        }
-        sBeginCalls++;
-
-        if (popupBegan) {
+        if (ImGui::BeginPopupModal(curModal.title_.c_str(), NULL,
+                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize |
+                                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                                       ImGuiWindowFlags_NoSavedSettings)) {
             // Show the nav highlight on the default button (button1) the moment the popup opens, so a
             // gamepad/keyboard user sees the selection immediately rather than after a first input.
             if (ImGui::IsWindowAppearing()) {
@@ -93,7 +76,7 @@ void LighthouseModalWindow::DrawElement() {
             }
             // EndPopup() is only valid when BeginPopupModal() returned true. Calling it
             // unconditionally corrupts ImGui's window stack on any frame where the popup is
-            // not open -- the closePopup path below reaches exactly that state.
+            // not open -- the closePopup branch above reaches exactly that state.
             ImGui::EndPopup();
         }
     }
