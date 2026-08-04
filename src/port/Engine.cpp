@@ -973,6 +973,15 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
         gui->EndDraw();
         lhFast3dWindow->EndFrame();
         ImGui::PopStyleColor(2);
+
+        // TEMP DIAGNOSTIC (iOS black-screen investigation) -- remove once resolved.
+        static int sExtractFrames = 0;
+        if (sExtractFrames < 3 || sExtractFrames % 300 == 0) {
+            SPDLOG_INFO("[extract] frame #{} step={} prompt={} queued={} extracting={} {}x{}", sExtractFrames,
+                        (int)extractStep, (int)promptStep, LighthouseGui::PopupsQueued(), extracting.load(),
+                        wnd->GetWidth(), wnd->GetHeight());
+        }
+        sExtractFrames++;
     }
     threadPool = nullptr;
 
