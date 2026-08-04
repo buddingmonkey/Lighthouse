@@ -248,8 +248,16 @@ cmake -S . -B build-ios -G Xcode \
   -DIOS_DEVELOPMENT_TEAM=YOURTEAMID
 
 # 3. Build (or open build-ios/Lighthouse.xcodeproj and hit Run).
-cmake --build build-ios --config Release
+#    Everything after `--` goes to xcodebuild. -allowProvisioningUpdates lets it create
+#    the provisioning profile for PROJECT_ID; without it the build fails before compiling
+#    with "No profiles for '<bundle id>' were found". Xcode.app does this silently, the
+#    command line does not. Drop the flag if you left IOS_DEVELOPMENT_TEAM unset.
+cmake --build build-ios --config Release --target Lighthouse -- -allowProvisioningUpdates
 ```
+
+Building the `Lighthouse` target rather than `ALL_BUILD` skips the SDL2 dylib (the app
+links `SDL2::SDL2-static`) and `TorchExternal`, the host macOS Torch used by step 1. The
+asset-bundling step below is attached to the `Lighthouse` target, so it still runs.
 
 `IOS_DEVELOPMENT_TEAM` is your 10-character Apple Developer Team ID, from
 <https://developer.apple.com/account> → Membership. Leave it unset to configure and compile
@@ -260,6 +268,11 @@ A free Apple ID works too — add it under Xcode → Settings → Accounts, and 
 team's ID (`xcrun security find-identity -v -p codesigning` lists it, or open the generated
 project and pick the team in *Signing & Capabilities*). Free provisioning profiles expire
 after 7 days, so the app has to be reinstalled weekly.
+
+If step 3 still reports that no profiles were found, open `build-ios/Lighthouse.xcodeproj`
+once, select the *Lighthouse* target → *Signing & Capabilities* and pick your team there.
+Xcode registers the bundle ID and creates the profile; command-line builds work afterwards.
+This is usually only needed with a free personal team.
 
 `lighthouse.o2r`, `config.yml`, `assets/yaml` and `gamecontrollerdb.txt` are copied into the
 `.app` after linking. If the build warns that `lighthouse.o2r` was not found, run step 1.
