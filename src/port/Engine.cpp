@@ -499,6 +499,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
             "re-extract them from the download or.\n\nExiting...",
             "OK", "", [&]() {
                 lhFast3dWindow = nullptr;
+                Ship::Context::DestroyInstance();
                 context = nullptr;
                 exit(1);
             });
@@ -596,6 +597,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                 [&]() {
                                     threadPool = nullptr;
                                     lhFast3dWindow = nullptr;
+                                    Ship::Context::DestroyInstance();
                                     context = nullptr;
                                     exit(0);
                                 });
@@ -624,6 +626,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                     PathTestCleanup();
                                     threadPool = nullptr;
                                     lhFast3dWindow = nullptr;
+                                    Ship::Context::DestroyInstance();
                                     context = nullptr;
                                     exit(0);
                                 });
@@ -637,6 +640,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                     "OK", "", [&]() {
                                         threadPool = nullptr;
                                         lhFast3dWindow = nullptr;
+                                        Ship::Context::DestroyInstance();
                                         context = nullptr;
                                         exit(0);
                                     });
@@ -655,6 +659,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                 "OK", "", [&]() {
                                     threadPool = nullptr;
                                     lhFast3dWindow = nullptr;
+                                    Ship::Context::DestroyInstance();
                                     context = nullptr;
                                     exit(0);
                                 });
@@ -689,6 +694,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                         [&]() {
                             threadPool = nullptr;
                             lhFast3dWindow = nullptr;
+                            Ship::Context::DestroyInstance();
                             context = nullptr;
                             exit(0);
                         });
@@ -738,6 +744,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                 [&]() {
                                     threadPool = nullptr;
                                     lhFast3dWindow = nullptr;
+                                    Ship::Context::DestroyInstance();
                                     context = nullptr;
                                     exit(0);
                                 });
@@ -860,6 +867,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                         LighthouseGui::RegisterPopup("Extraction Error", errorMsg.c_str(), "OK", "", [&]() {
                             threadPool = nullptr;
                             lhFast3dWindow = nullptr;
+                            Ship::Context::DestroyInstance();
                             context = nullptr;
                             exit(0);
                         });
@@ -878,6 +886,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
         if (!WindowIsRunning()) {
             threadPool = nullptr;
             lhFast3dWindow = nullptr;
+            Ship::Context::DestroyInstance();
             context = nullptr;
             exit(0);
         }
@@ -1077,12 +1086,18 @@ void GameEngine::Destroy() {
 
     // Flush all resource refs so destructors run while spdlog is still active.
     // sResourceRefCache holds shared_ptrs that outlive the LUS cache otherwise.
+    // GameEngine::context is a non-owning raw pointer -- Ship::Context keeps the only
+    // owning reference in a static unique_ptr -- so nulling it here does not destroy
+    // anything. DestroyInstance() releases that static; without it ~Context() ran during
+    // exit()'s static teardown, by which point spdlog's own statics were gone, and its
+    // opening SPDLOG_TRACE dereferenced a dead logger (SIGSEGV at 0x18).
     ResourceHelpers_ClearRefCache();
     AudioDma_Clear();
     ReleaseSoundfonts();
     if (Instance->context && Instance->context->GetResourceManager()) {
         Instance->context->GetResourceManager()->UnloadResources("*");
     }
+    Ship::Context::DestroyInstance();
     Instance->context = nullptr;
     // PortEnhancements_Exit();
     for (auto ptr : MemoryPool) {
