@@ -41,7 +41,17 @@ extern "C" {
 
 #else
 
+/* Darwin's <assert.h> already provides __assert, as a three-argument function-like macro:
+ *
+ *     #define __assert(e, file, line) __assert_rtn(..., file, line, e)
+ *
+ * Declaring it here expands that macro mid-declaration and the parse collapses, which is
+ * why Debug builds broke on Apple platforms while Release ones did not -- NDEBUG takes the
+ * branch above. The argument order matches the calls below, so where the platform defines
+ * __assert we let it handle the failure; only declare our own where it does not. */
+#ifndef __assert
 extern void __assert(const char *, const char *, int);
+#endif
 #ifdef __ANSI_CPP__
 #define assert(EX)  ((EX)?((void)0):__assert( # EX , __FILE__, __LINE__))
 #else
