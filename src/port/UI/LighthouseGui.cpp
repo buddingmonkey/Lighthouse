@@ -24,6 +24,7 @@
 
 #include "Notification.h"
 #include "port/Controller/Mapper.h"
+#include "port/Controller/TouchControls.h"
 #include "port/Network/Anchor/Anchor.h"
 #include "port/Enhancements/Backports/EggAim.h"
 #include "LighthouseMenu.h"
@@ -70,6 +71,7 @@ std::shared_ptr<DisplayOverlayWindow> mDisplayOverlayWindow;
 // std::shared_ptr<TimesplitsWindow> mTimesplitsWindow;
 // std::shared_ptr<TimesplitsSettingsWindow> mTimesplitsSettingsWindow;
 std::shared_ptr<InputViewer> mInputViewer;
+std::shared_ptr<TouchControlsWindow> mTouchControls;
 std::shared_ptr<InputViewerSettingsWindow> mInputViewerSettings;
 std::shared_ptr<EggAimCrosshairWindow> mEggAimCrosshair;
 std::shared_ptr<LighthouseModalWindow> mModalWindow;
@@ -201,6 +203,12 @@ void SetupGuiElements() {
     mInputViewer = std::make_shared<InputViewer>("gWindows.InputViewer", "Input Viewer");
     gui->AddGuiWindow(mInputViewer);
 
+    // Draw() is overridden outright, so the overlay gates on gSettings.TouchControls.Enabled
+    // instead. The empty CVar name keeps SyncVisibilityConsoleVariable from writing a dead
+    // gWindows entry to every user's config.
+    mTouchControls = std::make_shared<TouchControlsWindow>("", true, "On-Screen Controls");
+    gui->AddGuiWindow(mTouchControls);
+
     mInputViewerSettings = std::make_shared<InputViewerSettingsWindow>("gWindows.InputViewerSettings",
                                                                        "Input Viewer Settings", ImVec2(500, 525));
     gui->AddGuiWindow(mInputViewerSettings);
@@ -245,6 +253,7 @@ void Destroy() {
     // mItemTrackerSettingsWindow = nullptr;
     mDisplayOverlayWindow = nullptr;
     mInputViewer = nullptr;
+    mTouchControls = nullptr;
     mInputViewerSettings = nullptr;
     mEggAimCrosshair = nullptr;
     mEventDebuggerWindow = nullptr;

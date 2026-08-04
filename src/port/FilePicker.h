@@ -6,11 +6,12 @@
 
 #include "ship/window/gui/FileBrowserWindow.h"
 
-// Desktop platforms have a usable native file dialog (portable-file-dialogs). Consoles and Linux
-// handhelds (arm) generally lack a native dialog / display server, so they fall back to
+// Desktop platforms have a usable native file dialog (portable-file-dialogs). Consoles, mobile and
+// Linux handhelds (arm) generally lack a native dialog / display server, so they fall back to
 // libultraship's in-game ImGui file browser. Define LIGHTHOUSE_NATIVE_FILE_DIALOG to override.
 #ifndef LIGHTHOUSE_NATIVE_FILE_DIALOG
-#if defined(__SWITCH__) || defined(__WIIU__) || (defined(__linux__) && (defined(__aarch64__) || defined(__arm__)))
+#if defined(__SWITCH__) || defined(__WIIU__) || defined(__IOS__) ||                                                     \
+    (defined(__linux__) && (defined(__aarch64__) || defined(__arm__)))
 #define LIGHTHOUSE_NATIVE_FILE_DIALOG 0
 #else
 #define LIGHTHOUSE_NATIVE_FILE_DIALOG 1

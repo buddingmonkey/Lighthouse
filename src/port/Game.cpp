@@ -18,6 +18,7 @@
 #endif
 #include <SDL2/SDL.h>
 
+#include "Controller/TouchControls.h"
 #include "DevTools/ThreadWatchdog.h"
 #include "GameStatus.h"
 #include "Interpolation/FrameInterpolation.h"
@@ -270,8 +271,9 @@ void push_frame() {
     }
 }
 
-/* Rename SDL_main to main for SDL compatibility */
-#ifdef __GNUC__
+/* Rename SDL_main to main for SDL compatibility.
+   Not on iOS: there SDL2main supplies main() and calls SDL_main from the UIKit delegate. */
+#if defined(__GNUC__) && !defined(__IOS__)
 #define SDL_main main
 #endif
 
@@ -285,6 +287,11 @@ int SDL_main(int argc, char* argv[]) {
     std::error_code ec;
     const char* shipHome = std::getenv("SHIP_HOME");
     const char* appImage = std::getenv("APPIMAGE");
+#ifdef __IOS__
+    // The bundle is read-only; anchor to Documents, which is where saves,
+    // bk.o2r and mods live.
+    std::filesystem::current_path(Ship::Context::GetAppDirectoryPath("bk"), ec);
+#else
     if (shipHome != nullptr && shipHome[0] != '\0') {
         std::filesystem::current_path(shipHome, ec);
     } else if (appImage != nullptr && appImage[0] != '\0') {
@@ -297,6 +304,9 @@ int SDL_main(int argc, char* argv[]) {
             std::filesystem::current_path(base, ec);
         }
     }
+#endif
+    (void)shipHome;
+    (void)appImage;
 
     GameEngine::Create(argc, argv);
     // Both threads are created during core1_init, so allowlist them first.
@@ -318,6 +328,7 @@ int SDL_main(int argc, char* argv[]) {
         // Pump events every iteration: a task-starved pass must not starve
         // input and window messages.
         Ship::Context::GetRawInstance()->GetWindow()->HandleEvents();
+        TouchControls_Poll();
         OS_SiService();
         if (IsInlineModExtractionBusy()) {
             GameEngine::Instance->RenderGuiFrame();

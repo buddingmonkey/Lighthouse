@@ -132,6 +132,9 @@ void LighthouseMenu::AddMenuSettings() {
         .RaceDisable(false)
         .Options(CheckboxOptions().Tooltip(
             "Search input box gets autofocus when visible. Does not affect using other widgets."));
+#ifndef __IOS__
+    // iOS has no file:// URL handler; the Files app reaches the same folder instead
+    // (see the On My iPhone/iPad > Lighthouse entry).
     AddWidget(path, "Open App Files Folder", WIDGET_BUTTON)
         .RaceDisable(false)
         .Callback([](WidgetInfo& info) {
@@ -139,6 +142,7 @@ void LighthouseMenu::AddMenuSettings() {
             SDL_OpenURL(std::string("file:///" + std::filesystem::absolute(filesPath).string()).c_str());
         })
         .Options(ButtonOptions().Tooltip("Opens the folder that contains the save and mods folders, etc."));
+#endif
 
     AddWidget(path, "Boot", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Boot Sequence", WIDGET_CVAR_COMBOBOX)
@@ -283,7 +287,13 @@ void LighthouseMenu::AddMenuSettings() {
         .Options(ComboboxOptions()
                      .ComboMap(imguiScaleOptions)
                      .Tooltip("Changes the scaling of the ImGui menu elements.")
+                     // Must match defaultImGuiScale in Engine.cpp, or the widget reports a
+                     // different scale than the one actually applied on a fresh install.
+#ifdef __IOS__
+                     .DefaultIndex(2)
+#else
                      .DefaultIndex(1)
+#endif
                      .ComponentAlignment(ComponentAlignments::Right)
                      .LabelPosition(LabelPositions::Far));
     //.Callback([](WidgetInfo& info) { GameEngine::Instance->ScaleImGui(); });
@@ -511,6 +521,40 @@ void LighthouseMenu::AddMenuSettings() {
         .Options(CheckboxOptions().Tooltip("Pocket scheme only. The R2 button slows movement to a tip-toe walk.\n"
                                            "Off: tap R2 to toggle tip-toe on/off.\nOn: tip-toe only "
                                            "while R2 is held."));
+
+#ifdef __IOS__
+    AddWidget(path, "On-Screen Controls", WIDGET_SEPARATOR_TEXT);
+    AddWidget(path, "Show On-Screen Controls", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_SETTING("TouchControls.Enabled"))
+        .RaceDisable(false)
+        .Options(CheckboxOptions().DefaultValue(true).Tooltip("Draws a virtual N64 controller over the game."));
+    AddWidget(path, "Hide With Gamepad", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_SETTING("TouchControls.HideWithGamepad"))
+        .RaceDisable(false)
+        .Options(CheckboxOptions().DefaultValue(true).Tooltip(
+            "Hides the on-screen controls while a physical controller is connected."));
+    AddWidget(path, "Show D-Pad", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_SETTING("TouchControls.ShowDPad"))
+        .RaceDisable(false)
+        .Options(CheckboxOptions().DefaultValue(false));
+    AddWidget(path, "Control Size", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("TouchControls.Scale"))
+        .RaceDisable(false)
+        .Options(FloatSliderOptions().Min(0.6f).Max(1.2f).DefaultValue(1.0f).Format("%.2f"));
+    AddWidget(path, "Control Opacity", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("TouchControls.Opacity"))
+        .RaceDisable(false)
+        .Options(FloatSliderOptions().Min(0.05f).Max(1.0f).DefaultValue(0.4f).Format("%.2f"));
+    AddWidget(path, "Edge Margin", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("TouchControls.EdgeInset"))
+        .RaceDisable(false)
+        .Options(FloatSliderOptions().Min(0.0f).Max(0.15f).DefaultValue(0.05f).Format("%.2f").Tooltip(
+            "Keeps the controls clear of the notch and home indicator."));
+    AddWidget(path, "Touch Stick Deadzone", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("TouchControls.Deadzone"))
+        .RaceDisable(false)
+        .Options(FloatSliderOptions().Min(0.0f).Max(0.5f).DefaultValue(0.12f).Format("%.2f"));
+#endif
 
     // Input Viewer
     path.sidebarName = "Input Viewer";

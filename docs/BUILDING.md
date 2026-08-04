@@ -215,6 +215,105 @@ cpack
 cmake --build build-cmake --target clean
 ```
 
+## iOS (iPhone / iPad)
+
+Requires a Mac with Xcode 15 or newer, plus `cmake` and `ninja` (Homebrew or MacPorts).
+Everything else — SDL2, libzip, spdlog, tinyxml2, nlohmann-json and metal-cpp — is fetched
+by libultraship during configure. The renderer is Metal; there is no OpenGL ES path.
+
+The build cross-compiles, so the asset packer (Torch) has to run on the Mac itself. The
+easiest route is to generate `lighthouse.o2r` once from a normal macOS build tree and let
+the iOS configure pick it up.
+
+```bash
+git clone https://github.com/HarbourMasters/Lighthouse.git
+cd Lighthouse
+git submodule update --init
+
+# 1. Generate the port asset archive on the host.
+cmake -H. -Bbuild-cmake -GNinja
+cmake --build build-cmake --target GeneratePortO2R
+
+# 2. Configure the iOS project. -G Xcode is required: the app bundle, asset catalog
+#    and code signing all go through Xcode's build phases.
+#    CMAKE_IGNORE_PREFIX_PATH keeps the iOS configure from picking up the Homebrew /
+#    MacPorts SDL2 and libzip you installed for the desktop build — they are the wrong
+#    architecture, and libultraship would use them instead of the versions it fetches.
+cmake -S . -B build-ios -G Xcode \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/ios.toolchain.cmake \
+  -DPLATFORM=OS64 \
+  -DDEPLOYMENT_TARGET=16.0 \
+  -DCMAKE_IGNORE_PREFIX_PATH="/opt/homebrew;/usr/local;/opt/local" \
+  -DPROJECT_ID=com.yourname.lighthouse \
+  -DIOS_DEVELOPMENT_TEAM=YOURTEAMID
+
+# 3. Build (or open build-ios/Lighthouse.xcodeproj and hit Run).
+cmake --build build-ios --config Release
+```
+
+`IOS_DEVELOPMENT_TEAM` is your 10-character Apple Developer Team ID, from
+<https://developer.apple.com/account> → Membership. Leave it unset to configure and compile
+without an Apple account; the resulting app just can't be installed on a device.
+`PROJECT_ID` must be a bundle identifier your team owns.
+
+A free Apple ID works too — add it under Xcode → Settings → Accounts, and use the personal
+team's ID (`xcrun security find-identity -v -p codesigning` lists it, or open the generated
+project and pick the team in *Signing & Capabilities*). Free provisioning profiles expire
+after 7 days, so the app has to be reinstalled weekly.
+
+`lighthouse.o2r`, `config.yml`, `assets/yaml` and `gamecontrollerdb.txt` are copied into the
+`.app` after linking. If the build warns that `lighthouse.o2r` was not found, run step 1.
+
+### Getting the game onto a device
+
+`bk.o2r` is **not** built at compile time for iOS — the app extracts it on-device, the same
+way the desktop builds do:
+
+1. Install and launch the app once. It creates a `Lighthouse` folder under
+   *On My iPhone* / *On My iPad* in the Files app.
+2. Copy a supported Banjo-Kazooie ROM (`.z64`) into that folder.
+3. Relaunch. Lighthouse finds the ROM, asks to extract, and writes `bk.o2r` next to it.
+   Extraction takes a few minutes and needs roughly 200 MB free.
+
+Saves, `lighthouse.cfg.json` and the `mods` folder all live in the same directory, so they
+can be backed up or edited from the Files app or over USB in Finder.
+
+### iOS notes
+
+* **Layout**: landscape only, full screen, rendered at the display's native pixel
+  resolution. ProMotion displays are allowed to run above 60 Hz.
+* **Controllers**: any MFi / Bluetooth controller SDL2 recognises (Xbox, DualSense,
+  DualShock 4, Backbone, 8BitDo...) works via the GameController framework. Pair it in
+  iOS Settings first; the on-screen pad hides itself while one is connected.
+* **On-screen controls**: drawn by `src/port/Controller/TouchControls.cpp` and merged into
+  the pad in `OS_SiService`, so they feed the same path as a physical controller. Size,
+  opacity, edge margin, stick deadzone and the optional D-pad live under
+  *Settings → Controls*. The `MENU` button at the top of the screen opens the port menu,
+  which is otherwise bound to Escape.
+* **Mods** work exactly as on desktop — drop `.o2r`/`.otr` files into `Lighthouse/mods`
+  via the Files app. Applying a mod list needs a restart, and since iOS apps can't relaunch
+  themselves the menu asks you to close the app and reopen it from the Home Screen.
+* **Networking** (Anchor multiplayer) is off by default on iOS because SDL2_net isn't part
+  of the iOS dependency set.
+
+### Companion libultraship changes
+
+iOS support needs three small fixes in the `libultraship` submodule, which have to land
+upstream (or in your fork) before this builds:
+
+* `src/fast/backends/gfx_sdl2.cpp` — request `SDL_WINDOW_ALLOW_HIGHDPI` so the Metal
+  drawable is the display's native pixel size instead of 1x (this is what macOS already
+  does for Retina), and stop routing fullscreen through the Cocoa-only helpers, which
+  aren't compiled for iOS and would fail to link.
+* `src/fast/Fast3dWindow.cpp` — only advertise the OpenGL backend when it was compiled in.
+  Without this a config carrying `"Window.Backend.Id": 2`, e.g. copied from a desktop
+  install, selects a backend iOS has no case for and crashes on a null renderer.
+* `src/ship/Context.cpp` — `GetAppBundlePath()` returns the read-only app bundle on iOS
+  instead of `Documents`, so shipped assets and user data are separate.
+* `src/CMakeLists.txt` — guard the code-signing tweak for the `zip` target with
+  `if(TARGET zip)`; it only exists when libzip came from FetchContent, so configure fails
+  outright on a machine that has libzip installed.
+
 # Compatible Roms
 Any retail version. See [the readme](https://github.com/HarbourMasters/Lighthouse/blob/develop/README.md#1-verify-your-rom-dump)
 

@@ -59,9 +59,15 @@
 
 const float imguiScaleOptionToValue[4] = { 0.75f, 1.0f, 1.5f, 2.0f };
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
+#ifdef __IOS__
+// Phone-sized screens need larger text and touch targets than the desktop default.
+const uint32_t defaultImGuiScale = 2;
+#else
 const uint32_t defaultImGuiScale = 1;
+#endif
 int32_t previousImGuiScaleIndex = -1;
-float previousImGuiScale = defaultImGuiScale;
+// Tracks the scale already baked into the ImGui style, which always starts unscaled.
+float previousImGuiScale = 1.0f;
 bool portArchiveVersionMatch = false;
 std::string assets_path;
 
@@ -140,6 +146,13 @@ bool VerifyArchiveVersion(OTRVersion version) {
 }
 
 GameEngine::GameEngine() {
+#ifdef __IOS__
+    // Play through the ring/silent switch like other games do.
+    SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "playback");
+    // Otherwise the accelerometer appears as a phantom joystick in the device list.
+    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+#endif
+
     this->context = Ship::Context::CreateUninitializedInstance("Lighthouse", "bk", "lighthouse.cfg.json");
 
 #ifdef __SWITCH__
@@ -193,7 +206,7 @@ GameEngine::GameEngine() {
     }
 
     previousImGuiScaleIndex = -1;
-    previousImGuiScale = defaultImGuiScale;
+    previousImGuiScale = 1.0f;
     ScaleImGui();
 }
 
@@ -1139,6 +1152,10 @@ void GameEngine::RelaunchIfRequested(int argc, char* argv[]) {
             SPDLOG_ERROR("Relaunch failed: CreateProcess error {}", GetLastError());
         }
     }
+#elif defined(__IOS__)
+    // exec is unavailable to sandboxed apps; the user relaunches from the home screen.
+    (void)argc;
+    (void)argv;
 #elif defined(__linux__) || defined(__APPLE__)
     execv(argv[0], argv);
     SPDLOG_ERROR("Relaunch failed: execv error {}", strerror(errno));
