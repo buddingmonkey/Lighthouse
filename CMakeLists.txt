@@ -404,7 +404,13 @@ if (CMAKE_GENERATOR MATCHES "Visual Studio")
     )
 endif()
 
-add_subdirectory(libultraship ${CMAKE_CURRENT_SOURCE_DIR}/libultraship)
+# The second argument to add_subdirectory() is the *binary* directory. Pointing it at the
+# source directory made libultraship write its entire build output -- CMakeScripts,
+# cmake_install.cmake, generated headers and every target's .a -- into the submodule's source
+# tree, so every build directory shared one output location. Two builds running at once (or a
+# host build and an iOS build) would overwrite each other's artifacts, and `git status` in the
+# submodule was permanently dirty. Let CMake place it under the binary directory as usual.
+add_subdirectory(libultraship)
 add_dependencies(${PROJECT_NAME} libultraship)
 target_link_libraries(${PROJECT_NAME} PRIVATE libultraship)
 
