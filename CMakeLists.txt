@@ -783,7 +783,13 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(TORCH_HOST_GENERATOR CMAKE_GENERATOR "Unix Makefiles")
     set(TORCH_MULTI_CONFIG FALSE)
 else()
-    set(TORCH_HOST_ARGS "")
+    # ExternalProject does not inherit CMAKE_BUILD_TYPE, and an empty build type on a
+    # single-config generator means no optimisation flags at all -- the packer was being built
+    # -O0 even from a Release tree, which is most of why asset extraction takes tens of
+    # minutes. It is a build-time tool, so build it Release regardless of the host project's
+    # configuration, matching what the iOS branch above already does. Multi-config generators
+    # ignore this and follow the parent configuration instead.
+    set(TORCH_HOST_ARGS -DCMAKE_BUILD_TYPE=Release)
     set(TORCH_HOST_GENERATOR "")
 endif()
 ExternalProject_Add(TorchExternal
