@@ -269,6 +269,23 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
             XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO"
         )
     endif()
+
+    # Without a shared scheme Xcode invents its own the first time the project is opened, and
+    # that one always runs Debug. Debug means -O0 for everything including the statically
+    # linked asset extractor, which is roughly 60x slower: extracting bk.o2r from a 16MB ROM
+    # takes ~45 minutes at -O0 against ~40 seconds optimised, and the game itself runs
+    # unoptimised too. Generate the scheme from here so the configuration is a deliberate
+    # choice rather than whatever Xcode defaulted to.
+    set(IOS_SCHEME_CONFIGURATION "Debug" CACHE STRING
+        "Build configuration the generated Xcode scheme runs (Debug or Release)")
+    set_property(CACHE IOS_SCHEME_CONFIGURATION PROPERTY STRINGS Debug Release)
+
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        XCODE_GENERATE_SCHEME TRUE
+        XCODE_SCHEME_LAUNCH_CONFIGURATION "${IOS_SCHEME_CONFIGURATION}"
+    )
+    message(STATUS "Xcode scheme '${PROJECT_NAME}' runs the ${IOS_SCHEME_CONFIGURATION} "
+                   "configuration (set IOS_SCHEME_CONFIGURATION to change)")
 else()
     add_executable(${PROJECT_NAME} ${ALL_FILES})
 endif()
