@@ -200,7 +200,7 @@ void SetupGuiElements() {
         "gWindows.CheckTrackerSettings", "Check Tracker Settings");
     gui->AddGuiWindow(mRandoCheckTrackerSettingsWindow);
 
-    mInputViewer = std::make_shared<InputViewer>("gWindows.InputViewer", "Input Viewer");
+    mInputViewer = std::make_shared<InputViewer>(CVAR_WINDOW("InputViewer"), "Input Viewer");
     gui->AddGuiWindow(mInputViewer);
 
     // Draw() is overridden outright, so the overlay gates on gSettings.TouchControls.Enabled
@@ -209,7 +209,7 @@ void SetupGuiElements() {
     mTouchControls = std::make_shared<TouchControlsWindow>("", true, "On-Screen Controls");
     gui->AddGuiWindow(mTouchControls);
 
-    mInputViewerSettings = std::make_shared<InputViewerSettingsWindow>("gWindows.InputViewerSettings",
+    mInputViewerSettings = std::make_shared<InputViewerSettingsWindow>(CVAR_WINDOW("InputViewerSettings"),
                                                                        "Input Viewer Settings", ImVec2(500, 525));
     gui->AddGuiWindow(mInputViewerSettings);
 
