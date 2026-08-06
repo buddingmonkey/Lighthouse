@@ -286,13 +286,13 @@ int SDL_main(int argc, char* argv[]) {
     // Anchor relative paths to the executable instead of cwd
     // when SHIP_HOME is not in use
     std::error_code ec;
-    const char* shipHome = std::getenv("SHIP_HOME");
-    const char* appImage = std::getenv("APPIMAGE");
 #ifdef __IOS__
     // The bundle is read-only; anchor to Documents, which is where saves,
     // bk.o2r and mods live.
     std::filesystem::current_path(Ship::Context::GetAppDirectoryPath("bk"), ec);
 #else
+    const char* shipHome = std::getenv("SHIP_HOME");
+    const char* appImage = std::getenv("APPIMAGE");
     if (shipHome != nullptr && shipHome[0] != '\0') {
         std::filesystem::current_path(shipHome, ec);
     } else if (appImage != nullptr && appImage[0] != '\0') {
@@ -306,8 +306,6 @@ int SDL_main(int argc, char* argv[]) {
         }
     }
 #endif
-    (void)shipHome;
-    (void)appImage;
 
     GameEngine::Create(argc, argv);
     // Both threads are created during core1_init, so allowlist them first.

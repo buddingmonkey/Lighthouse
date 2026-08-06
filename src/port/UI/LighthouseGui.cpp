@@ -205,7 +205,8 @@ void SetupGuiElements() {
 
     // Draw() is overridden outright, so the overlay gates on gSettings.TouchControls.Enabled
     // instead. The empty CVar name keeps SyncVisibilityConsoleVariable from writing a dead
-    // gWindows entry to every user's config.
+    // gWindows entry to every user's config -- an early-out there, not a documented part of
+    // GuiWindow's contract, so re-check it on a libultraship bump.
     mTouchControls = std::make_shared<TouchControlsWindow>("", true, "On-Screen Controls");
     gui->AddGuiWindow(mTouchControls);
 

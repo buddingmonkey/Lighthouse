@@ -44,6 +44,12 @@ bool TouchControls_Active() {
 
 namespace {
 
+// None of the state in this file is locked, because all of it belongs to the window thread:
+// Game.cpp's main loop calls TouchControls_Poll() and then OS_SiService() (which reaches
+// TouchControls_MergeInto under the SI latch mutex, on that same thread), and the gui pass
+// that reaches TouchControls_Draw() runs from ServiceRcp()/RenderGuiFrame() in the same loop.
+// Moving input polling onto a thread of its own means guarding everything below.
+
 // Layout lives in "height units": the y axis spans 0..1 and x spans 0..aspect, so a
 // circle is a circle and one set of constants suits both phone and tablet aspect ratios.
 struct Vec2 {
@@ -119,6 +125,7 @@ struct State {
 State sState;
 std::vector<Finger> sFingers;
 Layout sLayout;
+bool sLayoutValid = false;
 bool sMenuLatch = false;
 // Refreshed once per poll: PadActive() is also called from the SI service, which holds the
 // pad mutex the game thread waits on, so it must not walk SDL's joystick list.
@@ -186,6 +193,7 @@ void AddPill(Layout& l, PadControl id, Vec2 center, Vec2 half, uint16_t mask, co
     b.enabled = true;
 }
 
+// Every CVar read here must also be mirrored in EnsureLayout's change check.
 void BuildLayout(float aspect) {
     Layout l;
     l.aspect = aspect;
@@ -243,7 +251,39 @@ void BuildLayout(float aspect) {
     }
 
     sLayout = l;
+    sLayoutValid = true;
 }
+
+// BuildLayout's inputs as of the last build, so rotating the device or dragging a settings
+// slider rebuilds and an ordinary frame does not.
+float sBuiltAspect = 0.0f;
+float sBuiltScale = 0.0f;
+float sBuiltInset = 0.0f;
+int sBuiltDPad = 0;
+
+void EnsureLayout(float aspect) {
+    const float scale = CVarGetFloat(CVAR_TOUCH("Scale"), 1.0f);
+    const float inset = CVarGetFloat(CVAR_TOUCH("EdgeInset"), 0.05f);
+    const int dpad = CVarGetInteger(CVAR_TOUCH("ShowDPad"), 0);
+    if (sLayoutValid && aspect == sBuiltAspect && scale == sBuiltScale && inset == sBuiltInset && dpad == sBuiltDPad) {
+        return;
+    }
+    sBuiltAspect = aspect;
+    sBuiltScale = scale;
+    sBuiltInset = inset;
+    sBuiltDPad = dpad;
+    BuildLayout(aspect);
+}
+
+// Hit slop: how far past a control's drawn edge a touch still counts. Pushed past the gaps
+// BuildLayout leaves, neighbouring controls overlap and ClassifyTouch picks the nearer one.
+constexpr float kPillSlopX = 1.15f;
+constexpr float kPillSlopY = 1.35f;
+constexpr float kCircleSlop = 1.2f;
+constexpr float kMenuSlopX = 1.2f;
+constexpr float kMenuSlopY = 1.4f;
+// N64 sticks read a little past 80 at the octagon corners; 80 is the safe full-range value.
+constexpr float kStickRange = 80.0f;
 
 bool HitsButton(const Button& b, const Vec2& p) {
     if (!b.enabled) {
@@ -251,15 +291,15 @@ bool HitsButton(const Button& b, const Vec2& p) {
     }
     if (b.pill) {
         // A little slop so shoulder taps near the screen edge still register.
-        return std::abs(p.x - b.center.x) <= b.halfExtent.x * 1.15f &&
-               std::abs(p.y - b.center.y) <= b.halfExtent.y * 1.35f;
+        return std::abs(p.x - b.center.x) <= b.halfExtent.x * kPillSlopX &&
+               std::abs(p.y - b.center.y) <= b.halfExtent.y * kPillSlopY;
     }
-    return Dist(p, b.center) <= b.radius * 1.2f;
+    return Dist(p, b.center) <= b.radius * kCircleSlop;
 }
 
 bool HitsMenu(const Vec2& p) {
-    return std::abs(p.x - sLayout.menuCenter.x) <= sLayout.menuHalfExtent.x * 1.2f &&
-           std::abs(p.y - sLayout.menuCenter.y) <= sLayout.menuHalfExtent.y * 1.4f;
+    return std::abs(p.x - sLayout.menuCenter.x) <= sLayout.menuHalfExtent.x * kMenuSlopX &&
+           std::abs(p.y - sLayout.menuCenter.y) <= sLayout.menuHalfExtent.y * kMenuSlopY;
 }
 
 int ClassifyTouch(const Vec2& p, bool padActive, bool menuButtonActive) {
@@ -277,6 +317,8 @@ int ClassifyTouch(const Vec2& p, bool padActive, bool menuButtonActive) {
         if (!HitsButton(b, p)) {
             continue;
         }
+        // Zero distance means a pill wins any tie by construction; today no pill overlaps a
+        // circle at any scale BuildLayout allows, so a layout change should recheck that.
         const float d = b.pill ? 0.0f : Dist(p, b.center);
         if (best == kTargetNone || d < bestDist) {
             best = i;
@@ -306,9 +348,6 @@ void OpenMenu() {
     }
 }
 
-// N64 sticks read a little past 80 at the octagon corners; 80 is the safe full-range value.
-constexpr float kStickRange = 80.0f;
-
 } // namespace
 
 extern "C" void TouchControls_Poll(void) {
@@ -332,7 +371,7 @@ extern "C" void TouchControls_Poll(void) {
         sMenuLatch = false;
         return;
     }
-    BuildLayout(w / h);
+    EnsureLayout(w / h);
 
     sGamepadPresent = GamepadConnected();
     const bool padActive = PadActive();
@@ -487,8 +526,7 @@ void TouchControls_Draw() {
     }
     const ImGuiIO& io = ImGui::GetIO();
     const float h = io.DisplaySize.y;
-    // stickBase is zero until the first poll has built a layout.
-    if (h <= 0.0f || sLayout.stickBase <= 0.0f) {
+    if (h <= 0.0f || !sLayoutValid) {
         return;
     }
     // Height units map to pixels by a single factor; see BuildLayout.

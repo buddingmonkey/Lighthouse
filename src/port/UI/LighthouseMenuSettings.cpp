@@ -132,17 +132,23 @@ void LighthouseMenu::AddMenuSettings() {
         .RaceDisable(false)
         .Options(CheckboxOptions().Tooltip(
             "Search input box gets autofocus when visible. Does not affect using other widgets."));
-#ifndef __IOS__
-    // iOS has no file:// URL handler; the Files app reaches the same folder instead
-    // (see the On My iPhone/iPad > Lighthouse entry).
+    // ButtonOptions doesn't override Disabled()/DisabledTooltip(), so those return WidgetOptions&
+    // and can't be chained into Options(); set them on a named local instead.
+    ButtonOptions filesFolderOptions =
+        ButtonOptions().Tooltip("Opens the folder that contains the save and mods folders, etc.");
+#ifdef __IOS__
+    // iOS has no file:// URL handler, so the button can't do anything there.
+    filesFolderOptions.Disabled(true).DisabledTooltip(
+        "Not available on iOS. Open the Files app and look under On My iPhone / On My iPad > Lighthouse "
+        "to reach the same folder.");
+#endif
     AddWidget(path, "Open App Files Folder", WIDGET_BUTTON)
         .RaceDisable(false)
         .Callback([](WidgetInfo& info) {
             std::string filesPath = Ship::Context::GetRawInstance()->GetAppDirectoryPath();
             SDL_OpenURL(std::string("file:///" + std::filesystem::absolute(filesPath).string()).c_str());
         })
-        .Options(ButtonOptions().Tooltip("Opens the folder that contains the save and mods folders, etc."));
-#endif
+        .Options(filesFolderOptions);
 
     AddWidget(path, "Boot", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Boot Sequence", WIDGET_CVAR_COMBOBOX)
@@ -283,13 +289,7 @@ void LighthouseMenu::AddMenuSettings() {
         .Options(ComboboxOptions()
                      .ComboMap(imguiScaleOptions)
                      .Tooltip("Changes the scaling of the ImGui menu elements.")
-                     // Must match defaultImGuiScale in Engine.cpp, or the widget reports a
-                     // different scale than the one actually applied on a fresh install.
-#ifdef __IOS__
-                     .DefaultIndex(2)
-#else
-                     .DefaultIndex(1)
-#endif
+                     .DefaultIndex(defaultImGuiScaleIndex)
                      .ComponentAlignment(ComponentAlignments::Right)
                      .LabelPosition(LabelPositions::Far));
     //.Callback([](WidgetInfo& info) { GameEngine::Instance->ScaleImGui(); });

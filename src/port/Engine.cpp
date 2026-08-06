@@ -63,9 +63,9 @@ const float imguiScaleOptionToValue[4] = { 0.75f, 1.0f, 1.5f, 2.0f };
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
 #ifdef __IOS__
 // Phone-sized screens need larger text and touch targets than the desktop default.
-const uint32_t defaultImGuiScale = 2;
+const uint32_t defaultImGuiScaleIndex = 2;
 #else
-const uint32_t defaultImGuiScale = 1;
+const uint32_t defaultImGuiScaleIndex = 1;
 #endif
 int32_t previousImGuiScaleIndex = -1;
 // Tracks the scale already baked into the ImGui style, which always starts unscaled.
@@ -439,6 +439,20 @@ void GameEngine::FinishInit() {
 #endif
 }
 
+// Teardown shared by every bail-out in RunExtract(). The thread pool is a RunExtract() local and
+// does not exist yet at the earliest bail-out, hence the pointer; `context` is the GameEngine
+// member. Both are passed in so this stays a plain function over exactly what it releases.
+[[noreturn]] static void ShutdownAndExit(int code, std::shared_ptr<BS::thread_pool>* threadPool,
+                                         Ship::Context*& context) {
+    if (threadPool != nullptr) {
+        *threadPool = nullptr;
+    }
+    lhFast3dWindow = nullptr;
+    Ship::Context::DestroyInstance();
+    context = nullptr;
+    exit(code);
+}
+
 void GameEngine::RunExtract(int argc, char* argv[]) {
     bool extractDone = false;
     ExtractSteps extractStep = ES_PORT_ARCHIVE;
@@ -510,12 +524,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
             "Extractor assets not found",
             "No O2R files found. Missing 'assets/' folder needed to generate OTR file.\nPlease "
             "re-extract them from the download or.\n\nExiting...",
-            "OK", "", [&]() {
-                lhFast3dWindow = nullptr;
-                Ship::Context::DestroyInstance();
-                context = nullptr;
-                exit(1);
-            });
+            "OK", "", [&]() { ShutdownAndExit(1, nullptr, context); });
     } else if (shouldRegen) {
         LighthouseGui::RegisterPopup("Outdated ROM Archives",
                                      "Your ROM archives were created with incompatible versions of Lighthouse.\n"
@@ -607,13 +616,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                             LighthouseGui::RegisterPopup(
                                 "Lighthouse Path Error",
                                 "Lighthouse is running in a temp folder.\nExtract the .zip and run again.", "OK", "",
-                                [&]() {
-                                    threadPool = nullptr;
-                                    lhFast3dWindow = nullptr;
-                                    Ship::Context::DestroyInstance();
-                                    context = nullptr;
-                                    exit(0);
-                                });
+                                [&]() { ShutdownAndExit(0, &threadPool, context); });
                         } else {
                             windowsStep = WS_PERMS;
                         }
@@ -637,11 +640,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                         fclose(tfile);
                                     }
                                     PathTestCleanup();
-                                    threadPool = nullptr;
-                                    lhFast3dWindow = nullptr;
-                                    Ship::Context::DestroyInstance();
-                                    context = nullptr;
-                                    exit(0);
+                                    ShutdownAndExit(0, &threadPool, context);
                                 });
                         } else {
                             fclose(tfile);
@@ -650,13 +649,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                     "Lighthouse Permissions Error",
                                     "Lighthouse does not have proper file permissions.\nPlease move it to a "
                                     "folder that does and run again.",
-                                    "OK", "", [&]() {
-                                        threadPool = nullptr;
-                                        lhFast3dWindow = nullptr;
-                                        Ship::Context::DestroyInstance();
-                                        context = nullptr;
-                                        exit(0);
-                                    });
+                                    "OK", "", [&]() { ShutdownAndExit(0, &threadPool, context); });
                             }
                             windowsStep = WS_ONEDRIVE;
                         }
@@ -669,13 +662,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                 "Lighthouse appears to be in a OneDrive folder, which will cause issues.\n"
                                 "Please move it to a folder outside of OneDrive, like the root of a\n"
                                 "drive (e.g. \"C:\\Games\\Lighthouse\").",
-                                "OK", "", [&]() {
-                                    threadPool = nullptr;
-                                    lhFast3dWindow = nullptr;
-                                    Ship::Context::DestroyInstance();
-                                    context = nullptr;
-                                    exit(0);
-                                });
+                                "OK", "", [&]() { ShutdownAndExit(0, &threadPool, context); });
                         } else {
                             windowsStep = WS_DONE;
                             if (args.size() > 0) {
@@ -704,13 +691,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                 extractStep = ES_VERIFY;
                             }
                         },
-                        [&]() {
-                            threadPool = nullptr;
-                            lhFast3dWindow = nullptr;
-                            Ship::Context::DestroyInstance();
-                            context = nullptr;
-                            exit(0);
-                        });
+                        [&]() { ShutdownAndExit(0, &threadPool, context); });
                     break;
                 }
                 file = args.at(0);
@@ -754,13 +735,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                             LighthouseGui::RegisterPopup(
                                 "No O2R Files", "No O2R files found. Generate one now?", "Yes", "No",
                                 [&]() { promptStep = PS_LOCAL; },
-                                [&]() {
-                                    threadPool = nullptr;
-                                    lhFast3dWindow = nullptr;
-                                    Ship::Context::DestroyInstance();
-                                    context = nullptr;
-                                    exit(0);
-                                });
+                                [&]() { ShutdownAndExit(0, &threadPool, context); });
                         } else {
                             extractStep = ES_VERIFY;
                         }
@@ -877,13 +852,8 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                         } else {
                             errorMsg = "No ROM O2R file detected.\nPlease generate a ROM O2R and relaunch.";
                         }
-                        LighthouseGui::RegisterPopup("Extraction Error", errorMsg.c_str(), "OK", "", [&]() {
-                            threadPool = nullptr;
-                            lhFast3dWindow = nullptr;
-                            Ship::Context::DestroyInstance();
-                            context = nullptr;
-                            exit(0);
-                        });
+                        LighthouseGui::RegisterPopup("Extraction Error", errorMsg.c_str(), "OK", "",
+                                                     [&]() { ShutdownAndExit(0, &threadPool, context); });
                     }
                     // Don't set extractDone — keep the loop alive so the popup renders.
                     continue;
@@ -897,11 +867,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
 
     render:
         if (!WindowIsRunning()) {
-            threadPool = nullptr;
-            lhFast3dWindow = nullptr;
-            Ship::Context::DestroyInstance();
-            context = nullptr;
-            exit(0);
+            ShutdownAndExit(0, &threadPool, context);
         }
         // Process window events for resize, mouse, keyboard events
         wnd->HandleEvents();
@@ -1040,7 +1006,7 @@ ImFont* GameEngine::CreateFontWithSize(float size, std::string fontPath) {
 }
 
 void GameEngine::ScaleImGui() {
-    int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", defaultImGuiScale);
+    int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", defaultImGuiScaleIndex);
     if (imGuiScaleIndex == previousImGuiScaleIndex) {
         return;
     }

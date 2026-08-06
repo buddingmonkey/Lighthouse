@@ -171,10 +171,11 @@ endif()
 set(VERSION us)
 # SDL2_net isn't part of the iOS dependency set, and Anchor multiplayer is desktop-only.
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    option(USE_NETWORKING "Enable networking features" OFF)
+    set(USE_NETWORKING_DEFAULT OFF)
 else()
-    option(USE_NETWORKING "Enable networking features" ON)
+    set(USE_NETWORKING_DEFAULT ON)
 endif()
+option(USE_NETWORKING "Enable networking features" ${USE_NETWORKING_DEFAULT})
 set(SKIP_XCODE_VERSION_CHECK ON)
 
 # Add compile definitions for the target
@@ -805,21 +806,20 @@ include(ExternalProject)
 # work. Pin a single-config generator, and name the macOS SDK because xcodebuild exports
 # SDKROOT=iPhoneOS into the script phase environment.
 set(TORCH_MULTI_CONFIG ${CMAKE_CONFIGURATION_TYPES})
+# ExternalProject does not inherit CMAKE_BUILD_TYPE, and an empty build type on a
+# single-config generator means no optimisation flags at all -- the packer was being built
+# -O0 even from a Release tree, which is most of why asset extraction takes tens of
+# minutes. It is a build-time tool, so build it Release regardless of the host project's
+# configuration. Multi-config generators ignore this and follow the parent configuration
+# instead.
+set(TORCH_HOST_ARGS -DCMAKE_BUILD_TYPE=Release)
+set(TORCH_HOST_GENERATOR "")
 if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     # The empty toolchain file is insurance: this CMake doesn't forward it, but the
     # explicit -D takes precedence in versions that do.
-    set(TORCH_HOST_ARGS -DCMAKE_TOOLCHAIN_FILE= -DCMAKE_OSX_SYSROOT=macosx -DCMAKE_BUILD_TYPE=Release)
+    list(APPEND TORCH_HOST_ARGS -DCMAKE_TOOLCHAIN_FILE= -DCMAKE_OSX_SYSROOT=macosx)
     set(TORCH_HOST_GENERATOR CMAKE_GENERATOR "Unix Makefiles")
     set(TORCH_MULTI_CONFIG FALSE)
-else()
-    # ExternalProject does not inherit CMAKE_BUILD_TYPE, and an empty build type on a
-    # single-config generator means no optimisation flags at all -- the packer was being built
-    # -O0 even from a Release tree, which is most of why asset extraction takes tens of
-    # minutes. It is a build-time tool, so build it Release regardless of the host project's
-    # configuration, matching what the iOS branch above already does. Multi-config generators
-    # ignore this and follow the parent configuration instead.
-    set(TORCH_HOST_ARGS -DCMAKE_BUILD_TYPE=Release)
-    set(TORCH_HOST_GENERATOR "")
 endif()
 ExternalProject_Add(TorchExternal
 	PREFIX TorchExternal

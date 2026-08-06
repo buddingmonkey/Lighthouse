@@ -22,7 +22,7 @@ void TouchControls_MergeInto(void* contPad);
 
 // Overlay host. Draws nothing off touch platforms, so it can be registered unconditionally.
 class TouchControlsWindow final : public Ship::GuiWindow {
-  public:
+public:
     using GuiWindow::GuiWindow;
 
     void InitElement() override{};
