@@ -61,6 +61,14 @@ static const std::unordered_map<int32_t, const char*> controlSchemeLabels = {
     { CONTROL_SCHEME_POCKET, "Pocket" },
 };
 
+#ifdef __IOS__
+static const std::unordered_map<int32_t, const char*> touchLayoutLabels = {
+    { 0, "Automatic" },
+    { 1, "Phone" },
+    { 2, "Tablet" },
+};
+#endif
+
 static const std::unordered_map<int32_t, const char*> bootSequenceLabels = {
     { BOOTSEQUENCE_DEFAULT, "Default" },
     { BOOTSEQUENCE_AUTHENTIC, "Authentic" },
@@ -533,19 +541,44 @@ void LighthouseMenu::AddMenuSettings() {
         .CVar(CVAR_SETTING("TouchControls.ShowDPad"))
         .RaceDisable(false)
         .Options(CheckboxOptions().DefaultValue(false));
+    AddWidget(path, "Left-Handed Layout", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_SETTING("TouchControls.Mirror"))
+        .RaceDisable(false)
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+            "Swaps the two halves of the pad, putting the stick under your right thumb."));
+    AddWidget(path, "Layout", WIDGET_CVAR_COMBOBOX)
+        .CVar(CVAR_SETTING("TouchControls.Layout"))
+        .RaceDisable(false)
+        .Options(ComboboxOptions()
+                     .Tooltip("Phone puts the shoulder buttons along the top edge, under the index fingers.\n"
+                              "Tablet moves them down the left and right edges, where a hand holding a "
+                              "larger screen can still reach them.\n\n"
+                              "Automatic picks from the screen size.")
+                     .ComboMap(touchLayoutLabels)
+                     .DefaultIndex(0));
     AddWidget(path, "Control Size", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("TouchControls.Scale"))
         .RaceDisable(false)
-        .Options(FloatSliderOptions().Min(0.6f).Max(1.2f).DefaultValue(1.0f).Format("%.2f"));
+        .Options(FloatSliderOptions().Min(0.7f).Max(1.4f).DefaultValue(1.0f).Format("%.2f").Tooltip(
+            "Controls are sized in real-world units, so they stay the same size on your thumb "
+            "whatever screen you play on.\n\nOn a short screen this stops going up before the slider "
+            "does, because the buttons have run out of room."));
+    AddWidget(path, "Control Reach", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("TouchControls.Reach"))
+        .RaceDisable(false)
+        .Options(FloatSliderOptions().Min(0.8f).Max(1.25f).DefaultValue(1.0f).Format("%.2f").Tooltip(
+            "How far from the corners you grip the controls sit. Turn it down for smaller hands; "
+            "the buttons keep their size and spacing either way."));
     AddWidget(path, "Control Opacity", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("TouchControls.Opacity"))
         .RaceDisable(false)
         .Options(FloatSliderOptions().Min(0.05f).Max(1.0f).DefaultValue(0.4f).Format("%.2f"));
     AddWidget(path, "Edge Margin", WIDGET_CVAR_SLIDER_FLOAT)
-        .CVar(CVAR_SETTING("TouchControls.EdgeInset"))
+        .CVar(CVAR_SETTING("TouchControls.EdgeMargin"))
         .RaceDisable(false)
-        .Options(FloatSliderOptions().Min(0.0f).Max(0.15f).DefaultValue(0.05f).Format("%.2f").Tooltip(
-            "Keeps the controls clear of the notch and home indicator."));
+        .Options(FloatSliderOptions().Min(0.0f).Max(10.0f).DefaultValue(3.0f).Format("%.1f mm").Tooltip(
+            "Clearance between the controls and the screen edge, for the notch and the home "
+            "indicator."));
     AddWidget(path, "Touch Stick Deadzone", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("TouchControls.Deadzone"))
         .RaceDisable(false)

@@ -50,20 +50,27 @@ namespace {
 // that reaches TouchControls_Draw() runs from ServiceRcp()/RenderGuiFrame() in the same loop.
 // Moving input polling onto a thread of its own means guarding everything below.
 
-// Layout lives in "height units": the y axis spans 0..1 and x spans 0..aspect, so a
-// circle is a circle and one set of constants suits both phone and tablet aspect ratios.
+// Layout lives in "height units": the y axis spans 0..1 and x spans 0..aspect, so a circle is a
+// circle. Every constant below is authored in millimetres and converted once, so a control keeps
+// its physical size whether the screen is 60 mm tall or 170.
 struct Vec2 {
     float x = 0.0f;
     float y = 0.0f;
 };
 
+// A phone is held with the index fingers curled over the top edge and both thumbs in the bottom
+// corners. A tablet is held the same way, but its top corners are a hand's width out of reach, so
+// the shoulder rail runs down the sides instead. Sizing physically covers every other difference.
+enum DeviceClass {
+    DEVICE_PHONE,
+    DEVICE_TABLET,
+};
+
+// Ordered so that each group of controls that has to be placed, and kept on screen, as a unit is
+// a contiguous run: the right thumb's face buttons, then the D-pad, then the shoulder rail.
 enum PadControl {
     CTRL_A,
     CTRL_B,
-    CTRL_Z,
-    CTRL_L,
-    CTRL_R,
-    CTRL_START,
     CTRL_CUP,
     CTRL_CDOWN,
     CTRL_CLEFT,
@@ -72,8 +79,26 @@ enum PadControl {
     CTRL_DDOWN,
     CTRL_DLEFT,
     CTRL_DRIGHT,
+    CTRL_Z,
+    CTRL_L,
+    CTRL_R,
+    CTRL_START,
     CTRL_COUNT,
 };
+
+// Hit slop: how far past a control's drawn edge a touch still counts. Neighbours overlap once it
+// is pushed past the gaps BuildLayout leaves, and ClassifyTouch picks whichever is hit deeper.
+constexpr float kPillSlopX = 1.15f;
+constexpr float kPillSlopY = 1.35f;
+constexpr float kCircleSlop = 1.2f;
+// Four buttons in a diamond have to be drawn small to fit, so they carry more slop than the rest:
+// the drawn disc is a target to aim at, not the edge of what registers. The gaps between them stay
+// dead on purpose -- a touch that misses an item slot should do nothing rather than the wrong one.
+constexpr float kClusterSlop = 1.55f;
+constexpr float kMenuSlopX = 1.2f;
+constexpr float kMenuSlopY = 1.4f;
+// N64 sticks read a little past 80 at the octagon corners; 80 is the safe full-range value.
+constexpr float kStickRange = 80.0f;
 
 struct Button {
     Vec2 center;
@@ -81,6 +106,7 @@ struct Button {
     // Pills (shoulders, Start) are drawn as rounded rects; radius stays the hit radius.
     Vec2 halfExtent;
     bool pill = false;
+    float slop = kCircleSlop;
     uint16_t mask = 0;
     const char* label = "";
     bool enabled = true;
@@ -177,6 +203,7 @@ void AddButton(Layout& l, PadControl id, Vec2 center, float radius, uint16_t mas
     b.radius = radius;
     b.halfExtent = { radius, radius };
     b.pill = false;
+    b.slop = kCircleSlop;
     b.mask = mask;
     b.label = label;
     b.enabled = true;
@@ -188,113 +215,333 @@ void AddPill(Layout& l, PadControl id, Vec2 center, Vec2 half, uint16_t mask, co
     b.halfExtent = half;
     b.radius = std::max(half.x, half.y);
     b.pill = true;
+    b.slop = kCircleSlop;
     b.mask = mask;
     b.label = label;
     b.enabled = true;
 }
 
-// Every CVar read here must also be mirrored in EnsureLayout's change check.
-void BuildLayout(float aspect) {
-    Layout l;
-    l.aspect = aspect;
-    // 1.2 is the largest scale at which no two controls overlap on any supported
-    // aspect ratio, D-pad enabled.
-    const float s = std::clamp(CVarGetFloat(CVAR_TOUCH("Scale"), 1.0f), 0.6f, 1.2f);
-    const float inset = std::clamp(CVarGetFloat(CVAR_TOUCH("EdgeInset"), 0.05f), 0.0f, 0.15f);
-    const float right = aspect - inset;
+// iOS reports window sizes in points, and a point is a fixed physical size. Apple quotes the two
+// densities in inches -- 163 per inch on every iPhone and on the iPad mini, 132 per inch on the
+// other iPads -- so they are converted here and nothing past this point deals in inches.
+constexpr float kMmPerInch = 25.4f;
+constexpr float kPhonePointsPerMm = 163.0f / kMmPerInch;
+constexpr float kTabletPointsPerMm = 132.0f / kMmPerInch;
+// Every landscape iPhone is at most 440 points tall and every iPad at least 744, so the threshold
+// has room either side of it.
+constexpr float kTabletMinPointHeight = 600.0f;
 
-    // Shoulders and Start ride the top edge, clear of both thumbs.
-    const Vec2 pill = { 0.095f * s, 0.052f * s };
-    AddPill(l, CTRL_L, { inset + pill.x, inset + pill.y }, pill, BTN_L, "L");
-    AddPill(l, CTRL_Z, { inset + pill.x * 3.4f, inset + pill.y }, pill, BTN_Z, "Z");
-    AddPill(l, CTRL_R, { right - pill.x, inset + pill.y }, pill, BTN_R, "R");
-    AddPill(l, CTRL_START, { right - pill.x * 3.4f, inset + pill.y }, pill, BTN_START, "START");
-
-    l.menuHalfExtent = { 0.085f * s, 0.045f * s };
-    l.menuCenter = { aspect * 0.5f, inset + l.menuHalfExtent.y };
-
-    // Left thumb: floating analog stick anchored bottom-left.
-    l.stickBase = 0.16f * s;
-    l.stickKnob = 0.075f * s;
-    l.stickHome = { inset + l.stickBase + 0.06f, 1.0f - inset - l.stickBase - 0.05f };
-    l.stickZoneMin = { 0.0f, 0.30f };
-    l.stickZoneMax = { aspect * 0.48f, 1.0f };
-
-    // Right thumb: A/B, with the C cluster above them.
-    AddButton(l, CTRL_A, { right - 0.13f * s, 1.0f - inset - 0.13f * s }, 0.10f * s, BTN_A, "A");
-    AddButton(l, CTRL_B, { right - 0.33f * s, 1.0f - inset - 0.20f * s }, 0.085f * s, BTN_B, "B");
-
-    const Vec2 c = { right - 0.16f * s, 1.0f - inset - 0.47f * s };
-    const float cOff = 0.088f * s;
-    const float cRad = 0.052f * s;
-    AddButton(l, CTRL_CUP, { c.x, c.y - cOff }, cRad, BTN_CUP, "C");
-    AddButton(l, CTRL_CDOWN, { c.x, c.y + cOff }, cRad, BTN_CDOWN, "C");
-    AddButton(l, CTRL_CLEFT, { c.x - cOff, c.y }, cRad, BTN_CLEFT, "C");
-    AddButton(l, CTRL_CRIGHT, { c.x + cOff, c.y }, cRad, BTN_CRIGHT, "C");
-
-    // The D-pad is unused by most of the game, so it is opt-in. It sits above the stick,
-    // anchored below the shoulder pills; the stick's capture zone is then pushed below it
-    // so the two can't fight over a touch at any scale (buttons win in ClassifyTouch).
-    const bool dpad = CVarGetInteger(CVAR_TOUCH("ShowDPad"), 0) != 0;
-    const float dOff = 0.082f * s;
-    const float dRad = 0.048f * s;
-    const Vec2 d = { inset + 0.15f * s, inset + pill.y * 2.0f + dOff + dRad + 0.02f };
-    if (dpad) {
-        l.stickZoneMin.y = std::max(l.stickZoneMin.y, d.y + dOff + dRad + 0.01f);
+DeviceClass DeviceClassFor(float pointHeight, int setting) {
+    switch (setting) {
+        case 1:
+            return DEVICE_PHONE;
+        case 2:
+            return DEVICE_TABLET;
+        default:
+            return pointHeight >= kTabletMinPointHeight ? DEVICE_TABLET : DEVICE_PHONE;
     }
-    AddButton(l, CTRL_DUP, { d.x, d.y - dOff }, dRad, BTN_DUP, "");
-    AddButton(l, CTRL_DDOWN, { d.x, d.y + dOff }, dRad, BTN_DDOWN, "");
-    AddButton(l, CTRL_DLEFT, { d.x - dOff, d.y }, dRad, BTN_DLEFT, "");
-    AddButton(l, CTRL_DRIGHT, { d.x + dOff, d.y }, dRad, BTN_DRIGHT, "");
+}
+
+// SDL knows the real figure on most devices, which is what separates an iPad mini from the iPads
+// it shares a point count with. The per-class nominal covers the rest, and the size slider absorbs
+// whatever that gets wrong. SDL reports dots per inch because that is the unit the platform hands
+// it, so the sanity check is in those terms and the conversion happens on the way out.
+float PointsPerMm(DeviceClass device) {
+    float ddpi = 0.0f;
+    float hdpi = 0.0f;
+    float vdpi = 0.0f;
+    if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) == 0) {
+        const float ppi = vdpi / std::max(ImGui::GetIO().DisplayFramebufferScale.y, 1.0f);
+        if (ppi >= 110.0f && ppi <= 200.0f) {
+            return ppi / kMmPerInch;
+        }
+    }
+    return device == DEVICE_TABLET ? kTabletPointsPerMm : kPhonePointsPerMm;
+}
+
+// Places a control on the arc a thumb sweeps from the corner it grips. Angles run up from the
+// inboard horizontal; inboard is +1 for the left thumb and -1 for the right one.
+Vec2 Arc(const Vec2& pivot, float inboard, float radius, float degrees) {
+    const float radians = degrees * 3.14159265f / 180.0f;
+    return { pivot.x + inboard * radius * std::cos(radians), pivot.y - radius * std::sin(radians) };
+}
+
+// Slides a run of controls as a unit until its bounding box clears the screen edges and whatever
+// sits above it. Clusters move whole, so this can't deform a diamond into a trapezium.
+void FitRange(Layout& l, int first, int last, float margin, float ceiling) {
+    Vec2 min = { FLT_MAX, FLT_MAX };
+    Vec2 max = { -FLT_MAX, -FLT_MAX };
+    for (int i = first; i <= last; i++) {
+        const Button& b = l.buttons[i];
+        if (!b.enabled) {
+            continue;
+        }
+        min.x = std::min(min.x, b.center.x - b.halfExtent.x);
+        min.y = std::min(min.y, b.center.y - b.halfExtent.y);
+        max.x = std::max(max.x, b.center.x + b.halfExtent.x);
+        max.y = std::max(max.y, b.center.y + b.halfExtent.y);
+    }
+    if (min.x > max.x) {
+        return;
+    }
+
+    Vec2 shift;
+    if (min.x < margin) {
+        shift.x = margin - min.x;
+    } else if (max.x > l.aspect - margin) {
+        shift.x = l.aspect - margin - max.x;
+    }
+    if (min.y < ceiling) {
+        shift.y = ceiling - min.y;
+    } else if (max.y > 1.0f - margin) {
+        shift.y = 1.0f - margin - max.y;
+    }
+    for (int i = first; i <= last; i++) {
+        l.buttons[i].center.x += shift.x;
+        l.buttons[i].center.y += shift.y;
+    }
+}
+
+// Puts the stick under the right thumb and the face buttons under the left.
+void MirrorLayout(Layout& l) {
+    for (Button& b : l.buttons) {
+        b.center.x = l.aspect - b.center.x;
+    }
+    // The clusters are directional, so swap their horizontal pairs back: mirroring the screen
+    // shouldn't leave C-left sitting on the right of its own diamond.
+    std::swap(l.buttons[CTRL_CLEFT].center, l.buttons[CTRL_CRIGHT].center);
+    std::swap(l.buttons[CTRL_DLEFT].center, l.buttons[CTRL_DRIGHT].center);
+
+    const float zoneMin = l.aspect - l.stickZoneMax.x;
+    l.stickZoneMax.x = l.aspect - l.stickZoneMin.x;
+    l.stickZoneMin.x = zoneMin;
+    l.stickHome.x = l.aspect - l.stickHome.x;
+}
+
+// The dimensions that decide how tall the pad is, in millimetres: A's radius, how far above A the
+// C cluster's centre sits, the diamond's own half-height and radius, and the shoulder rail a phone
+// stacks above all of it. BuildLayout both places the controls from these and works out from them
+// how large the pad is allowed to get, so they are named rather than written out twice.
+constexpr float kARadiusMm = 6.5f;
+constexpr float kACGapMm = 20.0f;
+constexpr float kCOffYMm = 7.0f;
+constexpr float kCRadiusMm = 3.8f;
+constexpr float kZPillHalfYMm = 4.7f;
+constexpr float kRailGapMm = 2.0f;
+constexpr float kFaceMm = kARadiusMm + kACGapMm + kCOffYMm + kCRadiusMm;
+constexpr float kRailMm = kZPillHalfYMm * 2.0f + kRailGapMm;
+
+// Everything BuildLayout reads. Comparing the struct whole is what stops a new setting from
+// silently failing to trigger a rebuild.
+struct LayoutKey {
+    float aspect = 0.0f;
+    float pointHeight = 0.0f;
+    float size = 0.0f;
+    float reach = 0.0f;
+    float margin = 0.0f;
+    int device = 0;
+    int dpad = 0;
+    int mirror = 0;
+    // Only moves the menu button, but it still belongs here: a gamepad connecting mid-session has
+    // to rebuild the layout for that to take effect.
+    int padHidden = 0;
+
+    bool operator==(const LayoutKey&) const = default;
+};
+
+void BuildLayout(const LayoutKey& key) {
+    Layout l;
+    l.aspect = key.aspect;
+
+    const DeviceClass device = DeviceClassFor(key.pointHeight, key.device);
+    // Height units per millimetre. Every dimension below goes through one of the three lambdas, so
+    // no constant in this function is a fraction of the screen.
+    const float unit = PointsPerMm(device) / key.pointHeight;
+
+    // The face group sitting under the shoulder rail is the tallest run of controls on screen, so
+    // on a short screen that, rather than the slider, decides how large the pad can get. A phone
+    // held in landscape has barely 55 mm to spend, and saturating the slider there beats letting
+    // the controls grow into one another.
+    const float railMm = device == DEVICE_PHONE ? kRailMm : 0.0f;
+    const float budget = 1.0f / unit - 2.0f * key.margin;
+    const float size = std::max(std::min(key.size, budget / (kFaceMm + railMm)), 0.4f);
+
+    const auto mm = [unit](float millimetres) { return millimetres * unit; };
+    const auto sz = [unit, size](float millimetres) { return millimetres * unit * size; };
+    // Reach moves a group as a whole nearer the corner it is gripped from; the spacing inside the
+    // group stays on size alone, so pulling the pad in can't pull it into itself.
+    const auto arc = [unit, size, &key](float millimetres) { return millimetres * unit * size * key.reach; };
+
+    const float margin = mm(key.margin);
+    const float left = margin;
+    const float right = key.aspect - margin;
+    const float top = margin;
+    const float bottom = 1.0f - margin;
+
+    const Vec2 shoulder = { sz(7.0f), sz(4.2f) };
+    // Z is held down for most of a fight, so it takes the corner and a wider pill than the rest.
+    const Vec2 zPill = { sz(8.5f), sz(kZPillHalfYMm) };
+    const float railGap = sz(1.5f);
+    // Room a side rail needs above its anchor for the second pill of each pair.
+    const float railTop = std::max(zPill.y + shoulder.y * 2.0f, shoulder.y * 3.0f) + railGap;
+
+    // 7 mm square is Apple's 44 pt minimum target at every density, which is as small as this is
+    // allowed to get. It deliberately ignores the size slider: shrinking the pad shouldn't take the
+    // one control that leads back to the settings below the floor with it.
+    const float menuHalf = mm(3.5f);
+    l.menuHalfExtent = { menuHalf, menuHalf };
+    const float menuStack = menuHalf * 2.0f + railGap;
+
+    // A side rail exists because a tablet's top corners are out of reach. That only holds while the
+    // screen is tall enough to put the rail below the menu button and still within reach -- force
+    // the tablet layout onto a phone and it isn't, so the top rail is the honest answer there.
+    const bool sideRail = device == DEVICE_TABLET && bottom - arc(75.0f) >= top + menuStack + railTop;
+    // Top centre is a gap in the shoulder rail, and only a top rail has one. A side rail, or a pad
+    // hidden for a gamepad that leaves this button alone over the game, tucks it into the corner.
+    const bool cornerMenu = sideRail || key.padHidden != 0;
+    l.menuCenter = { cornerMenu ? left + menuHalf : key.aspect * 0.5f, top + menuHalf };
+    // The menu button wins any touch it covers, because ClassifyTouch tests it first, so a rail
+    // sharing its corner has to start below it.
+    const float railCeiling = cornerMenu ? top + menuStack : top;
+
+    float railBottom = top;
+    if (!sideRail) {
+        railBottom = top + zPill.y * 2.0f;
+        AddPill(l, CTRL_Z, { left + zPill.x, top + zPill.y }, zPill, BTN_Z, "Z");
+        AddPill(l, CTRL_L, { left + zPill.x * 2.0f + railGap + shoulder.x, top + shoulder.y }, shoulder, BTN_L, "L");
+        AddPill(l, CTRL_R, { right - shoulder.x, top + shoulder.y }, shoulder, BTN_R, "R");
+        AddPill(l, CTRL_START, { right - shoulder.x * 3.0f - railGap, top + shoulder.y }, shoulder, BTN_START, "START");
+    } else {
+        // An index finger reaches further up the side than a thumb reaches across the face, but on
+        // a tablet nowhere near the top corner. Anchor the rail where it does land and stack the
+        // second control of each pair above the first.
+        const float anchor =
+            std::clamp(bottom - arc(75.0f), railCeiling + railTop, std::max(railCeiling + railTop, bottom - zPill.y));
+        AddPill(l, CTRL_Z, { left + zPill.x, anchor }, zPill, BTN_Z, "Z");
+        AddPill(l, CTRL_L, { left + shoulder.x, anchor - zPill.y - railGap - shoulder.y }, shoulder, BTN_L, "L");
+        AddPill(l, CTRL_R, { right - shoulder.x, anchor }, shoulder, BTN_R, "R");
+        AddPill(l, CTRL_START, { right - shoulder.x, anchor - shoulder.y * 2.0f - railGap }, shoulder, BTN_START,
+                "START");
+    }
+
+    // Right thumb. A sits where the thumb comes to rest and the rest of the group hangs off it:
+    // B inboard and a little above, the way the two sit on the controller, and the C cluster
+    // further inboard again rather than stacked straight up over A, which is both the direction a
+    // thumb extends worst and the one a landscape screen has least of. The C diamond is wider than
+    // it is tall for the same reason.
+    const Vec2 rightPivot = { right, bottom };
+    const Vec2 a = Arc(rightPivot, -1.0f, arc(22.5f), 44.0f);
+    AddButton(l, CTRL_A, a, sz(kARadiusMm), BTN_A, "A");
+    AddButton(l, CTRL_B, { a.x - sz(15.0f), a.y - sz(1.5f) }, sz(5.8f), BTN_B, "B");
+
+    const Vec2 c = { a.x - sz(19.0f), a.y - sz(kACGapMm) };
+    const Vec2 cOff = { sz(10.0f), sz(kCOffYMm) };
+    const float cRad = sz(kCRadiusMm);
+    AddButton(l, CTRL_CUP, { c.x, c.y - cOff.y }, cRad, BTN_CUP, "C");
+    AddButton(l, CTRL_CDOWN, { c.x, c.y + cOff.y }, cRad, BTN_CDOWN, "C");
+    AddButton(l, CTRL_CLEFT, { c.x - cOff.x, c.y }, cRad, BTN_CLEFT, "C");
+    AddButton(l, CTRL_CRIGHT, { c.x + cOff.x, c.y }, cRad, BTN_CRIGHT, "C");
+    for (int i = CTRL_CUP; i <= CTRL_CRIGHT; i++) {
+        l.buttons[i].slop = kClusterSlop;
+    }
+
+    // Left thumb. The stick floats to wherever a finger lands in its zone, so stickHome is only
+    // where the ring rests while nobody is holding it.
+    const Vec2 leftPivot = { left, bottom };
+    l.stickBase = sz(10.5f);
+    l.stickKnob = sz(5.0f);
+    l.stickHome = Arc(leftPivot, 1.0f, arc(26.0f), 52.0f);
+    l.stickHome.x = std::clamp(l.stickHome.x, l.stickBase, std::max(l.stickBase, l.aspect - l.stickBase));
+    l.stickHome.y = std::clamp(l.stickHome.y, l.stickBase, std::max(l.stickBase, 1.0f - l.stickBase));
+
+    // The D-pad is unused by most of the game, so it is opt-in. It sits directly above the stick's
+    // resting ring, the same shape as the C cluster.
+    const bool dpad = key.dpad != 0;
+    const Vec2 dOff = { sz(9.0f), sz(6.5f) };
+    const float dRad = sz(3.7f);
+    const Vec2 d = { l.stickHome.x, l.stickHome.y - l.stickBase - dOff.y - dRad - sz(kRailGapMm) };
+    AddButton(l, CTRL_DUP, { d.x, d.y - dOff.y }, dRad, BTN_DUP, "");
+    AddButton(l, CTRL_DDOWN, { d.x, d.y + dOff.y }, dRad, BTN_DDOWN, "");
+    AddButton(l, CTRL_DLEFT, { d.x - dOff.x, d.y }, dRad, BTN_DLEFT, "");
+    AddButton(l, CTRL_DRIGHT, { d.x + dOff.x, d.y }, dRad, BTN_DRIGHT, "");
     for (int i = CTRL_DUP; i <= CTRL_DRIGHT; i++) {
         l.buttons[i].enabled = dpad;
+        l.buttons[i].slop = kClusterSlop;
+    }
+
+    // Nothing above guarantees a control lands on screen or clear of the rail at every size and
+    // reach, so square that up here rather than picking constants that suit the worst case and
+    // waste room in every other one. Each group moves whole, so this can't deform a diamond or
+    // shear the face buttons apart.
+    const float clusterCeiling = railBottom + sz(kRailGapMm);
+    for (int i = CTRL_Z; i <= CTRL_START; i++) {
+        FitRange(l, i, i, margin, top);
+    }
+    FitRange(l, CTRL_A, CTRL_CRIGHT, margin, clusterCeiling);
+    FitRange(l, CTRL_DUP, CTRL_DRIGHT, margin, clusterCeiling);
+
+    // Anything inside the zone that isn't a button grabs the stick. Bound it by what a thumb can
+    // sweep without the hand leaving the corner; the fractional cap only bites on a phone, where
+    // that sweep covers most of the screen anyway.
+    const float sweep = arc(60.0f);
+    l.stickZoneMin = { 0.0f, std::max(bottom - sweep, 0.28f) };
+    l.stickZoneMax = { std::min(left + sweep, key.aspect * 0.45f), 1.0f };
+    if (dpad) {
+        // Buttons win in ClassifyTouch either way, but keeping the zone off the D-pad means a
+        // touch aimed between two of its buttons doesn't become a stick grab.
+        const float dpadBottom = l.buttons[CTRL_DDOWN].center.y + dRad;
+        l.stickZoneMin.y = std::max(l.stickZoneMin.y, dpadBottom + sz(1.0f));
+    }
+
+    if (key.mirror != 0) {
+        MirrorLayout(l);
     }
 
     sLayout = l;
     sLayoutValid = true;
 }
 
-// BuildLayout's inputs as of the last build, so rotating the device or dragging a settings
-// slider rebuilds and an ordinary frame does not.
-float sBuiltAspect = 0.0f;
-float sBuiltScale = 0.0f;
-float sBuiltInset = 0.0f;
-int sBuiltDPad = 0;
+// BuildLayout's inputs as of the last build, so rotating the device or dragging a settings slider
+// rebuilds and an ordinary frame does not.
+LayoutKey sBuiltKey;
 
-void EnsureLayout(float aspect) {
-    const float scale = CVarGetFloat(CVAR_TOUCH("Scale"), 1.0f);
-    const float inset = CVarGetFloat(CVAR_TOUCH("EdgeInset"), 0.05f);
-    const int dpad = CVarGetInteger(CVAR_TOUCH("ShowDPad"), 0);
-    if (sLayoutValid && aspect == sBuiltAspect && scale == sBuiltScale && inset == sBuiltInset && dpad == sBuiltDPad) {
+void EnsureLayout(float aspect, float pointHeight) {
+    LayoutKey key;
+    key.aspect = aspect;
+    key.pointHeight = pointHeight;
+    key.size = std::clamp(CVarGetFloat(CVAR_TOUCH("Scale"), 1.0f), 0.7f, 1.4f);
+    key.reach = std::clamp(CVarGetFloat(CVAR_TOUCH("Reach"), 1.0f), 0.8f, 1.25f);
+    key.margin = std::clamp(CVarGetFloat(CVAR_TOUCH("EdgeMargin"), 3.0f), 0.0f, 10.0f);
+    key.device = CVarGetInteger(CVAR_TOUCH("Layout"), 0);
+    key.dpad = CVarGetInteger(CVAR_TOUCH("ShowDPad"), 0);
+    key.mirror = CVarGetInteger(CVAR_TOUCH("Mirror"), 0);
+    // Deliberately not PadActive(): that also goes false while the menu is open, which would move
+    // the button out from under the finger that just opened it.
+    key.padHidden = CVarGetInteger(CVAR_TOUCH("HideWithGamepad"), 1) && sGamepadPresent ? 1 : 0;
+    if (sLayoutValid && key == sBuiltKey) {
         return;
     }
-    sBuiltAspect = aspect;
-    sBuiltScale = scale;
-    sBuiltInset = inset;
-    sBuiltDPad = dpad;
-    BuildLayout(aspect);
+    sBuiltKey = key;
+    BuildLayout(key);
 }
 
-// Hit slop: how far past a control's drawn edge a touch still counts. Pushed past the gaps
-// BuildLayout leaves, neighbouring controls overlap and ClassifyTouch picks the nearer one.
-constexpr float kPillSlopX = 1.15f;
-constexpr float kPillSlopY = 1.35f;
-constexpr float kCircleSlop = 1.2f;
-constexpr float kMenuSlopX = 1.2f;
-constexpr float kMenuSlopY = 1.4f;
-// N64 sticks read a little past 80 at the octagon corners; 80 is the safe full-range value.
-constexpr float kStickRange = 80.0f;
-
-bool HitsButton(const Button& b, const Vec2& p) {
-    if (!b.enabled) {
-        return false;
-    }
+// How far inside its slop region a touch landed: 1 at the centre, 0 at the edge, negative outside.
+// Pills and circles are measured the same way so the two can be compared where they sit adjacent,
+// which they do on a tablet, where the shoulder rail runs down the side past the face buttons.
+float HitDepth(const Button& b, const Vec2& p) {
     if (b.pill) {
+        if (b.halfExtent.x <= 0.0f || b.halfExtent.y <= 0.0f) {
+            return -1.0f;
+        }
         // A little slop so shoulder taps near the screen edge still register.
-        return std::abs(p.x - b.center.x) <= b.halfExtent.x * kPillSlopX &&
-               std::abs(p.y - b.center.y) <= b.halfExtent.y * kPillSlopY;
+        const float dx = std::abs(p.x - b.center.x) / (b.halfExtent.x * kPillSlopX);
+        const float dy = std::abs(p.y - b.center.y) / (b.halfExtent.y * kPillSlopY);
+        return 1.0f - std::max(dx, dy);
     }
-    return Dist(p, b.center) <= b.radius * kCircleSlop;
+    if (b.radius <= 0.0f) {
+        return -1.0f;
+    }
+    return 1.0f - Dist(p, b.center) / (b.radius * b.slop);
 }
 
 bool HitsMenu(const Vec2& p) {
@@ -309,20 +556,22 @@ int ClassifyTouch(const Vec2& p, bool padActive, bool menuButtonActive) {
     if (!padActive) {
         return kTargetNone;
     }
-    // Nearest button wins, so overlapping hit slop can't double-fire.
+    // Deepest hit wins, so overlapping slop can't double-fire, and a touch between two controls
+    // goes to the one it is further inside rather than to whichever came first in the array.
     int best = kTargetNone;
-    float bestDist = 0.0f;
+    float bestDepth = 0.0f;
     for (int i = 0; i < CTRL_COUNT; i++) {
         const Button& b = sLayout.buttons[i];
-        if (!HitsButton(b, p)) {
+        if (!b.enabled) {
             continue;
         }
-        // Zero distance means a pill wins any tie by construction; today no pill overlaps a
-        // circle at any scale BuildLayout allows, so a layout change should recheck that.
-        const float d = b.pill ? 0.0f : Dist(p, b.center);
-        if (best == kTargetNone || d < bestDist) {
+        const float depth = HitDepth(b, p);
+        if (depth < 0.0f) {
+            continue;
+        }
+        if (best == kTargetNone || depth > bestDepth) {
             best = i;
-            bestDist = d;
+            bestDepth = depth;
         }
     }
     if (best != kTargetNone) {
@@ -371,9 +620,12 @@ extern "C" void TouchControls_Poll(void) {
         sMenuLatch = false;
         return;
     }
-    EnsureLayout(w / h);
-
+    // Refreshed before EnsureLayout, which folds it into the layout key to place the menu button.
     sGamepadPresent = GamepadConnected();
+    // DisplaySize is in points -- ImGui's SDL2 backend takes it from SDL_GetWindowSize -- which is
+    // what lets the layout be sized in millimetres.
+    EnsureLayout(w / h, h);
+
     const bool padActive = PadActive();
     // While the menu is open its own close button takes over: leaving ours on top would
     // also click whatever menu widget sits underneath, since SDL mirrors touches as mouse.
@@ -542,10 +794,23 @@ void TouchControls_Draw() {
             px({ sLayout.menuCenter.x - sLayout.menuHalfExtent.x, sLayout.menuCenter.y - sLayout.menuHalfExtent.y });
         const ImVec2 menuMax =
             px({ sLayout.menuCenter.x + sLayout.menuHalfExtent.x, sLayout.menuCenter.y + sLayout.menuHalfExtent.y });
-        const float menuRound = (menuMax.y - menuMin.y) * 0.35f;
-        dl->AddRectFilled(menuMin, menuMax, Shade(alpha * 0.6f, sState.menuPressed), menuRound);
+        const float menuRound = (menuMax.y - menuMin.y) * 0.3f;
+        dl->AddRectFilled(menuMin, menuMax, Shade(alpha * 0.45f, sState.menuPressed), menuRound);
         dl->AddRect(menuMin, menuMax, Shade(alpha, sState.menuPressed), menuRound, 0, h * 0.004f);
-        DrawLabel(dl, "MENU", px(sLayout.menuCenter), sLayout.menuHalfExtent.y * 1.1f * h);
+
+        // Three bars rather than the word MENU. At this size a word would be unreadable, and
+        // drawing the rules by hand avoids depending on a glyph the loaded font may not carry.
+        const ImVec2 center = px(sLayout.menuCenter);
+        const float span = menuMax.x - menuMin.x;
+        const float barHalfW = span * 0.25f;
+        const float barHalfH = std::max(span * 0.037f, 0.5f);
+        const float barGap = span * 0.22f;
+        const ImU32 barShade = Shade(std::min(alpha * 1.7f, 0.95f), sState.menuPressed);
+        for (int i = -1; i <= 1; i++) {
+            const float y = center.y + i * barGap;
+            dl->AddRectFilled(ImVec2(center.x - barHalfW, y - barHalfH), ImVec2(center.x + barHalfW, y + barHalfH),
+                              barShade, barHalfH);
+        }
     }
 
     if (!PadActive()) {
