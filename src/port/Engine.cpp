@@ -734,8 +734,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                         if (!romO2RExists) {
                             LighthouseGui::RegisterPopup(
                                 "No O2R Files", "No O2R files found. Generate one now?", "Yes", "No",
-                                [&]() { promptStep = PS_LOCAL; },
-                                [&]() { ShutdownAndExit(0, &threadPool, context); });
+                                [&]() { promptStep = PS_LOCAL; }, [&]() { ShutdownAndExit(0, &threadPool, context); });
                         } else {
                             extractStep = ES_VERIFY;
                         }

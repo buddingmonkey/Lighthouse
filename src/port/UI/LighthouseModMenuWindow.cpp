@@ -612,13 +612,12 @@ static void DrawModManager(const char* tableId, const ModFilter& shown, bool alp
         ImGui::SameLine();
         if (UIWidgets::Button(kApplyRestartLabel,
                               UIWidgets::ButtonOptions().Size(UIWidgets::Sizes::Inline).Color(THEME_COLOR))) {
-            LighthouseGui::RegisterPopup(
-                kApplyRestartLabel, kApplyRestartBody, kRestartButtonLabel, "Cancel", []() {
-                    SetEnabledModsCVarValue();
-                    Ship::Context::GetRawInstance()->GetConsoleVariables()->Save();
-                    GameEngine::RequestRelaunch();
-                    Ship::Context::GetRawInstance()->GetWindow()->Close();
-                });
+            LighthouseGui::RegisterPopup(kApplyRestartLabel, kApplyRestartBody, kRestartButtonLabel, "Cancel", []() {
+                SetEnabledModsCVarValue();
+                Ship::Context::GetRawInstance()->GetConsoleVariables()->Save();
+                GameEngine::RequestRelaunch();
+                Ship::Context::GetRawInstance()->GetWindow()->Close();
+            });
         }
     }
     ImGui::BeginDisabled(!editing);

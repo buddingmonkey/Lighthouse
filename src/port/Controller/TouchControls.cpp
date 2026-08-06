@@ -400,8 +400,8 @@ extern "C" void TouchControls_Poll(void) {
 
     // Carry assignments forward; classify only newly-landed fingers.
     for (auto& finger : live) {
-        auto prev = std::find_if(sFingers.begin(), sFingers.end(),
-                                 [&](const Finger& old) { return old.id == finger.id; });
+        auto prev =
+            std::find_if(sFingers.begin(), sFingers.end(), [&](const Finger& old) { return old.id == finger.id; });
         if (prev != sFingers.end()) {
             finger.target = prev->target;
         } else {
@@ -538,10 +538,10 @@ void TouchControls_Draw() {
     // Drawn even when the pad is hidden, so the settings stay reachable -- but not over
     // the menu itself, which has its own close button.
     if (!MenuVisible()) {
-        const ImVec2 menuMin = px({ sLayout.menuCenter.x - sLayout.menuHalfExtent.x,
-                                    sLayout.menuCenter.y - sLayout.menuHalfExtent.y });
-        const ImVec2 menuMax = px({ sLayout.menuCenter.x + sLayout.menuHalfExtent.x,
-                                    sLayout.menuCenter.y + sLayout.menuHalfExtent.y });
+        const ImVec2 menuMin =
+            px({ sLayout.menuCenter.x - sLayout.menuHalfExtent.x, sLayout.menuCenter.y - sLayout.menuHalfExtent.y });
+        const ImVec2 menuMax =
+            px({ sLayout.menuCenter.x + sLayout.menuHalfExtent.x, sLayout.menuCenter.y + sLayout.menuHalfExtent.y });
         const float menuRound = (menuMax.y - menuMin.y) * 0.35f;
         dl->AddRectFilled(menuMin, menuMax, Shade(alpha * 0.6f, sState.menuPressed), menuRound);
         dl->AddRect(menuMin, menuMax, Shade(alpha, sState.menuPressed), menuRound, 0, h * 0.004f);
