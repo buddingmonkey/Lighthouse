@@ -420,6 +420,7 @@ void GameEngine::Destroy() {
     if (Instance->context && Instance->context->GetResourceManager()) {
         Instance->context->GetResourceManager()->UnloadResources("*");
     }
+    Ship::Context::DestroyInstance();
     Instance->context = nullptr;
     // PortEnhancements_Exit();
     for (auto ptr : MemoryPool) {

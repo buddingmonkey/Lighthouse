@@ -143,6 +143,19 @@ bool AnyRomArchiveExists() {
     return false;
 }
 
+// Teardown shared by every bail-out in RunExtract(). The thread pool is a RunExtract() local and
+// does not exist yet at the earliest bail-out, hence the pointer; `context` is the GameEngine
+// member. Both are passed in so this stays a plain function over exactly what it releases.
+[[noreturn]] void ShutdownAndExit(int code, std::shared_ptr<BS::thread_pool>* threadPool, Ship::Context*& context) {
+    if (threadPool != nullptr) {
+        *threadPool = nullptr;
+    }
+    lhFast3dWindow = nullptr;
+    Ship::Context::DestroyInstance();
+    context = nullptr;
+    exit(code);
+}
+
 } // namespace
 
 void GameEngine::RunExtract(int argc, char* argv[]) {
@@ -198,13 +211,13 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                  "\x1b[2;2HYou've launched Lighthouse with an old ROM O2R file."
                                  "\x1b[4;2HPlease regenerate a new ROM O2R and relaunch."
                                  "\x1b[6;2HPress the Home button to exit...",
-                                 "OK", "", [&]() { exit(1); });
+                                 "OK", "", [&]() { ShutdownAndExit(1, nullptr, context); });
 #elif defined(__WIIU__)
     LighthouseGui::RegisterPopup("Outdated ROM Archives",
                                  "You've launched Lighthouse with an old a ROM O2R file.\n\n"
                                  "Please generate a ROM O2R and relaunch.\n\n"
                                  "Press and hold the Power button to shutdown...",
-                                 "OK", "", [&]() { exit(1); });
+                                 "OK", "", [&]() { ShutdownAndExit(1, nullptr, context); });
     OSFatal();
 #endif
 
@@ -213,11 +226,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
             "Extractor assets not found",
             "No O2R files found. Missing 'assets/' folder needed to generate O2R file.\nPlease "
             "re-extract them from the download or.\n\nExiting...",
-            "OK", "", [&]() {
-                lhFast3dWindow = nullptr;
-                context = nullptr;
-                exit(1);
-            });
+            "OK", "", [&]() { ShutdownAndExit(1, nullptr, context); });
     } else if (shouldRegen) {
         LighthouseGui::RegisterPopup("Outdated ROM Archives",
                                      "Your ROM archives were created with incompatible versions of Lighthouse.\n"
@@ -285,7 +294,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
 #endif
                     std::string title =
                         !std::filesystem::exists(assets_path) ? "Missing lighthouse.o2r" : "lighthouse.o2r is outdated";
-                    LighthouseGui::RegisterPopup(title, msg, "OK", "", [&]() { exit(1); });
+                    LighthouseGui::RegisterPopup(title, msg, "OK", "", [&]() { ShutdownAndExit(1, nullptr, context); });
                 }
                 continue;
             }
@@ -310,10 +319,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                 "Lighthouse Path Error",
                                 "Lighthouse is running in a temp folder.\nExtract the .zip and run again.", "OK", "",
                                 [&]() {
-                                    threadPool = nullptr;
-                                    lhFast3dWindow = nullptr;
-                                    context = nullptr;
-                                    exit(0);
+                                    ShutdownAndExit(0, &threadPool, context);
                                 });
                         } else {
                             windowsStep = WS_PERMS;
@@ -338,10 +344,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                         fclose(tfile);
                                     }
                                     PathTestCleanup();
-                                    threadPool = nullptr;
-                                    lhFast3dWindow = nullptr;
-                                    context = nullptr;
-                                    exit(0);
+                                    ShutdownAndExit(0, &threadPool, context);
                                 });
                         } else {
                             fclose(tfile);
@@ -351,10 +354,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                     "Lighthouse does not have proper file permissions.\nPlease move it to a "
                                     "folder that does and run again.",
                                     "OK", "", [&]() {
-                                        threadPool = nullptr;
-                                        lhFast3dWindow = nullptr;
-                                        context = nullptr;
-                                        exit(0);
+                                        ShutdownAndExit(0, &threadPool, context);
                                     });
                             }
                             windowsStep = WS_ONEDRIVE;
@@ -369,10 +369,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                 "Please move it to a folder outside of OneDrive, like the root of a\n"
                                 "drive (e.g. \"C:\\Games\\Lighthouse\").",
                                 "OK", "", [&]() {
-                                    threadPool = nullptr;
-                                    lhFast3dWindow = nullptr;
-                                    context = nullptr;
-                                    exit(0);
+                                    ShutdownAndExit(0, &threadPool, context);
                                 });
                         } else {
                             windowsStep = WS_DONE;
@@ -403,10 +400,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                             }
                         },
                         [&]() {
-                            threadPool = nullptr;
-                            lhFast3dWindow = nullptr;
-                            context = nullptr;
-                            exit(0);
+                            ShutdownAndExit(0, &threadPool, context);
                         });
                     break;
                 }
@@ -452,10 +446,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                 "No O2R Files", "No O2R files found. Generate one now?", "Yes", "No",
                                 [&]() { promptStep = PS_LOCAL; },
                                 [&]() {
-                                    threadPool = nullptr;
-                                    lhFast3dWindow = nullptr;
-                                    context = nullptr;
-                                    exit(0);
+                                    ShutdownAndExit(0, &threadPool, context);
                                 });
                         } else {
                             extractStep = ES_VERIFY;
@@ -568,10 +559,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                             errorMsg = "No ROM O2R file detected.\nPlease generate a ROM O2R and relaunch.";
                         }
                         LighthouseGui::RegisterPopup("Extraction Error", errorMsg.c_str(), "OK", "", [&]() {
-                            threadPool = nullptr;
-                            lhFast3dWindow = nullptr;
-                            context = nullptr;
-                            exit(0);
+                            ShutdownAndExit(0, &threadPool, context);
                         });
                     }
                     continue;
@@ -585,10 +573,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
 
     render:
         if (!WindowIsRunning()) {
-            threadPool = nullptr;
-            lhFast3dWindow = nullptr;
-            context = nullptr;
-            exit(0);
+            ShutdownAndExit(0, &threadPool, context);
         }
         wnd->HandleEvents();
         UIWidgets::Colors themeColor =
