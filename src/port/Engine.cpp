@@ -870,6 +870,12 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
         }
         // Process window events for resize, mouse, keyboard events
         wnd->HandleEvents();
+        // Extraction runs on the thread pool, so this loop can stop drawing
+        // while the app is off screen for the same reason the main loop does.
+        if (!port_appIsOnScreen()) {
+            SDL_Delay(16);
+            continue;
+        }
         UIWidgets::Colors themeColor =
             static_cast<UIWidgets::Colors>(CVarGetInteger(CVAR_SETTING("Menu.Theme"), UIWidgets::Colors::LightBlue));
         ImGui::PushStyleColor(ImGuiCol_TitleBgActive, UIWidgets::ColorValues.at(themeColor));

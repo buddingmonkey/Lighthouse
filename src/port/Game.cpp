@@ -51,6 +51,32 @@ std::atomic<bool> sGameThreadDone{ false };
 std::thread sGameThread;
 thread_local bool tIsGameThread = false;
 
+#ifdef __IOS__
+// Whether the app is on screen. A frame rendered once it isn't never presents,
+// so the drawables it takes are never handed back to the layer; three of those
+// empty the pool and every later nextDrawable spends its full one second
+// timeout before returning nothing. That state does not heal on its own -- with
+// no drawable there is nothing to present, and with nothing presented no
+// drawable is ever released -- and it leaves the game running at 1fps for the
+// rest of the session. So the loop stops rendering while off screen.
+//
+// The pair is willResignActive/didBecomeActive rather than the DID/WILL
+// background events: it is the earliest stop and the latest start, and it still
+// balances when iOS resigns activity without backgrounding at all, which is
+// what a notification banner or Control Centre does.
+std::atomic<bool> sAppOnScreen{ true };
+
+int SDLCALL LifecycleWatch(void* userdata, SDL_Event* event) {
+    (void)userdata;
+    if (event->type == SDL_APP_WILLENTERBACKGROUND) {
+        sAppOnScreen.store(false, std::memory_order_release);
+    } else if (event->type == SDL_APP_DIDENTERFOREGROUND) {
+        sAppOnScreen.store(true, std::memory_order_release);
+    }
+    return 1;
+}
+#endif
+
 // The interpolation pair a submitted list was built from, carried to whoever
 // renders it. At most a couple are live at once.
 struct InterpPair {
@@ -94,6 +120,16 @@ bool OnGameThread() {
     return tIsGameThread;
 }
 } // namespace
+
+// Only iOS takes the window away underneath a running render loop; everywhere
+// else this is always true and the callers compile out to nothing.
+extern "C" int port_appIsOnScreen(void) {
+#ifdef __IOS__
+    return sAppOnScreen.load(std::memory_order_acquire) ? 1 : 0;
+#else
+    return 1;
+#endif
+}
 
 // A list is submitted while its tick is still recording, so the pair is
 // captured here and travels with the task.
@@ -322,6 +358,12 @@ int SDL_main(int argc, char* argv[]) {
         }
         sGameThreadDone.store(true);
     });
+#ifdef __IOS__
+    SDL_AddEventWatch(LifecycleWatch, nullptr);
+    // Held for as long as the app is off screen, since the tick thread parks on
+    // its queues while nothing services the RCP.
+    bool pausedOffScreen = false;
+#endif
     while (WindowIsRunning() || !sGameThreadDone.load()) {
         ThreadWatchdog_Beat(WATCHDOG_MAIN_LOOP);
         port_noteMainLoopAlive();
@@ -330,6 +372,21 @@ int SDL_main(int argc, char* argv[]) {
         Ship::Context::GetRawInstance()->GetWindow()->HandleEvents();
         TouchControls_Poll();
         OS_SiService();
+#ifdef __IOS__
+        const bool onScreen = sAppOnScreen.load(std::memory_order_acquire);
+        if (onScreen == pausedOffScreen) {
+            pausedOffScreen = !onScreen;
+            if (pausedOffScreen) {
+                ThreadWatchdog_BeginExpectedStall("app off screen");
+            } else {
+                ThreadWatchdog_EndExpectedStall();
+            }
+        }
+        if (pausedOffScreen) {
+            SDL_Delay(16);
+            continue;
+        }
+#endif
         if (IsInlineModExtractionBusy()) {
             GameEngine::Instance->RenderGuiFrame();
             SDL_Delay(16);
