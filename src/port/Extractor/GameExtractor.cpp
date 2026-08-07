@@ -349,8 +349,20 @@ bool GameExtractor::GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<siz
     }
 
     sPhase = 1; // Parsing phase
+
+    // Torch assembles the archive in memory and writes it in one pass onto its final name, so
+    // a write that stops early -- the process killed, the disk full -- leaves a truncated file
+    // under the name the game loads next launch, and takes any previously working archive with
+    // it. Extracting into a staging directory and moving the result into place afterwards makes
+    // that swap atomic, and costs nothing: the destination directory reaches neither the
+    // archive's contents nor the assets Torch reads, only where the output lands.
+    const fs::path stagingDir = fs::path(game_path) / ".extracting";
+    std::error_code stagingEc;
+    fs::remove_all(stagingDir, stagingEc);
+
     delete Companion::Instance;
-    Companion::Instance = new Companion(this->mGameData, ArchiveType::O2R, false, assets_path, game_path);
+    Companion::Instance =
+        new Companion(this->mGameData, ArchiveType::O2R, false, assets_path, stagingDir.generic_string());
     Companion::Instance->SetRomPath(this->mGamePath);
     Companion::Instance->SetAssetTotal(&totalAssets);
     Companion::Instance->SetPhaseCallback([](int phase) { sPhase = phase; });
@@ -367,17 +379,41 @@ bool GameExtractor::GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<siz
         sPhase = 0;
         delete Companion::Instance;
         Companion::Instance = nullptr;
+        fs::remove_all(stagingDir, stagingEc);
         return false;
     }
 
-    // Record the produced archive path before tearing Companion down, so the
-    // inline Mod Menu flow can enable exactly this file by name.
-    sLastOutputPath = Companion::Instance->GetOutputPath();
+    // Read before tearing Companion down; the move below is what puts it where the inline Mod
+    // Menu flow expects to find it.
+    const fs::path produced = Companion::Instance->GetOutputPath();
 
     sPhase = 3;
     sStatusText = "Cleaning up...";
     delete Companion::Instance;
     Companion::Instance = nullptr;
+
+    // Replaces the previous archive in one step -- no remove first, which would reopen the
+    // window this is here to close.
+    const fs::path finalPath = fs::path(game_path) / produced.filename();
+    std::error_code moveEc;
+    fs::rename(produced, finalPath, moveEc);
+    if (moveEc) {
+        SPDLOG_ERROR("Failed to move \"{}\" onto \"{}\": {}", produced.string(), finalPath.string(), moveEc.message());
+        sLastError = "Could not move the extracted archive into place: " + moveEc.message();
+        fs::remove_all(stagingDir, stagingEc);
+        sStatusText.clear();
+        sPhase = 0;
+        return false;
+    }
+    sLastOutputPath = finalPath.generic_string();
+
+    // Torch drops this beside the archive; keep it where every other workflow has it.
+    const fs::path hashFile = stagingDir / "torch.hash.yml";
+    if (fs::exists(hashFile, stagingEc)) {
+        fs::rename(hashFile, fs::path(game_path) / "torch.hash.yml", stagingEc);
+    }
+    fs::remove_all(stagingDir, stagingEc);
+
     sStatusText.clear();
     sPhase = 0;
     return true;

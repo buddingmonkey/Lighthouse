@@ -150,6 +150,9 @@ GameEngine::GameEngine() {
     SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "playback");
     // Otherwise the accelerometer appears as a phantom joystick in the device list.
     SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+    // Hides the home indicator and defers the edge swipes that would otherwise reach the
+    // touch controls sitting along the bottom of the screen.
+    SDL_SetHint(SDL_HINT_IOS_HIDE_HOME_INDICATOR, "2");
 #endif
 
     this->context = Ship::Context::CreateUninitializedInstance("Lighthouse", "bk", "lighthouse.cfg.json");
@@ -191,6 +194,7 @@ GameEngine::GameEngine() {
 
     lhFast3dWindow = std::make_shared<Fast::Fast3dWindow>(std::vector<std::shared_ptr<Ship::GuiWindow>>({}));
     this->context->InitWindow(lhFast3dWindow);
+    port_installLifecycleWatch();
     this->context->InitAudio({ .SampleRate = 22000, .SampleLength = 736, .DesiredBuffered = 2208 });
 
     LighthouseGui::SetupMenu();
@@ -278,6 +282,46 @@ static bool AnyRomArchiveExists() {
         }
     }
     return false;
+}
+
+// An archive that exists but cannot be read is worse than one that is missing: a truncated
+// file fails to open with nothing but a log line, and an empty one opens as a valid empty
+// archive, so either boots the game with no assets and no explanation. Both shapes arrive the
+// same way -- a copy through the Files app that stopped early, or a write the system killed.
+static bool RomArchiveIsUsable(const std::string& path) {
+    std::error_code ec;
+    if (std::filesystem::file_size(path, ec) == 0 || ec) {
+        return false;
+    }
+
+    // Opens with ZIP_CREATE, so only ever call this on a file that already exists.
+    auto archive = std::make_shared<Ship::O2rArchive>(path);
+    if (!archive->Open()) {
+        return false;
+    }
+    return !archive->ListFiles()->empty();
+}
+
+// Moves an unreadable archive out of the way so the normal extraction path picks up from a
+// clean slate. Kept rather than deleted, matching how an invalid save file is handled.
+static void MoveAsideUnusableRomArchives() {
+    for (const auto& archive : sRomArchives) {
+        const std::string path = Ship::Context::LocateFileAcrossAppDirs(archive, "bk");
+        if (!std::filesystem::exists(path) || RomArchiveIsUsable(path)) {
+            continue;
+        }
+
+        std::error_code ec;
+        const std::filesystem::path invalid = std::filesystem::path(path).replace_extension(".o2r.invalid");
+        std::filesystem::remove(invalid, ec);
+        std::filesystem::rename(path, invalid, ec);
+        if (ec) {
+            SPDLOG_ERROR("Could not move unreadable archive \"{}\" aside: {}", path, ec.message());
+        } else {
+            SPDLOG_WARN("Archive \"{}\" could not be read; moved to \"{}\" and extracting again", path,
+                        invalid.string());
+        }
+    }
 }
 
 // Register every resource factory the game's asset types need.
@@ -464,6 +508,10 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
         menuWasVisible = true;
         gui->GetMenu()->Hide();
     }
+
+    // Before the version probe, which cannot tell an unreadable archive from a romhack's
+    // (legitimately absent) portVersion record.
+    MoveAsideUnusableRomArchives();
 
     OTRVersion romArchiveVersion = { INT16_MAX, 0, 0 };
     for (const auto& archive : sRomArchives) {

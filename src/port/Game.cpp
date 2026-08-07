@@ -65,15 +65,44 @@ thread_local bool tIsGameThread = false;
 // balances when iOS resigns activity without backgrounding at all, which is
 // what a notification banner or Control Centre does.
 std::atomic<bool> sAppOnScreen{ true };
+std::atomic<bool> sLowMemory{ false };
 
 int SDLCALL LifecycleWatch(void* userdata, SDL_Event* event) {
     (void)userdata;
-    if (event->type == SDL_APP_WILLENTERBACKGROUND) {
-        sAppOnScreen.store(false, std::memory_order_release);
-    } else if (event->type == SDL_APP_DIDENTERFOREGROUND) {
-        sAppOnScreen.store(true, std::memory_order_release);
+    switch (event->type) {
+        case SDL_APP_WILLENTERBACKGROUND:
+            sAppOnScreen.store(false, std::memory_order_release);
+            break;
+        case SDL_APP_DIDENTERFOREGROUND:
+            sAppOnScreen.store(true, std::memory_order_release);
+            break;
+        case SDL_APP_LOWMEMORY:
+            sLowMemory.store(true, std::memory_order_release);
+            break;
+        case SDL_APP_TERMINATING:
+            // The only state change the loop cannot be left to pick up: the process is gone
+            // once this returns. A marker separates an OS termination from a crash in the log.
+            SPDLOG_WARN("[iOS] The system is terminating the app");
+            if (const auto& logger = Ship::Context::GetRawInstance()->GetLogger()) {
+                logger->flush();
+            }
+            break;
+        default:
+            break;
     }
     return 1;
+}
+
+void SetAudioSuspended(bool suspended) {
+    const auto& audio = Ship::Context::GetRawInstance()->GetAudio();
+    if (audio == nullptr) {
+        return;
+    }
+    if (suspended) {
+        audio->SuspendPlayback();
+    } else {
+        audio->ResumePlayback();
+    }
 }
 #endif
 
@@ -128,6 +157,18 @@ extern "C" int port_appIsOnScreen(void) {
     return sAppOnScreen.load(std::memory_order_acquire) ? 1 : 0;
 #else
     return 1;
+#endif
+}
+
+// Called once the window exists, which is both the earliest SDL will accept a watch and
+// early enough to cover RunExtract's loop.
+extern "C" void port_installLifecycleWatch(void) {
+#ifdef __IOS__
+    static bool sInstalled = false;
+    if (!sInstalled) {
+        sInstalled = true;
+        SDL_AddEventWatch(LifecycleWatch, nullptr);
+    }
 #endif
 }
 
@@ -359,7 +400,6 @@ int SDL_main(int argc, char* argv[]) {
         sGameThreadDone.store(true);
     });
 #ifdef __IOS__
-    SDL_AddEventWatch(LifecycleWatch, nullptr);
     // Held for as long as the app is off screen, since the tick thread parks on
     // its queues while nothing services the RCP.
     bool pausedOffScreen = false;
@@ -373,12 +413,18 @@ int SDL_main(int argc, char* argv[]) {
         TouchControls_Poll();
         OS_SiService();
 #ifdef __IOS__
+        if (sLowMemory.exchange(false, std::memory_order_acq_rel)) {
+            SPDLOG_WARN("[iOS] Memory warning; dropping the texture cache");
+            gfx_texture_cache_clear();
+        }
         const bool onScreen = sAppOnScreen.load(std::memory_order_acquire);
         if (onScreen == pausedOffScreen) {
             pausedOffScreen = !onScreen;
             if (pausedOffScreen) {
                 ThreadWatchdog_BeginExpectedStall("app off screen");
+                SetAudioSuspended(true);
             } else {
+                SetAudioSuspended(false);
                 ThreadWatchdog_EndExpectedStall();
             }
         }
