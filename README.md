@@ -49,6 +49,10 @@ Your ROM needs to be in .z64 format. If it's in .n64 format, use the following t
 * Extract every file from the zip into a folder of your choosing.
 * Run lighthouse and select your compatible ROM.
 
+#### iOS (iPhone / iPad)
+* Apple's restrictions allow no prebuilt release, so build and install it with Xcode. See the [building instructions](https://github.com/HarbourMasters/Lighthouse/blob/main/docs/BUILDING.md#ios-iphone--ipad).
+* Launch the app once, copy your compatible ROM into the `Lighthouse` folder it makes in the Files app, and relaunch.
+
 # Configuration
 
 Lighthouse ships with a file with many standard controller mappings that can be used as-is with most controllers. If your controller isn't recognized by Lighthouse, or isn't working properly, you can create your own custom mapping using the built-in mapper in the Settings menu.
@@ -66,8 +70,13 @@ Lighthouse ships with a file with many standard controller mappings that can be 
 | F11 | Fullscreen |
 | Tab | Toggle Alternate assets |
 
+### Touch controls (iOS)
+On iPhone and iPad an on-screen N64 controller is drawn over the game: a floating analog stick on the left, A/B and the C cluster on the right, and L/Z/Start/R along the top edge. Tap `MENU` to open the port menu (the equivalent of ESC). Size, opacity, edge margin, stick deadzone and an optional D-Pad are under `Settings -> Controls`.
+
+Connect any MFi or Bluetooth controller and the on-screen pad hides itself automatically.
+
 ### Graphics Backends
-Currently, there are three rendering APIs supported: DirectX11 (Windows), OpenGL (all platforms), and Metal (macOS). You can change which API to use in the `Settings` menu of the menubar, which requires a restart.  If you're having an issue with crashing, you can change the API in the `lighthouse.cfg.json` file by finding the line `"Backend":{`... and changing the `id` value to `2` and set the `Name` to `OpenGL`. `DirectX 11` with id `1` is the default on Windows. `Metal` with id `3` is the default on macOS.
+Currently, there are three rendering APIs supported: DirectX11 (Windows), OpenGL (all platforms), and Metal (macOS and iOS). You can change which API to use in the `Settings` menu of the menubar, which requires a restart.  If you're having an issue with crashing, you can change the API in the `lighthouse.cfg.json` file by finding the line `"Backend":{`... and changing the `id` value to `2` and set the `Name` to `OpenGL`. `DirectX 11` with id `1` is the default on Windows. `Metal` with id `3` is the default on macOS, and the only backend on iOS.
 
 # Language Packs
 
@@ -84,6 +93,8 @@ _NOTE_: When using romhacks, only US v1.0 is supported, inherited from Banjo's B
 # Custom Assets
 
 Custom assets are packed in `.o2r` or `.otr` files. To use custom assets, place them in the `mods` folder.
+
+On iOS the `mods` folder is inside the `Lighthouse` folder under *On My iPhone* / *On My iPad* in the Files app; copy `.o2r`/`.otr` files there and reopen the app.
 
 If you're interested in creating and/or packing your own custom asset `.o2r`/`.otr` files, check out the following tools:
 * [**retro - OTR and O2R generator**](https://github.com/HarbourMasters64/retro)

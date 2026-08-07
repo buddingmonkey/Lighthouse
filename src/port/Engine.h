@@ -74,6 +74,10 @@ public:
     static std::vector<BKVersion> GetAvailableVersions();
 };
 
+// Index into imguiScaleOptionToValue in Engine.cpp, not a scale factor. Shared so the
+// "ImGui Menu Scaling" widget's default index cannot drift from the one actually applied.
+uint32_t DefaultImGuiScaleIndex();
+
 Fast::Interpreter* GameEngine_GetInterpreter();
 #define memallocn(type, n) (type*)GameEngine_Malloc(sizeof(type) * n)
 #define memalloc(type) memallocn(type, 1)

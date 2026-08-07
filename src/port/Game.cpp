@@ -18,6 +18,7 @@
 #endif
 #include <SDL2/SDL.h>
 
+#include "Controller/TouchControls.h"
 #include "DevTools/ThreadWatchdog.h"
 #include "GameStatus.h"
 #include "Interpolation/FrameInterpolation.h"
@@ -49,6 +50,47 @@ namespace {
 std::atomic<bool> sGameThreadDone{ false };
 std::thread sGameThread;
 thread_local bool tIsGameThread = false;
+
+#ifdef __IOS__
+std::atomic<bool> sAppOnScreen{ true };
+std::atomic<bool> sLowMemory{ false };
+
+int SDLCALL LifecycleWatch(void* userdata, SDL_Event* event) {
+    (void)userdata;
+    switch (event->type) {
+        case SDL_APP_WILLENTERBACKGROUND:
+            sAppOnScreen.store(false, std::memory_order_release);
+            break;
+        case SDL_APP_DIDENTERFOREGROUND:
+            sAppOnScreen.store(true, std::memory_order_release);
+            break;
+        case SDL_APP_LOWMEMORY:
+            sLowMemory.store(true, std::memory_order_release);
+            break;
+        case SDL_APP_TERMINATING:
+            SPDLOG_WARN("[iOS] The system is terminating the app");
+            if (const auto& logger = Ship::Context::GetRawInstance()->GetLogger()) {
+                logger->flush();
+            }
+            break;
+        default:
+            break;
+    }
+    return 1;
+}
+
+void SetAudioSuspended(bool suspended) {
+    const auto& audio = Ship::Context::GetRawInstance()->GetAudio();
+    if (audio == nullptr) {
+        return;
+    }
+    if (suspended) {
+        audio->SuspendPlayback();
+    } else {
+        audio->ResumePlayback();
+    }
+}
+#endif
 
 // The interpolation pair a submitted list was built from, carried to whoever
 // renders it. At most a couple are live at once.
@@ -93,6 +135,24 @@ bool OnGameThread() {
     return tIsGameThread;
 }
 } // namespace
+
+extern "C" int port_appIsOnScreen(void) {
+#ifdef __IOS__
+    return sAppOnScreen.load(std::memory_order_acquire) ? 1 : 0;
+#else
+    return 1;
+#endif
+}
+
+extern "C" void port_installLifecycleWatch(void) {
+#ifdef __IOS__
+    static bool sInstalled = false;
+    if (!sInstalled) {
+        sInstalled = true;
+        SDL_AddEventWatch(LifecycleWatch, nullptr);
+    }
+#endif
+}
 
 // A list is submitted while its tick is still recording, so the pair is
 // captured here and travels with the task.
@@ -272,8 +332,9 @@ void push_frame() {
     }
 }
 
-/* Rename SDL_main to main for SDL compatibility */
-#ifdef __GNUC__
+/* Rename SDL_main to main for SDL compatibility.
+   Not on iOS: there SDL2main supplies main() and calls SDL_main from the UIKit delegate. */
+#if defined(__GNUC__) && !defined(__IOS__)
 #define SDL_main main
 #endif
 
@@ -285,6 +346,11 @@ int SDL_main(int argc, char* argv[]) {
     // Anchor relative paths to the executable instead of cwd
     // when SHIP_HOME is not in use
     std::error_code ec;
+#ifdef __IOS__
+    // The bundle is read-only; anchor to Documents, which is where saves,
+    // bk.o2r and mods live.
+    std::filesystem::current_path(Ship::Context::GetAppDirectoryPath("bk"), ec);
+#else
     const char* shipHome = std::getenv("SHIP_HOME");
     const char* appImage = std::getenv("APPIMAGE");
     if (shipHome != nullptr && shipHome[0] != '\0') {
@@ -299,6 +365,7 @@ int SDL_main(int argc, char* argv[]) {
             std::filesystem::current_path(base, ec);
         }
     }
+#endif
 
     GameEngine::Create(argc, argv);
     // Both threads are created during core1_init, so allowlist them first.
@@ -315,13 +382,40 @@ int SDL_main(int argc, char* argv[]) {
         }
         sGameThreadDone.store(true);
     });
+#ifdef __IOS__
+    bool pausedOffScreen = false;
+#endif
     while (WindowIsRunning() || !sGameThreadDone.load()) {
         ThreadWatchdog_Beat(WATCHDOG_MAIN_LOOP);
         port_noteMainLoopAlive();
         // Pump events every iteration: a task-starved pass must not starve
         // input and window messages.
         Ship::Context::GetRawInstance()->GetWindow()->HandleEvents();
+#ifdef __IOS__
+        TouchControls_Poll();
+#endif
         OS_SiService();
+#ifdef __IOS__
+        if (sLowMemory.exchange(false, std::memory_order_acq_rel)) {
+            SPDLOG_WARN("[iOS] Memory warning; dropping the texture cache");
+            gfx_texture_cache_clear();
+        }
+        const bool onScreen = sAppOnScreen.load(std::memory_order_acquire);
+        if (onScreen == pausedOffScreen) {
+            pausedOffScreen = !onScreen;
+            if (pausedOffScreen) {
+                ThreadWatchdog_BeginExpectedStall("app off screen");
+                SetAudioSuspended(true);
+            } else {
+                SetAudioSuspended(false);
+                ThreadWatchdog_EndExpectedStall();
+            }
+        }
+        if (pausedOffScreen) {
+            SDL_Delay(16);
+            continue;
+        }
+#endif
         if (IsInlineModExtractionBusy()) {
             GameEngine::Instance->RenderGuiFrame();
             SDL_Delay(16);

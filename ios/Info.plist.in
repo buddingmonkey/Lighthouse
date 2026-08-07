@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>@PROJECT_NAME@</string>
+    <key>CFBundleExecutable</key>
+    <string>@PROJECT_NAME@</string>
+    <key>CFBundleIdentifier</key>
+    <string>@PROJECT_ID@</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>@PROJECT_NAME@</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@PROJECT_VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@PROJECT_VERSION@</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.games</string>
+    <key>MinimumOSVersion</key>
+    <string>@IOS_DEPLOYMENT_TARGET@</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+
+    <!-- Exposes the app's Documents folder in the Files app, which is how bk.o2r,
+         ROMs, saves and mods are managed on device. -->
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+
+    <!-- Named colour rather than an empty dict, whose fallback is systemBackgroundColor:
+         white under a light appearance, until SDL's black window replaces it. -->
+    <key>UILaunchScreen</key>
+    <dict>
+        <key>UIColorName</key>
+        <string>LaunchBackground</string>
+    </dict>
+    <key>UIRequiresFullScreen</key>
+    <true/>
+    <key>UIStatusBarHidden</key>
+    <true/>
+    <key>UIViewControllerBasedStatusBarAppearance</key>
+    <false/>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>arm64</string>
+        <string>metal</string>
+    </array>
+
+    <!-- Lets ProMotion displays run past 60 Hz instead of being capped. -->
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
+    <!-- Required for correct hardware keyboard/pointer/controller event delivery. -->
+    <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
+    <key>GCSupportsControllerUserInteraction</key>
+    <true/>
+</dict>
+</plist>

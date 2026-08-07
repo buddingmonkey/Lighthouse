@@ -21,6 +21,7 @@
 #include "port/Extractor/ExtractFlow.h"
 #include "port/Extractor/GameExtractor.h"
 #include "port/LaunchArgs.h"
+#include "port/Patches/Patches.h"
 #include "port/UI/cvar_prefixes.h"
 #include "port/UI/LighthouseGui.hpp"
 #include "port/UI/LighthouseModMenuWindow.h"
@@ -591,6 +592,10 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
             exit(0);
         }
         wnd->HandleEvents();
+        if (!port_appIsOnScreen()) {
+            SDL_Delay(16);
+            continue;
+        }
         UIWidgets::Colors themeColor =
             static_cast<UIWidgets::Colors>(CVarGetInteger(CVAR_SETTING("Menu.Theme"), UIWidgets::Colors::LightBlue));
         ImGui::PushStyleColor(ImGuiCol_TitleBgActive, UIWidgets::ColorValues.at(themeColor));

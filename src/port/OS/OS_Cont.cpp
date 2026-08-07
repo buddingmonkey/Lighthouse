@@ -5,6 +5,7 @@
 #include "OS.h"
 
 #include <libultraship/libultraship.h>
+#include "port/Controller/TouchControls.h"
 
 #include <atomic>
 #include <cstring>
@@ -61,6 +62,11 @@ extern "C" int OS_SiService(void) {
         std::lock_guard<std::mutex> lock(sLatchMutex);
         memset(sLatch, 0, sizeof(sLatch));
         Ship::Context::GetRawInstance()->GetControlDeck()->WriteToPad(sLatch);
+#ifdef __IOS__
+        // Merged here rather than through a mapping so it survives mapping reloads and
+        // stays on the thread that polls SDL.
+        TouchControls_MergeInto(&sLatch[0]);
+#endif
     }
     sLatchValid.store(true, std::memory_order_release);
     OS_SendEventMesg(OS_EVENT_SI);

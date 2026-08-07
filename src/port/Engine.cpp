@@ -87,6 +87,22 @@ long long sPassBudgetNs = 0;
 } // namespace
 
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
+
+uint32_t DefaultImGuiScaleIndex() {
+#ifdef __IOS__
+    // Window sizes are points: no iPhone reaches 600 on its short side and every iPad does.
+    static const uint32_t index = []() {
+        auto window = Ship::Context::GetRawInstance()->GetWindow();
+        if (window == nullptr) {
+            return 0u;
+        }
+        return std::min(window->GetWidth(), window->GetHeight()) >= 600 ? 2u : 0u;
+    }();
+    return index;
+#else
+    return 1;
+#endif
+}
 bool portArchiveVersionMatch = false;
 std::string assets_path;
 
@@ -118,6 +134,14 @@ GameEngine* GameEngine::Instance;
 // Construction
 
 GameEngine::GameEngine() {
+#ifdef __IOS__
+    // Play through the ring/silent switch like other games do.
+    SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "playback");
+    // Otherwise the accelerometer appears as a phantom joystick in the device list.
+    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+    SDL_SetHint(SDL_HINT_IOS_HIDE_HOME_INDICATOR, "2");
+#endif
+
     this->context = Ship::Context::CreateUninitializedInstance("Lighthouse", "bk", "lighthouse.cfg.json");
 
 #ifdef __SWITCH__
@@ -155,6 +179,7 @@ GameEngine::GameEngine() {
 
     lhFast3dWindow = std::make_shared<Fast::Fast3dWindow>(std::vector<std::shared_ptr<Ship::GuiWindow>>({}));
     this->context->InitWindow(lhFast3dWindow);
+    port_installLifecycleWatch();
     this->context->InitAudio({ .SampleRate = 22000, .SampleLength = 736, .DesiredBuffered = 2208 });
 
     LighthouseGui::SetupMenu();
@@ -170,7 +195,7 @@ GameEngine::GameEngine() {
     }
 
     previousImGuiScaleIndex = -1;
-    previousImGuiScale = defaultImGuiScale;
+    previousImGuiScale = 1.0f;
     ScaleImGui();
 }
 
@@ -358,7 +383,7 @@ ImFont* GameEngine::CreateFontWithSize(float size, std::string fontPath) {
 }
 
 void GameEngine::ScaleImGui() {
-    int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", defaultImGuiScale);
+    int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", DefaultImGuiScaleIndex());
     if (imGuiScaleIndex == previousImGuiScaleIndex) {
         return;
     }
@@ -487,6 +512,10 @@ void GameEngine::RelaunchIfRequested(int argc, char* argv[]) {
             SPDLOG_ERROR("Relaunch failed: CreateProcess error {}", GetLastError());
         }
     }
+#elif defined(__IOS__)
+    // exec is unavailable to sandboxed apps; the user relaunches from the home screen.
+    (void)argc;
+    (void)argv;
 #elif defined(__linux__) || defined(__APPLE__)
     execv(argv[0], argv);
     SPDLOG_ERROR("Relaunch failed: execv error {}", strerror(errno));
