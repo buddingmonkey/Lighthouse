@@ -259,6 +259,25 @@ float PointsPerMm(DeviceClass device) {
     return device == DEVICE_TABLET ? kTabletPointsPerMm : kPhonePointsPerMm;
 }
 
+// Maps a finger's offset from the stick's base onto the N64's range. Direction comes from the
+// offset as given and magnitude is capped separately, so a finger past the ring reads as full
+// deflection: the ring is the edge of the gate, not a point to balance on. Deriving both from a
+// pre-clamped offset instead would shrink the vector the further out the finger went, which walks
+// the character when it should be running.
+Vec2 StickVector(const Vec2& offset, float maxLen, float deadzone) {
+    const float len = std::sqrt(offset.x * offset.x + offset.y * offset.y);
+    if (len <= 0.0f || maxLen <= 0.0f) {
+        return {};
+    }
+    const float mag = std::min(len / maxLen, 1.0f);
+    if (mag <= deadzone) {
+        return {};
+    }
+    // Rescale past the deadzone so the first pixel of travel isn't wasted.
+    const float scaled = (mag - deadzone) / (1.0f - deadzone) * kStickRange;
+    return { offset.x / len * scaled, offset.y / len * scaled };
+}
+
 // Places a control on the arc a thumb sweeps from the corner it grips. Angles run up from the
 // inboard horizontal; inboard is +1 for the left thumb and -1 for the right one.
 Vec2 Arc(const Vec2& pivot, float inboard, float radius, float degrees) {
@@ -701,24 +720,19 @@ extern "C" void TouchControls_Poll(void) {
     }
 
     if (next.stickActive) {
-        float dx = next.stickKnob.x - next.stickBase.x;
-        float dy = next.stickKnob.y - next.stickBase.y;
-        const float len = std::sqrt(dx * dx + dy * dy);
+        const Vec2 offset = { next.stickKnob.x - next.stickBase.x, next.stickKnob.y - next.stickBase.y };
         const float maxLen = sLayout.stickBase;
+        const float len = std::sqrt(offset.x * offset.x + offset.y * offset.y);
         if (len > maxLen && len > 0.0f) {
-            dx *= maxLen / len;
-            dy *= maxLen / len;
-            next.stickKnob = { next.stickBase.x + dx, next.stickBase.y + dy };
+            // Pin the drawn knob to the ring. Only the drawing is clamped; StickVector reads the
+            // offset as it came in, so travel past the ring stays at full deflection.
+            next.stickKnob = { next.stickBase.x + offset.x * maxLen / len, next.stickBase.y + offset.y * maxLen / len };
         }
-        const float mag = std::min(len / maxLen, 1.0f);
         const float deadzone = std::clamp(CVarGetFloat(CVAR_TOUCH("Deadzone"), 0.12f), 0.0f, 0.5f);
-        if (mag > deadzone && len > 0.0f) {
-            // Rescale past the deadzone so the first pixel of travel isn't wasted.
-            const float scaled = (mag - deadzone) / (1.0f - deadzone) * kStickRange;
-            next.stickX = (int8_t)std::lround(std::clamp(dx / len * scaled, -kStickRange, kStickRange));
-            // Screen y grows downward, the N64 stick's does not.
-            next.stickY = (int8_t)std::lround(std::clamp(-dy / len * scaled, -kStickRange, kStickRange));
-        }
+        const Vec2 stick = StickVector(offset, maxLen, deadzone);
+        next.stickX = (int8_t)std::lround(std::clamp(stick.x, -kStickRange, kStickRange));
+        // Screen y grows downward, the N64 stick's does not.
+        next.stickY = (int8_t)std::lround(std::clamp(-stick.y, -kStickRange, kStickRange));
     }
 
     next.menuPressed = menuHeld;
