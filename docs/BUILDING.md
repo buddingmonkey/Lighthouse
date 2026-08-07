@@ -271,6 +271,26 @@ If the build still reports that no profiles were found, open `build-ios/Lighthou
 
 Saves, `lighthouse.cfg.json` and the `mods` folder all live in the same directory, so they can be backed up or edited from the Files app or over USB in Finder.
 
+### Installing without turning on Developer Mode
+
+Installing straight from Xcode uses a development signature, and iOS 16 and later require Developer Mode to be enabled on the device for those. A build signed for distribution — TestFlight, Ad Hoc or Enterprise — installs on a stock device with Developer Mode off, at the cost of a paid Apple Developer Program membership; a free personal team can only sign for development. The debugger and the device console are unavailable either way, so this is a way to play the build, not to debug it.
+
+Both routes start from an archive:
+
+```bash
+xcodebuild -project build-ios/Lighthouse.xcodeproj -scheme Lighthouse \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath build-ios/Lighthouse.xcarchive archive -allowProvisioningUpdates
+
+# Should list Lighthouse.app. An empty or missing Applications directory means the archive
+# is unexportable, and Xcode's Organizer shows it as a generic archive rather than an app
+ls build-ios/Lighthouse.xcarchive/Products/Applications
+```
+
+Then export with `xcodebuild -exportArchive -archivePath build-ios/Lighthouse.xcarchive -exportOptionsPlist <plist> -exportPath build-ios/export -allowProvisioningUpdates`, where the plist sets `teamID` to your team and `method` to either `app-store-connect` (upload the resulting `.ipa` with Transporter, then install through TestFlight) or `release-testing` (register the device's UDID in the developer portal first, then install the `.ipa` with Apple Configurator or over the air).
+
+`PROJECT_ID` has to be a bundle identifier registered to your team either way; the default is not. Nothing else about the build changes — the ROM still goes into the app's folder in the Files app exactly as above, since the app declares `UIFileSharingEnabled`.
+
 ### iOS notes
 
 * **Layout**: landscape only, full screen, rendered at the display's native pixel resolution. ProMotion displays are allowed to run above 60 Hz.

@@ -136,6 +136,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     endif()
     set(CMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${IOS_DEVELOPMENT_TEAM}")
     set(CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2") # iPhone and iPad
+    # Keeps the static libraries out of an archive; the app target opts back in below.
+    set(CMAKE_XCODE_ATTRIBUTE_SKIP_INSTALL "YES")
 endif()
 
 ################################################################################
@@ -264,6 +266,10 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_BINARY_DIR}/ios/Info.plist
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${PROJECT_ID}"
         XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+        # CMake only fills INSTALL_PATH for shared libraries, and `xcodebuild archive` with an
+        # empty one leaves the archive without an Applications/ directory to export from.
+        XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+        XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
     )
     if(IOS_DEVELOPMENT_TEAM STREQUAL "")
         # Lets the project configure and compile without an Apple developer account;
