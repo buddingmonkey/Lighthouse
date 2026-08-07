@@ -124,7 +124,7 @@ endif()
 # iOS: the toolchain file (cmake/ios.toolchain.cmake) is supplied on the command line,
 # so CMAKE_SYSTEM_NAME is already "iOS" by the time we get here. See docs/BUILDING.md.
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    set(PROJECT_ID "com.lighthouse.Lighthouse" CACHE STRING "iOS bundle identifier")
+    set(PROJECT_ID "com.harbormasters.lighthouse" CACHE STRING "iOS bundle identifier")
     set(IOS_DEVELOPMENT_TEAM "" CACHE STRING "Apple Developer Team ID used to sign the iOS app")
     set(BUNDLE_ID "${PROJECT_ID}" CACHE STRING "Bundle ID libultraship signs its targets with")
     # The minimum version comes from the toolchain's DEPLOYMENT_TARGET; mirror it into the plist.
@@ -281,7 +281,9 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     # takes ~45 minutes at -O0 against ~40 seconds optimised, and the game itself runs
     # unoptimised too. Generate the scheme from here so the configuration is a deliberate
     # choice rather than whatever Xcode defaulted to.
-    set(IOS_SCHEME_CONFIGURATION "Debug" CACHE STRING
+    # -O0 also costs launch time: a cold start faults in and signature-checks every page of
+    # the 70MB Debug binary, against 14MB in Release, before main() runs.
+    set(IOS_SCHEME_CONFIGURATION "Release" CACHE STRING
         "Build configuration the generated Xcode scheme runs (Debug or Release)")
     set_property(CACHE IOS_SCHEME_CONFIGURATION PROPERTY STRINGS Debug Release)
 

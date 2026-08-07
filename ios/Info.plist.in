@@ -34,8 +34,13 @@
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true/>
 
+    <!-- Named colour rather than an empty dict, whose fallback is systemBackgroundColor:
+         white under a light appearance, until SDL's black window replaces it. -->
     <key>UILaunchScreen</key>
-    <dict/>
+    <dict>
+        <key>UIColorName</key>
+        <string>LaunchBackground</string>
+    </dict>
     <key>UIRequiresFullScreen</key>
     <true/>
     <key>UIStatusBarHidden</key>
