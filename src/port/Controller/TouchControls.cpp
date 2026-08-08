@@ -38,6 +38,7 @@ bool TouchControls_Active() {
 #include <ship/window/gui/GuiWindow.h>
 #include <ship/controller/controldeck/ControlDeck.h>
 
+#include "port/Controller/ControlSchemes.h"
 #include "port/UI/cvar_prefixes.h"
 
 #define CVAR_TOUCH(var) CVAR_SETTING("TouchControls." var)
@@ -98,6 +99,11 @@ constexpr float kMenuSlopX = 1.2f;
 constexpr float kMenuSlopY = 1.4f;
 // N64 sticks read a little past 80 at the octagon corners; 80 is the safe full-range value.
 constexpr float kStickRange = 80.0f;
+// A gamepad's right stick reaches MAX_AXIS_RANGE, and the camera's thresholds are set against
+// that, so the touch stick has to agree or it reads as a different stick.
+constexpr float kRightStickRange = 85.0f;
+// What a gamepad's stick-to-button mappings fire at, as a fraction of full deflection.
+constexpr float kAxisButtonThreshold = 0.25f;
 
 struct Button {
     Vec2 center;
@@ -108,6 +114,9 @@ struct Button {
     float slop = kCircleSlop;
     uint16_t mask = 0;
     const char* label = "";
+    // Way the face points, for the ones drawn as an arrow rather than lettered. Held per
+    // button rather than worked out from the cluster, so mirroring cannot turn it around.
+    Vec2 arrow;
     bool enabled = true;
 };
 
@@ -122,6 +131,11 @@ struct Layout {
     Vec2 stickZoneMax;
     Vec2 menuCenter;
     Vec2 menuHalfExtent;
+    // Modern drives the camera from a right stick, so there the C diamond becomes one.
+    bool rightStick = false;
+    Vec2 rightStickHome;
+    float rightStickBase = 0.0f;
+    float rightStickKnob = 0.0f;
 };
 
 // A finger keeps whatever it first grabbed until it lifts, so sliding off a button
@@ -129,6 +143,7 @@ struct Layout {
 constexpr int kTargetNone = -1;
 constexpr int kTargetStick = -2;
 constexpr int kTargetMenu = -3;
+constexpr int kTargetRightStick = -4;
 
 struct Finger {
     SDL_FingerID id = 0;
@@ -143,6 +158,10 @@ struct State {
     bool stickActive = false;
     Vec2 stickBase;
     Vec2 stickKnob;
+    int8_t rightX = 0;
+    int8_t rightY = 0;
+    bool rightActive = false;
+    Vec2 rightKnob;
     std::array<bool, CTRL_COUNT> pressed{};
     bool menuPressed = false;
 };
@@ -159,6 +178,9 @@ bool sGamepadPresent = false;
 bool sStickHeld = false;
 SDL_FingerID sStickFinger = 0;
 Vec2 sStickOrigin;
+// The right stick has a fixed base, so its finger needs no origin.
+bool sRightHeld = false;
+SDL_FingerID sRightFinger = 0;
 
 float Dist(const Vec2& a, const Vec2& b) {
     const float dx = a.x - b.x;
@@ -263,7 +285,7 @@ float PointsPerMm(DeviceClass device) {
 // deflection: the ring is the edge of the gate, not a point to balance on. Deriving both from a
 // pre-clamped offset instead would shrink the vector the further out the finger went, which walks
 // the character when it should be running.
-Vec2 StickVector(const Vec2& offset, float maxLen, float deadzone) {
+Vec2 StickVector(const Vec2& offset, float maxLen, float deadzone, float range) {
     const float len = std::sqrt(offset.x * offset.x + offset.y * offset.y);
     if (len <= 0.0f || maxLen <= 0.0f) {
         return {};
@@ -273,7 +295,7 @@ Vec2 StickVector(const Vec2& offset, float maxLen, float deadzone) {
         return {};
     }
     // Rescale past the deadzone so the first pixel of travel isn't wasted.
-    const float scaled = (mag - deadzone) / (1.0f - deadzone) * kStickRange;
+    const float scaled = (mag - deadzone) / (1.0f - deadzone) * range;
     return { offset.x / len * scaled, offset.y / len * scaled };
 }
 
@@ -286,7 +308,7 @@ Vec2 Arc(const Vec2& pivot, float inboard, float radius, float degrees) {
 
 // Slides a run of controls as a unit until its bounding box clears the screen edges and whatever
 // sits above it. Clusters move whole, so this can't deform a diamond into a trapezium.
-void FitRange(Layout& l, int first, int last, float margin, float ceiling) {
+void FitRange(Layout& l, int first, int last, float margin, float ceiling, bool withRightStick = false) {
     Vec2 min = { FLT_MAX, FLT_MAX };
     Vec2 max = { -FLT_MAX, -FLT_MAX };
     for (int i = first; i <= last; i++) {
@@ -298,6 +320,13 @@ void FitRange(Layout& l, int first, int last, float margin, float ceiling) {
         min.y = std::min(min.y, b.center.y - b.halfExtent.y);
         max.x = std::max(max.x, b.center.x + b.halfExtent.x);
         max.y = std::max(max.y, b.center.y + b.halfExtent.y);
+    }
+    const bool stick = withRightStick && l.rightStick;
+    if (stick) {
+        min.x = std::min(min.x, l.rightStickHome.x - l.rightStickBase);
+        min.y = std::min(min.y, l.rightStickHome.y - l.rightStickBase);
+        max.x = std::max(max.x, l.rightStickHome.x + l.rightStickBase);
+        max.y = std::max(max.y, l.rightStickHome.y + l.rightStickBase);
     }
     if (min.x > max.x) {
         return;
@@ -318,6 +347,10 @@ void FitRange(Layout& l, int first, int last, float margin, float ceiling) {
         l.buttons[i].center.x += shift.x;
         l.buttons[i].center.y += shift.y;
     }
+    if (stick) {
+        l.rightStickHome.x += shift.x;
+        l.rightStickHome.y += shift.y;
+    }
 }
 
 // Puts the stick under the right thumb and the face buttons under the left.
@@ -334,6 +367,7 @@ void MirrorLayout(Layout& l) {
     l.stickZoneMax.x = l.aspect - l.stickZoneMin.x;
     l.stickZoneMin.x = zoneMin;
     l.stickHome.x = l.aspect - l.stickHome.x;
+    l.rightStickHome.x = l.aspect - l.rightStickHome.x;
 }
 
 // The dimensions that decide how tall the pad is, in millimetres: A's radius, how far above A the
@@ -348,6 +382,9 @@ constexpr float kZPillHalfYMm = 4.7f;
 constexpr float kRailGapMm = 2.0f;
 constexpr float kFaceMm = kARadiusMm + kACGapMm + kCOffYMm + kCRadiusMm;
 constexpr float kRailMm = kZPillHalfYMm * 2.0f + kRailGapMm;
+// The ring Modern puts in the diamond's place, and the face height that costs instead.
+constexpr float kRightStickBaseMm = 8.5f;
+constexpr float kModernFaceMm = kARadiusMm + kACGapMm + kRightStickBaseMm;
 
 // Everything BuildLayout reads. Comparing the struct whole is what stops a new setting from
 // silently failing to trigger a rebuild.
@@ -360,6 +397,7 @@ struct LayoutKey {
     int device = 0;
     int dpad = 0;
     int mirror = 0;
+    int scheme = 0;
     // Only moves the menu button, but it still belongs here: a gamepad connecting mid-session has
     // to rebuild the layout for that to take effect.
     int padHidden = 0;
@@ -380,9 +418,10 @@ void BuildLayout(const LayoutKey& key) {
     // on a short screen that, rather than the slider, decides how large the pad can get. A phone
     // held in landscape has barely 55 mm to spend, and saturating the slider there beats letting
     // the controls grow into one another.
+    const bool modern = key.scheme == CONTROL_SCHEME_MODERN;
     const float railMm = device == DEVICE_PHONE ? kRailMm : 0.0f;
     const float budget = 1.0f / unit - 2.0f * key.margin;
-    const float size = std::max(std::min(key.size, budget / (kFaceMm + railMm)), 0.4f);
+    const float size = std::max(std::min(key.size, budget / ((modern ? kModernFaceMm : kFaceMm) + railMm)), 0.4f);
 
     const auto mm = [unit](float millimetres) { return millimetres * unit; };
     const auto sz = [unit, size](float millimetres) { return millimetres * unit * size; };
@@ -455,12 +494,30 @@ void BuildLayout(const LayoutKey& key) {
     const Vec2 c = { a.x - sz(14.0f), a.y - sz(kACGapMm) };
     const Vec2 cOff = { sz(8.5f), sz(kCOffYMm) };
     const float cRad = sz(kCRadiusMm);
-    AddButton(l, CTRL_CUP, { c.x, c.y - cOff.y }, cRad, BTN_CUP, "");
-    AddButton(l, CTRL_CDOWN, { c.x, c.y + cOff.y }, cRad, BTN_CDOWN, "");
-    AddButton(l, CTRL_CLEFT, { c.x - cOff.x, c.y }, cRad, BTN_CLEFT, "");
-    AddButton(l, CTRL_CRIGHT, { c.x + cOff.x, c.y }, cRad, BTN_CRIGHT, "");
+    if (modern) {
+        // Camera yaw and zoom come off the stick there, so the diamond is one. C-up and C-down
+        // are still their own actions -- first person, and an egg while crouched -- and go
+        // inboard rather than above and below, where the ring would put C-down over B.
+        l.rightStick = true;
+        l.rightStickHome = c;
+        l.rightStickBase = sz(kRightStickBaseMm);
+        l.rightStickKnob = sz(4.2f);
+        const float cInboard = l.rightStickBase + sz(1.5f) + cRad;
+        AddButton(l, CTRL_CUP, { c.x - cInboard, c.y - sz(4.5f) }, cRad, BTN_CUP, "");
+        AddButton(l, CTRL_CDOWN, { c.x - cInboard, c.y + sz(4.5f) }, cRad, BTN_CDOWN, "");
+    } else {
+        AddButton(l, CTRL_CUP, { c.x, c.y - cOff.y }, cRad, BTN_CUP, "");
+        AddButton(l, CTRL_CDOWN, { c.x, c.y + cOff.y }, cRad, BTN_CDOWN, "");
+        AddButton(l, CTRL_CLEFT, { c.x - cOff.x, c.y }, cRad, BTN_CLEFT, "");
+        AddButton(l, CTRL_CRIGHT, { c.x + cOff.x, c.y }, cRad, BTN_CRIGHT, "");
+    }
+    l.buttons[CTRL_CUP].arrow = { 0.0f, -1.0f };
+    l.buttons[CTRL_CDOWN].arrow = { 0.0f, 1.0f };
+    l.buttons[CTRL_CLEFT].arrow = { -1.0f, 0.0f };
+    l.buttons[CTRL_CRIGHT].arrow = { 1.0f, 0.0f };
     for (int i = CTRL_CUP; i <= CTRL_CRIGHT; i++) {
         l.buttons[i].slop = kClusterSlop;
+        l.buttons[i].enabled = !modern || i == CTRL_CUP || i == CTRL_CDOWN;
     }
 
     // Left thumb. The stick floats to wherever a finger lands in its zone, so stickHome is only
@@ -495,7 +552,7 @@ void BuildLayout(const LayoutKey& key) {
     for (int i = CTRL_Z; i <= CTRL_START; i++) {
         FitRange(l, i, i, margin, top);
     }
-    FitRange(l, CTRL_A, CTRL_CRIGHT, margin, clusterCeiling);
+    FitRange(l, CTRL_A, CTRL_CRIGHT, margin, clusterCeiling, true);
     FitRange(l, CTRL_DUP, CTRL_DRIGHT, margin, clusterCeiling);
 
     // Anything inside the zone that isn't a button grabs the stick. Bound it by what a thumb can
@@ -533,6 +590,7 @@ void EnsureLayout(float aspect, float pointHeight) {
     key.device = CVarGetInteger(CVAR_TOUCH("Layout"), 0);
     key.dpad = CVarGetInteger(CVAR_TOUCH("ShowDPad"), 0);
     key.mirror = CVarGetInteger(CVAR_TOUCH("Mirror"), 0);
+    key.scheme = CVarGetInteger(CVAR_SETTING("Controls.Scheme"), CONTROL_SCHEME_RETRO);
     // Deliberately not PadActive(): that also goes false while the menu is open, which would move
     // the button out from under the finger that just opened it.
     key.padHidden = CVarGetInteger(CVAR_TOUCH("HideWithGamepad"), 1) && sGamepadPresent ? 1 : 0;
@@ -595,6 +653,11 @@ int ClassifyTouch(const Vec2& p, bool padActive, bool menuButtonActive) {
     if (best != kTargetNone) {
         return best;
     }
+    // The right stick is grabbed from its ring rather than a zone: the buttons it sits among
+    // are close enough that a zone would swallow them.
+    if (sLayout.rightStick && Dist(p, sLayout.rightStickHome) <= sLayout.rightStickBase * kCircleSlop) {
+        return kTargetRightStick;
+    }
     if (p.x >= sLayout.stickZoneMin.x && p.x <= sLayout.stickZoneMax.x && p.y >= sLayout.stickZoneMin.y &&
         p.y <= sLayout.stickZoneMax.y) {
         return kTargetStick;
@@ -622,6 +685,7 @@ extern "C" void TouchControls_Poll(void) {
         sFingers.clear();
         sState = State{};
         sStickHeld = false;
+        sRightHeld = false;
         sMenuLatch = false;
         return;
     }
@@ -635,6 +699,7 @@ extern "C" void TouchControls_Poll(void) {
         sFingers.clear();
         sState = State{};
         sStickHeld = false;
+        sRightHeld = false;
         sMenuLatch = false;
         return;
     }
@@ -683,9 +748,11 @@ extern "C" void TouchControls_Poll(void) {
     State next;
     next.stickBase = sLayout.stickHome;
     next.stickKnob = sLayout.stickHome;
+    next.rightKnob = sLayout.rightStickHome;
 
     bool menuHeld = false;
     const Finger* stickFinger = nullptr;
+    const Finger* rightFinger = nullptr;
     for (const auto& finger : sFingers) {
         if (finger.target == kTargetMenu) {
             menuHeld = true;
@@ -693,6 +760,10 @@ extern "C" void TouchControls_Poll(void) {
             // The finger that already owns the stick keeps it; otherwise the first one claims it.
             if (stickFinger == nullptr || (sStickHeld && finger.id == sStickFinger)) {
                 stickFinger = &finger;
+            }
+        } else if (finger.target == kTargetRightStick) {
+            if (rightFinger == nullptr || (sRightHeld && finger.id == sRightFinger)) {
+                rightFinger = &finger;
             }
         } else if (finger.target >= 0 && finger.target < CTRL_COUNT) {
             next.pressed[finger.target] = true;
@@ -728,10 +799,34 @@ extern "C" void TouchControls_Poll(void) {
             next.stickKnob = { next.stickBase.x + offset.x * maxLen / len, next.stickBase.y + offset.y * maxLen / len };
         }
         const float deadzone = std::clamp(CVarGetFloat(CVAR_TOUCH("Deadzone"), 0.12f), 0.0f, 0.5f);
-        const Vec2 stick = StickVector(offset, maxLen, deadzone);
+        const Vec2 stick = StickVector(offset, maxLen, deadzone, kStickRange);
         next.stickX = (int8_t)std::lround(std::clamp(stick.x, -kStickRange, kStickRange));
         // Screen y grows downward, the N64 stick's does not.
         next.stickY = (int8_t)std::lround(std::clamp(-stick.y, -kStickRange, kStickRange));
+    }
+
+    if (rightFinger != nullptr) {
+        sRightHeld = true;
+        sRightFinger = rightFinger->id;
+        next.rightActive = true;
+        const Vec2 home = sLayout.rightStickHome;
+        const Vec2 offset = { rightFinger->pos.x - home.x, rightFinger->pos.y - home.y };
+        const float maxLen = sLayout.rightStickBase;
+        const float len = std::sqrt(offset.x * offset.x + offset.y * offset.y);
+        next.rightKnob = (len > maxLen && len > 0.0f)
+                             ? Vec2{ home.x + offset.x * maxLen / len, home.y + offset.y * maxLen / len }
+                             : rightFinger->pos;
+        const float deadzone = std::clamp(CVarGetFloat(CVAR_TOUCH("Deadzone"), 0.12f), 0.0f, 0.5f);
+        const Vec2 right = StickVector(offset, maxLen, deadzone, kRightStickRange);
+        next.rightX = (int8_t)std::lround(std::clamp(right.x, -kRightStickRange, kRightStickRange));
+        next.rightY = (int8_t)std::lround(std::clamp(-right.y, -kRightStickRange, kRightStickRange));
+        // Modern reads yaw and zoom from the stick itself, but its Wonderwing gesture and the
+        // picture puzzles read the C bits a gamepad's stick-to-button mapping would set.
+        if (std::abs(right.x) > kRightStickRange * kAxisButtonThreshold) {
+            next.buttons |= right.x > 0.0f ? BTN_CRIGHT : BTN_CLEFT;
+        }
+    } else {
+        sRightHeld = false;
     }
 
     next.menuPressed = menuHeld;
@@ -759,6 +854,10 @@ extern "C" void TouchControls_MergeInto(void* contPad) {
     if (pad->stick_x == 0 && pad->stick_y == 0) {
         pad->stick_x = sState.stickX;
         pad->stick_y = sState.stickY;
+    }
+    if (pad->right_stick_x == 0 && pad->right_stick_y == 0) {
+        pad->right_stick_x = sState.rightX;
+        pad->right_stick_y = sState.rightY;
     }
 }
 
@@ -846,10 +945,6 @@ void TouchControls_Draw() {
         return;
     }
 
-    // The C cluster is labelled as it is on the controller: an arrow per button, C in the middle.
-    const Vec2 cCenter = { (sLayout.buttons[CTRL_CLEFT].center.x + sLayout.buttons[CTRL_CRIGHT].center.x) * 0.5f,
-                           (sLayout.buttons[CTRL_CUP].center.y + sLayout.buttons[CTRL_CDOWN].center.y) * 0.5f };
-
     for (int i = 0; i < CTRL_COUNT; i++) {
         const Button& b = sLayout.buttons[i];
         if (!b.enabled) {
@@ -868,15 +963,26 @@ void TouchControls_Draw() {
             dl->AddCircleFilled(c, r, Shade(alpha * 0.55f, pressed), 32);
             dl->AddCircle(c, r, Shade(alpha, pressed), 32, h * 0.004f);
         }
-        if (i >= CTRL_CUP && i <= CTRL_CRIGHT) {
-            DrawArrow(dl, px(b.center), b.radius * h, { b.center.x - cCenter.x, b.center.y - cCenter.y },
-                      Shade(std::min(alpha * 1.7f, 0.95f), pressed));
+        if (b.arrow.x != 0.0f || b.arrow.y != 0.0f) {
+            DrawArrow(dl, px(b.center), b.radius * h, b.arrow, Shade(std::min(alpha * 1.7f, 0.95f), pressed));
         } else {
             // Pill labels are multi-character, so size them off the pill's height, not its width.
             DrawLabel(dl, b.label, px(b.center), (b.pill ? b.halfExtent.y * 1.1f : b.radius * 0.9f) * h);
         }
     }
-    DrawLabel(dl, "C", px(cCenter), sLayout.buttons[CTRL_CUP].radius * 1.25f * h);
+
+    if (sLayout.rightStick) {
+        const ImVec2 rBase = px(sLayout.rightStickHome);
+        const ImVec2 rKnob = px(sState.rightActive ? sState.rightKnob : sLayout.rightStickHome);
+        dl->AddCircleFilled(rBase, sLayout.rightStickBase * h, Shade(alpha * 0.35f, false), 48);
+        dl->AddCircle(rBase, sLayout.rightStickBase * h, Shade(alpha, false), 48, h * 0.004f);
+        dl->AddCircleFilled(rKnob, sLayout.rightStickKnob * h, Shade(alpha * 0.9f, sState.rightActive), 32);
+    } else {
+        // The letter belongs in the middle of the diamond, as on the controller.
+        const Vec2 cCenter = { (sLayout.buttons[CTRL_CLEFT].center.x + sLayout.buttons[CTRL_CRIGHT].center.x) * 0.5f,
+                               (sLayout.buttons[CTRL_CUP].center.y + sLayout.buttons[CTRL_CDOWN].center.y) * 0.5f };
+        DrawLabel(dl, "C", px(cCenter), sLayout.buttons[CTRL_CUP].radius * 1.25f * h);
+    }
 
     // Stick: base ring plus knob. Idle it sits at its home position as a target.
     const ImVec2 base = px(sState.stickBase);
