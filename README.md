@@ -50,10 +50,8 @@ Your ROM needs to be in .z64 format. If it's in .n64 format, use the following t
 * Run lighthouse and select your compatible ROM.
 
 #### iOS (iPhone / iPad)
-There is no prebuilt release; build and install it yourself with Xcode, following the [building instructions](https://github.com/HarbourMasters/Lighthouse/blob/main/docs/BUILDING.md#ios-iphone--ipad).
-* Launch the app once. It creates a `Lighthouse` folder under *On My iPhone* / *On My iPad* in the Files app.
-* Copy your compatible ROM into that folder and relaunch. Lighthouse extracts `bk.o2r` on device.
-* Saves, config and the `mods` folder live in the same place, so they can be managed from Files or over USB in Finder.
+* Apple's restrictions allow no prebuilt release, so build and install it with Xcode. See the [building instructions](https://github.com/HarbourMasters/Lighthouse/blob/main/docs/BUILDING.md#ios-iphone--ipad).
+* Launch the app once, copy your compatible ROM into the `Lighthouse` folder it makes in the Files app, and relaunch.
 
 # Configuration
 

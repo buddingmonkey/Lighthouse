@@ -216,17 +216,11 @@ cmake --build build-cmake --target clean
 ```
 
 ## iOS (iPhone / iPad)
-Requires a Mac with Xcode 15 or newer && `cmake, ninja` (can be installed via homebrew, macports, etc)
+Requires a Mac with Xcode 15 or newer && `cmake, ninja` (can be installed via homebrew, macports, etc). SDL2, metal-cpp and libzip are fetched while configuring. The renderer is Metal.
 
-Everything else, including SDL2 and metal-cpp, is fetched by libultraship while configuring. The renderer is Metal, there is no OpenGL ES path.
+_Note: the build cross-compiles, so `lighthouse.o2r` has to come from a macOS build tree and `bk.o2r` is extracted on the device._
 
-The build cross-compiles, so Torch has to run on the Mac itself. Generate `lighthouse.o2r` once from a normal macOS build tree and the iOS configure picks it up.
-
-`IOS_DEVELOPMENT_TEAM` is your 10-character Apple Developer Team ID, from the Membership page at <https://developer.apple.com/account>, and `PROJECT_ID` must be a bundle identifier your team owns.
-
-A free Apple ID works too, added under Xcode > Settings > Accounts; use the personal team's ID, which `xcrun security find-identity -v -p codesigning` lists, or open the generated project and pick the team in *Signing & Capabilities*. Free provisioning profiles expire after 7 days, so the app has to be reinstalled weekly.
-
-Leave `IOS_DEVELOPMENT_TEAM` unset to configure and compile without an Apple account, in which case the app just can't be installed on a device.
+_Note: `IOS_DEVELOPMENT_TEAM` is your 10-character Apple Developer Team ID, from <https://developer.apple.com/account>, and `PROJECT_ID` a bundle identifier your team owns. A free Apple ID works, added under Xcode > Settings > Accounts, but its profiles expire after 7 days. Leave the team unset to compile without an Apple account._
 
 ```bash
 # Clone the repo
@@ -240,8 +234,7 @@ cmake -H. -Bbuild-cmake -GNinja
 cmake --build build-cmake --target GeneratePortO2R
 
 # Generate the Xcode project, which the app bundle, asset catalog and signing all need
-# CMAKE_IGNORE_PREFIX_PATH stops the homebrew/macports SDL2 and libzip from your desktop
-# build being picked up in place of the ones libultraship fetches, they're the wrong arch
+# CMAKE_IGNORE_PREFIX_PATH keeps the homebrew/macports SDL2 and libzip out, wrong arch
 cmake -S . -B build-ios -G Xcode \
   -DCMAKE_TOOLCHAIN_FILE=cmake/ios.toolchain.cmake \
   -DPLATFORM=OS64 \
@@ -251,73 +244,43 @@ cmake -S . -B build-ios -G Xcode \
   -DIOS_DEVELOPMENT_TEAM=YOURTEAMID
 
 # Compile the project, or open build-ios/Lighthouse.xcodeproj and hit Run
-# Anything after `--` goes to xcodebuild, and without -allowProvisioningUpdates the build
-# fails with "No profiles for '<bundle id>' were found". Drop it if you set no team
+# Build the Lighthouse target rather than ALL_BUILD to skip the SDL2 dylib and the host Torch
+# Drop -allowProvisioningUpdates if you set no team
 cmake --build build-ios --config Release --target Lighthouse -- -allowProvisioningUpdates
 ```
 
-Build the `Lighthouse` target rather than `ALL_BUILD` to skip the SDL2 dylib (the app links `SDL2::SDL2-static`) and the host Torch.
-
-`lighthouse.o2r`, `config.yml`, `assets/yaml` and `gamecontrollerdb.txt` are copied into the `.app` after linking, so if the build warns that `lighthouse.o2r` is missing, run the `GeneratePortO2R` step.
-
-If the build still reports that no profiles were found, open `build-ios/Lighthouse.xcodeproj` once and pick your team under the Lighthouse target's *Signing & Capabilities*. Xcode registers the bundle ID and creates the profile, after which command-line builds work. This is usually only needed with a free personal team.
+_Note: if the build reports that no profiles were found, open `build-ios/Lighthouse.xcodeproj` once and pick your team under the Lighthouse target's *Signing & Capabilities*._
 
 ### Getting the game onto a device
-`bk.o2r` is not built at compile time for iOS. The app extracts it on device, the same way the desktop builds do:
-
 1. Install and launch the app once. It creates a `Lighthouse` folder under *On My iPhone* / *On My iPad* in the Files app.
 2. Copy a supported Banjo-Kazooie ROM (`.z64`) into that folder.
-3. Relaunch. Lighthouse finds the ROM, asks to extract, and writes `bk.o2r` next to it. Extraction takes a few minutes and needs roughly 200 MB free.
+3. Relaunch and let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
 
-Saves, `lighthouse.cfg.json` and the `mods` folder all live in the same directory, so they can be backed up or edited from the Files app or over USB in Finder.
+Saves, `lighthouse.cfg.json` and the `mods` folder live in the same folder.
 
-### Installing without turning on Developer Mode
-
-Installing straight from Xcode uses a development signature, and iOS 16 and later require Developer Mode to be enabled on the device for those. A build signed for distribution — TestFlight, Ad Hoc or Enterprise — installs on a stock device with Developer Mode off, at the cost of a paid Apple Developer Program membership; a free personal team can only sign for development. The debugger and the device console are unavailable either way, so this is a way to play the build, not to debug it.
-
-Both routes start from an archive:
+### Generating a distributable
+Installing from Xcode needs Developer Mode turned on. A build signed for distribution (TestFlight or Ad Hoc, paid membership only) installs without it, but can't be debugged.
 
 ```bash
+# Archive
 xcodebuild -project build-ios/Lighthouse.xcodeproj -scheme Lighthouse \
   -configuration Release -destination 'generic/platform=iOS' \
   -archivePath build-ios/Lighthouse.xcarchive archive -allowProvisioningUpdates
 
-# Should list Lighthouse.app. An empty or missing Applications directory means the archive
-# is unexportable, and Xcode's Organizer shows it as a generic archive rather than an app
+# Should list Lighthouse.app, an empty Applications folder means the archive can't be exported
 ls build-ios/Lighthouse.xcarchive/Products/Applications
+
+# Export, with `teamID` and `method` (app-store-connect or release-testing) set in the plist
+xcodebuild -exportArchive -archivePath build-ios/Lighthouse.xcarchive \
+  -exportOptionsPlist <plist> -exportPath build-ios/export -allowProvisioningUpdates
 ```
 
-Then export with `xcodebuild -exportArchive -archivePath build-ios/Lighthouse.xcarchive -exportOptionsPlist <plist> -exportPath build-ios/export -allowProvisioningUpdates`, where the plist sets `teamID` to your team and `method` to either `app-store-connect` (upload the resulting `.ipa` with Transporter, then install through TestFlight) or `release-testing` (register the device's UDID in the developer portal first, then install the `.ipa` with Apple Configurator or over the air).
-
-`PROJECT_ID` has to be a bundle identifier registered to your team either way; the default is not. Nothing else about the build changes — the ROM still goes into the app's folder in the Files app exactly as above, since the app declares `UIFileSharingEnabled`.
-
 ### iOS notes
-
-* **Layout**: landscape only, full screen, rendered at the display's native pixel resolution. ProMotion displays are allowed to run above 60 Hz.
-* **Controllers**: any MFi / Bluetooth controller SDL2 recognises (Xbox, DualSense, DualShock 4, Backbone, 8BitDo...) works via the GameController framework. Pair it in iOS Settings first; the on-screen pad hides itself while one is connected.
-* **On-screen controls**: drawn by `src/port/Controller/TouchControls.cpp` and merged into the pad in `OS_SiService`, so they feed the same path as a physical controller. The layout is sized in millimetres rather than in fractions of the screen, so a button covers the same amount of thumb on a phone as on an iPad, and the controls sit on the arcs the thumbs sweep from the two bottom corners. The analog stick floats: it appears wherever a finger lands in the lower-left area rather than at one fixed spot.
-* **Phones and tablets**: on a phone the shoulder buttons run along the top edge, under the index fingers. A tablet's top corners are out of reach of a hand holding it, so there the same buttons run down the left and right edges instead. Z takes the corner of its rail, ahead of L, because it is held for most of a fight.
-* **Configuring them**: *Settings > Controls*, in the **On-Screen Controls** section — show/hide, hide while a gamepad is connected, a left-handed layout that swaps the two halves, the phone/tablet layout override, control size, control reach (how far from the corners the controls sit — turn it down for smaller hands), control opacity, edge margin in millimetres (which keeps them clear of the notch and home indicator), touch stick deadzone, and an optional D-pad that is off by default.
-* **The MENU button** at the top of the screen opens the port menu, which is otherwise bound to Escape. It stays available even when the pad itself is hidden.
-* **Mods** work exactly as on desktop — drop `.o2r`/`.otr` files into `Lighthouse/mods` via the Files app. Applying a mod list needs a restart, and since iOS apps can't relaunch themselves the menu asks you to close the app and reopen it from the Home Screen.
-* **Networking** (Anchor multiplayer) is off by default on iOS because SDL2_net isn't part of the iOS dependency set.
-
-### Companion libultraship changes
-
-iOS support needs changes in the `libultraship` submodule that have not landed upstream yet. `.gitmodules` therefore points at a fork (`buddingmonkey/libultraship`, branch `ios-support`) rather than `Kenix3/libultraship`; these are what has to land upstream before that pin can go away:
-
-* `cmake/dependencies/ios.cmake` — the iOS dependency set. libzip is built from FetchContent with `ENABLE_ZSTD` and `ENABLE_LZMA` off, because neither ships in the iOS SDK and libzip would otherwise find the host's x86_64 Homebrew build and fail to link for arm64.
-* `cmake/dependencies/ios.cmake` also runs libzip's link-based `check_function_exists()` probes, before libzip's own `project()` call resets `CMAKE_TRY_COMPILE_TARGET_TYPE` to `STATIC_LIBRARY` and makes every one of them report success.
-* `src/CMakeLists.txt` — guard the code-signing tweak for the `zip` target with `if(TARGET zip)`; it only exists when libzip came from FetchContent, so configure fails outright on a machine that has libzip installed.
-* `src/ship/CMakeLists.txt` — build the CoreAudio player on iOS as well as macOS, and compile `audio/CoreAudioSession.mm` there.
-* `src/fast/backends/gfx_sdl2.cpp` — request `SDL_WINDOW_ALLOW_HIGHDPI` so the Metal drawable is the display's native pixel size instead of 1x (this is what macOS already does for Retina), and stop routing fullscreen through the Cocoa-only helpers, which aren't compiled for iOS and would fail to link.
-* `src/fast/Fast3dGui.cpp` — take `DisplayFramebufferScale` from `SDL_Metal_GetDrawableSize()`. ImGui's SDL2 backend derives it from `SDL_GL_GetDrawableSize()`, which UIKit only implements for GL views, so the scale came out 1.0 on a 2x/3x display and every ImGui frame was dropped.
-* `src/fast/backends/gfx_metal.cpp` — log once when a framebuffer size mismatch makes `RenderDrawData()` drop frames, instead of leaving a blank GUI with no other symptom.
-* `src/fast/Fast3dWindow.cpp` — only advertise the OpenGL backend when it was compiled in. Without this a config carrying `"Window.Backend.Id": 2`, e.g. copied from a desktop install, selects a backend iOS has no case for and crashes on a null renderer.
-* `src/ship/Context.cpp` — `GetAppBundlePath()` returns the read-only app bundle on iOS instead of `Documents`, so shipped assets and user data are separate; and `~Context()` checks each member rather than assuming it is present, since an early exit can destroy a context before every `Init*` stage has run.
-* `include/ship/audio/CoreAudioAudioPlayer.h`, `src/ship/audio/CoreAudioAudioPlayer.cpp` and `src/ship/audio/CoreAudioSession.{h,mm}` — use CoreAudio on iOS instead of the SDL player, and configure the process-wide `AVAudioSession`, without which the default SoloAmbient category leaves the RemoteIO unit running but silenced by the ring/silent switch. Interruptions, route loss and media services resets are all handled.
-* `AudioPlayer::DowngradeAudioChannels()` in `include/ship/audio/AudioPlayer.h` and `src/ship/audio/AudioPlayer.cpp` — let a route that refuses surround fall back to stereo rather than being fed 6-channel audio.
-* `include/libultraship/libultra/message.h` — write `OSMesg`'s integer constructors at full pointer width. Initialising a narrow member leaves the rest of the union holding whatever was on the stack, and receivers that tell an event from a task pointer by testing the whole pointer then dereference the garbage.
+* Landscape only, full screen, at the display's native pixel resolution.
+* Any MFi / Bluetooth controller SDL2 recognises works. Pair it in iOS Settings first; the on-screen pad hides itself while one is connected.
+* The on-screen controls are configured in *Settings > Controls*, under **On-Screen Controls**: size, reach, opacity, edge margin, a left-handed layout, the phone/tablet layout and an optional D-pad. The **MENU** button at the top of the screen opens the port menu, which is otherwise bound to Escape.
+* Mods work as on desktop — drop `.o2r`/`.otr` files into `Lighthouse/mods` via the Files app. Applying a mod list needs the app to be closed and reopened, since iOS apps can't relaunch themselves.
+* Networking (Anchor multiplayer) is off, SDL2_net isn't part of the iOS dependency set.
 
 # Compatible Roms
 Any retail version. See [the readme](https://github.com/HarbourMasters/Lighthouse/blob/develop/README.md#1-verify-your-rom-dump)
