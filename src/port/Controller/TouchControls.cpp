@@ -486,7 +486,10 @@ void BuildLayout(const LayoutKey& key) {
     // further inboard again rather than stacked straight up over A, which is both the direction a
     // thumb extends worst and the one a landscape screen has least of. The C diamond is wider than
     // it is tall for the same reason.
-    const Vec2 rightPivot = { right, bottom };
+    // A thumb curls from the corner of the screen, which is below the margin the controls are
+    // kept off it by. Measured from the margin instead, both groups sit a button too high.
+    const float pivotDrop = sz(kARadiusMm);
+    const Vec2 rightPivot = { right, bottom + pivotDrop };
     const Vec2 a = Arc(rightPivot, -1.0f, arc(22.5f), 44.0f);
     AddButton(l, CTRL_A, a, sz(kARadiusMm), BTN_A, "A");
     AddButton(l, CTRL_B, { a.x - sz(15.0f), a.y - sz(1.5f) }, sz(5.8f), BTN_B, "B");
@@ -522,7 +525,7 @@ void BuildLayout(const LayoutKey& key) {
 
     // Left thumb. The stick floats to wherever a finger lands in its zone, so stickHome is only
     // where the ring rests while nobody is holding it.
-    const Vec2 leftPivot = { left, bottom };
+    const Vec2 leftPivot = { left, bottom + pivotDrop };
     l.stickBase = sz(10.5f);
     l.stickKnob = sz(5.0f);
     l.stickHome = Arc(leftPivot, 1.0f, arc(26.0f), 52.0f);
