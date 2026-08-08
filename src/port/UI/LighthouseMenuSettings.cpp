@@ -297,7 +297,7 @@ void LighthouseMenu::AddMenuSettings() {
         .Options(ComboboxOptions()
                      .ComboMap(imguiScaleOptions)
                      .Tooltip("Changes the scaling of the ImGui menu elements.")
-                     .DefaultIndex(defaultImGuiScaleIndex)
+                     .DefaultIndex(DefaultImGuiScaleIndex())
                      .ComponentAlignment(ComponentAlignments::Right)
                      .LabelPosition(LabelPositions::Far));
     //.Callback([](WidgetInfo& info) { GameEngine::Instance->ScaleImGui(); });

@@ -61,12 +61,24 @@
 
 const float imguiScaleOptionToValue[4] = { 0.75f, 1.0f, 1.5f, 2.0f };
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
+
+uint32_t DefaultImGuiScaleIndex() {
 #ifdef __IOS__
-// Phone-sized screens need larger text and touch targets than the desktop default.
-const uint32_t defaultImGuiScaleIndex = 2;
+    // A tablet takes the larger menu; a phone has too little screen to navigate it. The window
+    // is measured in points, and no iPhone reaches 600 on its short side while every iPad does.
+    static const uint32_t index = []() {
+        auto window = Ship::Context::GetRawInstance()->GetWindow();
+        if (window == nullptr) {
+            return 0u;
+        }
+        return std::min(window->GetWidth(), window->GetHeight()) >= 600 ? 2u : 0u;
+    }();
+    return index;
 #else
-const uint32_t defaultImGuiScaleIndex = 1;
+    return 1;
 #endif
+}
+
 int32_t previousImGuiScaleIndex = -1;
 // Tracks the scale already baked into the ImGui style, which always starts unscaled.
 float previousImGuiScale = 1.0f;
@@ -1059,7 +1071,7 @@ ImFont* GameEngine::CreateFontWithSize(float size, std::string fontPath) {
 }
 
 void GameEngine::ScaleImGui() {
-    int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", defaultImGuiScaleIndex);
+    int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", DefaultImGuiScaleIndex());
     if (imGuiScaleIndex == previousImGuiScaleIndex) {
         return;
     }
