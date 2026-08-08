@@ -91,9 +91,8 @@ enum PadControl {
 constexpr float kPillSlopX = 1.15f;
 constexpr float kPillSlopY = 1.35f;
 constexpr float kCircleSlop = 1.2f;
-// Four buttons in a diamond have to be drawn small to fit, so they carry more slop than the rest:
-// the drawn disc is a target to aim at, not the edge of what registers. The gaps between them stay
-// dead on purpose -- a touch that misses an item slot should do nothing rather than the wrong one.
+// Four buttons in a diamond have to be drawn small to fit, so the drawn disc is a target to aim
+// at rather than the edge of what registers; ClassifyTouch settles where two of them meet.
 constexpr float kClusterSlop = 1.55f;
 constexpr float kMenuSlopX = 1.2f;
 constexpr float kMenuSlopY = 1.4f;
@@ -343,7 +342,7 @@ void MirrorLayout(Layout& l) {
 // how large the pad is allowed to get, so they are named rather than written out twice.
 constexpr float kARadiusMm = 6.5f;
 constexpr float kACGapMm = 20.0f;
-constexpr float kCOffYMm = 7.0f;
+constexpr float kCOffYMm = 6.0f;
 constexpr float kCRadiusMm = 3.8f;
 constexpr float kZPillHalfYMm = 4.7f;
 constexpr float kRailGapMm = 2.0f;
@@ -453,13 +452,13 @@ void BuildLayout(const LayoutKey& key) {
     AddButton(l, CTRL_A, a, sz(kARadiusMm), BTN_A, "A");
     AddButton(l, CTRL_B, { a.x - sz(15.0f), a.y - sz(1.5f) }, sz(5.8f), BTN_B, "B");
 
-    const Vec2 c = { a.x - sz(19.0f), a.y - sz(kACGapMm) };
-    const Vec2 cOff = { sz(10.0f), sz(kCOffYMm) };
+    const Vec2 c = { a.x - sz(14.0f), a.y - sz(kACGapMm) };
+    const Vec2 cOff = { sz(8.5f), sz(kCOffYMm) };
     const float cRad = sz(kCRadiusMm);
-    AddButton(l, CTRL_CUP, { c.x, c.y - cOff.y }, cRad, BTN_CUP, "C");
-    AddButton(l, CTRL_CDOWN, { c.x, c.y + cOff.y }, cRad, BTN_CDOWN, "C");
-    AddButton(l, CTRL_CLEFT, { c.x - cOff.x, c.y }, cRad, BTN_CLEFT, "C");
-    AddButton(l, CTRL_CRIGHT, { c.x + cOff.x, c.y }, cRad, BTN_CRIGHT, "C");
+    AddButton(l, CTRL_CUP, { c.x, c.y - cOff.y }, cRad, BTN_CUP, "");
+    AddButton(l, CTRL_CDOWN, { c.x, c.y + cOff.y }, cRad, BTN_CDOWN, "");
+    AddButton(l, CTRL_CLEFT, { c.x - cOff.x, c.y }, cRad, BTN_CLEFT, "");
+    AddButton(l, CTRL_CRIGHT, { c.x + cOff.x, c.y }, cRad, BTN_CRIGHT, "");
     for (int i = CTRL_CUP; i <= CTRL_CRIGHT; i++) {
         l.buttons[i].slop = kClusterSlop;
     }
@@ -784,6 +783,22 @@ void DrawLabel(ImDrawList* dl, const char* text, ImVec2 center, float size) {
     dl->AddText(font, size, ImVec2(center.x - extent.x * 0.5f, center.y - extent.y * 0.5f),
                 ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.9f)), text);
 }
+
+// Points a triangle outward, wound clockwise in screen space as ImGui's fill needs.
+void DrawArrow(ImDrawList* dl, ImVec2 center, float radius, Vec2 outward, ImU32 color) {
+    const float len = std::sqrt(outward.x * outward.x + outward.y * outward.y);
+    if (len <= 0.0f) {
+        return;
+    }
+    const Vec2 f = { outward.x / len, outward.y / len };
+    const Vec2 side = { -f.y, f.x };
+    const float tip = radius * 0.6f;
+    const float back = radius * 0.32f;
+    const float half = radius * 0.44f;
+    dl->AddTriangleFilled(ImVec2(center.x + f.x * tip, center.y + f.y * tip),
+                          ImVec2(center.x - f.x * back + side.x * half, center.y - f.y * back + side.y * half),
+                          ImVec2(center.x - f.x * back - side.x * half, center.y - f.y * back - side.y * half), color);
+}
 } // namespace
 
 void TouchControls_Draw() {
@@ -831,6 +846,10 @@ void TouchControls_Draw() {
         return;
     }
 
+    // The C cluster is labelled as it is on the controller: an arrow per button, C in the middle.
+    const Vec2 cCenter = { (sLayout.buttons[CTRL_CLEFT].center.x + sLayout.buttons[CTRL_CRIGHT].center.x) * 0.5f,
+                           (sLayout.buttons[CTRL_CUP].center.y + sLayout.buttons[CTRL_CDOWN].center.y) * 0.5f };
+
     for (int i = 0; i < CTRL_COUNT; i++) {
         const Button& b = sLayout.buttons[i];
         if (!b.enabled) {
@@ -849,9 +868,15 @@ void TouchControls_Draw() {
             dl->AddCircleFilled(c, r, Shade(alpha * 0.55f, pressed), 32);
             dl->AddCircle(c, r, Shade(alpha, pressed), 32, h * 0.004f);
         }
-        // Pill labels are multi-character, so size them off the pill's height, not its width.
-        DrawLabel(dl, b.label, px(b.center), (b.pill ? b.halfExtent.y * 1.1f : b.radius * 0.9f) * h);
+        if (i >= CTRL_CUP && i <= CTRL_CRIGHT) {
+            DrawArrow(dl, px(b.center), b.radius * h, { b.center.x - cCenter.x, b.center.y - cCenter.y },
+                      Shade(std::min(alpha * 1.7f, 0.95f), pressed));
+        } else {
+            // Pill labels are multi-character, so size them off the pill's height, not its width.
+            DrawLabel(dl, b.label, px(b.center), (b.pill ? b.halfExtent.y * 1.1f : b.radius * 0.9f) * h);
+        }
     }
+    DrawLabel(dl, "C", px(cCenter), sLayout.buttons[CTRL_CUP].radius * 1.25f * h);
 
     // Stick: base ring plus knob. Idle it sits at its home position as a target.
     const ImVec2 base = px(sState.stickBase);
