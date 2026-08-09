@@ -353,8 +353,14 @@ bool GameExtractor::GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<siz
     }
 
     sPhase = 1; // Parsing phase
+
+    const fs::path stagingDir = fs::path(game_path) / ".extracting";
+    std::error_code stagingEc;
+    fs::remove_all(stagingDir, stagingEc);
+
     delete Companion::Instance;
-    Companion::Instance = new Companion(this->mGameData, ArchiveType::O2R, false, assets_path, game_path);
+    Companion::Instance =
+        new Companion(this->mGameData, ArchiveType::O2R, false, assets_path, stagingDir.generic_string());
     Companion::Instance->SetRomPath(this->mGamePath);
     Companion::Instance->SetAssetTotal(&totalAssets);
     Companion::Instance->SetPhaseCallback([](int phase) { sPhase = phase; });
@@ -371,17 +377,36 @@ bool GameExtractor::GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<siz
         sPhase = 0;
         delete Companion::Instance;
         Companion::Instance = nullptr;
+        fs::remove_all(stagingDir, stagingEc);
         return false;
     }
 
-    // Record the produced archive path before tearing Companion down, so the
-    // inline Mod Menu flow can enable exactly this file by name.
-    sLastOutputPath = Companion::Instance->GetOutputPath();
+    const fs::path produced = Companion::Instance->GetOutputPath();
 
     sPhase = 3;
     sStatusText = "Cleaning up...";
     delete Companion::Instance;
     Companion::Instance = nullptr;
+
+    const fs::path finalPath = fs::path(game_path) / produced.filename();
+    std::error_code moveEc;
+    fs::rename(produced, finalPath, moveEc);
+    if (moveEc) {
+        SPDLOG_ERROR("Failed to move \"{}\" onto \"{}\": {}", produced.string(), finalPath.string(), moveEc.message());
+        sLastError = "Could not move the extracted archive into place: " + moveEc.message();
+        fs::remove_all(stagingDir, stagingEc);
+        sStatusText.clear();
+        sPhase = 0;
+        return false;
+    }
+    sLastOutputPath = finalPath.generic_string();
+
+    const fs::path hashFile = stagingDir / "torch.hash.yml";
+    if (fs::exists(hashFile, stagingEc)) {
+        fs::rename(hashFile, fs::path(game_path) / "torch.hash.yml", stagingEc);
+    }
+    fs::remove_all(stagingDir, stagingEc);
+
     sStatusText.clear();
     sPhase = 0;
     return true;
