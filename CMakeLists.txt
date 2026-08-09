@@ -826,6 +826,13 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     # The empty toolchain file is insurance: this CMake doesn't forward it, but the
     # explicit -D takes precedence in versions that do.
     list(APPEND TORCH_HOST_ARGS -DCMAKE_TOOLCHAIN_FILE= -DCMAKE_OSX_SYSROOT=macosx)
+    # The sysroot alone is not enough. CMAKE_OSX_DEPLOYMENT_TARGET is empty by default, which
+    # emits no -mmacosx-version-min, and clang then takes its platform from the
+    # IPHONEOS_DEPLOYMENT_TARGET that xcodebuild also exports -- so the packer compiles for iOS
+    # against the macOS SDK and fails to link the host libraries. Name the host's own version.
+    execute_process(COMMAND sw_vers -productVersion
+        OUTPUT_VARIABLE TORCH_HOST_MACOS_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
+    list(APPEND TORCH_HOST_ARGS -DCMAKE_OSX_DEPLOYMENT_TARGET=${TORCH_HOST_MACOS_VERSION})
     set(TORCH_HOST_GENERATOR CMAKE_GENERATOR "Unix Makefiles")
     set(TORCH_MULTI_CONFIG FALSE)
 endif()
