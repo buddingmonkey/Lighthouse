@@ -61,7 +61,7 @@ static const std::unordered_map<int32_t, const char*> controlSchemeLabels = {
     { CONTROL_SCHEME_POCKET, "Pocket" },
 };
 
-#ifdef __IOS__
+#ifdef LIGHTHOUSE_TOUCH_CONTROLS
 static const std::unordered_map<int32_t, const char*> touchLayoutLabels = {
     { 0, "Automatic" },
     { 1, "Phone" },
@@ -149,6 +149,11 @@ void LighthouseMenu::AddMenuSettings() {
     filesFolderOptions.Disabled(true).DisabledTooltip(
         "Not available on iOS. Open the Files app and look under On My iPhone / On My iPad > Lighthouse "
         "to reach the same folder.");
+#elif defined(__ANDROID__)
+    // Android rejects a raw file:// Intent with FileUriExposedException, so the button can't do anything there.
+    filesFolderOptions.Disabled(true).DisabledTooltip(
+        "Not available on Android. Reach the same folder with a file manager, or over USB under "
+        "Android/data > Lighthouse.");
 #endif
     AddWidget(path, "Open App Files Folder", WIDGET_BUTTON)
         .RaceDisable(false)
@@ -526,7 +531,7 @@ void LighthouseMenu::AddMenuSettings() {
                                            "Off: tap R2 to toggle tip-toe on/off.\nOn: tip-toe only "
                                            "while R2 is held."));
 
-#ifdef __IOS__
+#ifdef LIGHTHOUSE_TOUCH_CONTROLS
     AddWidget(path, "On-Screen Controls", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Show On-Screen Controls", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_SETTING("TouchControls.Enabled"))
@@ -577,8 +582,8 @@ void LighthouseMenu::AddMenuSettings() {
         .CVar(CVAR_SETTING("TouchControls.EdgeMargin"))
         .RaceDisable(false)
         .Options(FloatSliderOptions().Min(0.0f).Max(10.0f).DefaultValue(3.0f).Format("%.1f mm").Tooltip(
-            "Clearance between the controls and the screen edge, for the notch and the home "
-            "indicator."));
+            "Clearance between the controls and the screen edge, for the cutout and the "
+            "gesture bar."));
     AddWidget(path, "Touch Stick Deadzone", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("TouchControls.Deadzone"))
         .RaceDisable(false)

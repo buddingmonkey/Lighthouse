@@ -37,16 +37,15 @@ std::map<std::string, std::filesystem::path> filePaths;
 static int dragSourceIndex = -1;
 static int dragTargetIndex = -1;
 
-// Mods only bind at process start. Desktop re-execs itself; iOS apps can't, so there the
-// user is asked to reopen from the Home Screen.
-#ifdef __IOS__
+// Mods only bind at process start. Desktop re-execs itself; mobile apps can't, so the user reopens the app.
+#ifdef LIGHTHOUSE_MOBILE
 static constexpr const char* kApplyRestartLabel = "Apply & Quit";
 static constexpr const char* kRestartButtonLabel = "Quit";
 static constexpr const char* kApplyRestartBody = "Applying mods requires a restart. Save the mod list and close "
-                                                 "Lighthouse now?\nReopen it from the Home Screen to finish.";
+                                                 "Lighthouse now?\nReopen it to finish.";
 static constexpr const char* kModInstalledBody = "The romhack mod was extracted into your mods folder.\n"
                                                  "Lighthouse needs to restart to load it.\n\n"
-                                                 "Close now, then reopen from the Home Screen?";
+                                                 "Close now, then reopen?";
 #else
 static constexpr const char* kApplyRestartLabel = "Apply & Restart";
 static constexpr const char* kRestartButtonLabel = "Restart";

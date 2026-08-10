@@ -51,10 +51,10 @@ std::atomic<bool> sGameThreadDone{ false };
 std::thread sGameThread;
 thread_local bool tIsGameThread = false;
 
-#ifdef __IOS__
+#ifdef LIGHTHOUSE_MOBILE
 // Whether the app is on screen. A frame rendered once it isn't never presents,
-// so the drawables it takes are never handed back to the layer; three of those
-// empty the pool and every later nextDrawable spends its full one second
+// so on iOS the drawables it takes are never handed back to the layer; three of
+// those empty the pool and every later nextDrawable spends its full one second
 // timeout before returning nothing. That state does not heal on its own -- with
 // no drawable there is nothing to present, and with nothing presented no
 // drawable is ever released -- and it leaves the game running at 1fps for the
@@ -82,7 +82,7 @@ int SDLCALL LifecycleWatch(void* userdata, SDL_Event* event) {
         case SDL_APP_TERMINATING:
             // The only state change the loop cannot be left to pick up: the process is gone
             // once this returns. A marker separates an OS termination from a crash in the log.
-            SPDLOG_WARN("[iOS] The system is terminating the app");
+            SPDLOG_WARN("[mobile] The system is terminating the app");
             if (const auto& logger = Ship::Context::GetRawInstance()->GetLogger()) {
                 logger->flush();
             }
@@ -150,10 +150,9 @@ bool OnGameThread() {
 }
 } // namespace
 
-// Only iOS takes the window away underneath a running render loop; everywhere
-// else this is always true and the callers compile out to nothing.
+// Only mobile takes the window away underneath a running render loop; everywhere else this is always true.
 extern "C" int port_appIsOnScreen(void) {
-#ifdef __IOS__
+#ifdef LIGHTHOUSE_MOBILE
     return sAppOnScreen.load(std::memory_order_acquire) ? 1 : 0;
 #else
     return 1;
@@ -163,7 +162,7 @@ extern "C" int port_appIsOnScreen(void) {
 // Called once the window exists, which is both the earliest SDL will accept a watch and
 // early enough to cover RunExtract's loop.
 extern "C" void port_installLifecycleWatch(void) {
-#ifdef __IOS__
+#ifdef LIGHTHOUSE_MOBILE
     static bool sInstalled = false;
     if (!sInstalled) {
         sInstalled = true;
@@ -349,9 +348,8 @@ void push_frame() {
     }
 }
 
-/* Rename SDL_main to main for SDL compatibility.
-   Not on iOS: there SDL2main supplies main() and calls SDL_main from the UIKit delegate. */
-#if defined(__GNUC__) && !defined(__IOS__)
+// Rename SDL_main to main for SDL compatibility. Not on mobile: there the platform entry point calls SDL_main.
+#if defined(__GNUC__) && !defined(LIGHTHOUSE_MOBILE)
 #define SDL_main main
 #endif
 
@@ -363,9 +361,8 @@ int SDL_main(int argc, char* argv[]) {
     // Anchor relative paths to the executable instead of cwd
     // when SHIP_HOME is not in use
     std::error_code ec;
-#ifdef __IOS__
-    // The bundle is read-only; anchor to Documents, which is where saves,
-    // bk.o2r and mods live.
+#ifdef LIGHTHOUSE_MOBILE
+    // The app package is read-only; anchor to the app directory, which is where saves, bk.o2r and mods live.
     std::filesystem::current_path(Ship::Context::GetAppDirectoryPath("bk"), ec);
 #else
     const char* shipHome = std::getenv("SHIP_HOME");
@@ -399,7 +396,7 @@ int SDL_main(int argc, char* argv[]) {
         }
         sGameThreadDone.store(true);
     });
-#ifdef __IOS__
+#ifdef LIGHTHOUSE_MOBILE
     // Held for as long as the app is off screen, since the tick thread parks on
     // its queues while nothing services the RCP.
     bool pausedOffScreen = false;
@@ -412,9 +409,9 @@ int SDL_main(int argc, char* argv[]) {
         Ship::Context::GetRawInstance()->GetWindow()->HandleEvents();
         TouchControls_Poll();
         OS_SiService();
-#ifdef __IOS__
+#ifdef LIGHTHOUSE_MOBILE
         if (sLowMemory.exchange(false, std::memory_order_acq_rel)) {
-            SPDLOG_WARN("[iOS] Memory warning; dropping the texture cache");
+            SPDLOG_WARN("[mobile] Memory warning; dropping the texture cache");
             gfx_texture_cache_clear();
         }
         const bool onScreen = sAppOnScreen.load(std::memory_order_acquire);

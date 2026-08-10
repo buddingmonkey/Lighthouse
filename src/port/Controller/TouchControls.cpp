@@ -4,7 +4,7 @@ void TouchControlsWindow::Draw() {
     Lighthouse::TouchControls_Draw();
 }
 
-#ifndef __IOS__
+#ifndef LIGHTHOUSE_TOUCH_CONTROLS
 
 extern "C" void TouchControls_Poll(void) {
 }
@@ -242,15 +242,42 @@ void AddPill(Layout& l, PadControl id, Vec2 center, Vec2 half, uint16_t mask, co
     b.enabled = true;
 }
 
-// iOS reports window sizes in points, and a point is a fixed physical size. Apple quotes the two
-// densities in inches -- 163 per inch on every iPhone and on the iPad mini, 132 per inch on the
-// other iPads -- so they are converted here and nothing past this point deals in inches.
+// The layout works in whatever unit the platform sizes its windows in, so all it needs is how
+// many of those cover a millimetre; nothing past this point deals in inches.
 constexpr float kMmPerInch = 25.4f;
+
+#ifdef __ANDROID__
+// Android sizes its windows in pixels, so the plausible band is a screen density rather than
+// Apple's fixed point size, and a tablet is told apart by physical width instead of a unit count.
+constexpr float kMinPlausiblePpi = 200.0f;
+constexpr float kMaxPlausiblePpi = 900.0f;
+constexpr float kNominalPhonePpi = 400.0f;
+constexpr float kNominalTabletPpi = 260.0f;
+constexpr float kTabletMinShortSideMm = 100.0f;
+#else
+// Apple quotes the two densities in inches: 163 on every iPhone and on the iPad mini, 132 on the
+// other iPads. Every landscape iPhone is at most 440 points tall and every iPad at least 744.
+constexpr float kMinPlausiblePpi = 110.0f;
+constexpr float kMaxPlausiblePpi = 200.0f;
 constexpr float kPhonePointsPerMm = 163.0f / kMmPerInch;
 constexpr float kTabletPointsPerMm = 132.0f / kMmPerInch;
-// Every landscape iPhone is at most 440 points tall and every iPad at least 744, so the threshold
-// has room either side of it.
 constexpr float kTabletMinPointHeight = 600.0f;
+#endif
+
+// Window units per millimetre as the display reports them, or zero when the figure is not usable.
+float MeasuredUnitsPerMm() {
+    float ddpi = 0.0f;
+    float hdpi = 0.0f;
+    float vdpi = 0.0f;
+    if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) != 0) {
+        return 0.0f;
+    }
+    const float ppi = vdpi / std::max(ImGui::GetIO().DisplayFramebufferScale.y, 1.0f);
+    if (ppi < kMinPlausiblePpi || ppi > kMaxPlausiblePpi) {
+        return 0.0f;
+    }
+    return ppi / kMmPerInch;
+}
 
 DeviceClass DeviceClassFor(float pointHeight, int setting) {
     switch (setting) {
@@ -259,25 +286,27 @@ DeviceClass DeviceClassFor(float pointHeight, int setting) {
         case 2:
             return DEVICE_TABLET;
         default:
-            return pointHeight >= kTabletMinPointHeight ? DEVICE_TABLET : DEVICE_PHONE;
+            break;
     }
+#ifdef __ANDROID__
+    const float unitsPerMm = MeasuredUnitsPerMm();
+    return unitsPerMm > 0.0f && pointHeight / unitsPerMm >= kTabletMinShortSideMm ? DEVICE_TABLET : DEVICE_PHONE;
+#else
+    return pointHeight >= kTabletMinPointHeight ? DEVICE_TABLET : DEVICE_PHONE;
+#endif
 }
 
-// SDL knows the real figure on most devices, which is what separates an iPad mini from the iPads
-// it shares a point count with. The per-class nominal covers the rest, and the size slider absorbs
-// whatever that gets wrong. SDL reports dots per inch because that is the unit the platform hands
-// it, so the sanity check is in those terms and the conversion happens on the way out.
+// The per-class nominal covers devices SDL has no usable figure for; the size slider absorbs the rest.
 float PointsPerMm(DeviceClass device) {
-    float ddpi = 0.0f;
-    float hdpi = 0.0f;
-    float vdpi = 0.0f;
-    if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) == 0) {
-        const float ppi = vdpi / std::max(ImGui::GetIO().DisplayFramebufferScale.y, 1.0f);
-        if (ppi >= 110.0f && ppi <= 200.0f) {
-            return ppi / kMmPerInch;
-        }
+    const float measured = MeasuredUnitsPerMm();
+    if (measured > 0.0f) {
+        return measured;
     }
+#ifdef __ANDROID__
+    return (device == DEVICE_TABLET ? kNominalTabletPpi : kNominalPhonePpi) / kMmPerInch;
+#else
     return device == DEVICE_TABLET ? kTabletPointsPerMm : kPhonePointsPerMm;
+#endif
 }
 
 // Maps a finger's offset from the stick's base onto the N64's range. Direction comes from the
@@ -997,4 +1026,4 @@ void TouchControls_Draw() {
 
 } // namespace Lighthouse
 
-#endif // __IOS__
+#endif // LIGHTHOUSE_TOUCH_CONTROLS

@@ -63,15 +63,24 @@ const float imguiScaleOptionToValue[4] = { 0.75f, 1.0f, 1.5f, 2.0f };
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
 
 uint32_t DefaultImGuiScaleIndex() {
-#ifdef __IOS__
-    // A tablet takes the larger menu; a phone has too little screen to navigate it. The window
-    // is measured in points, and no iPhone reaches 600 on its short side while every iPad does.
+#ifdef LIGHTHOUSE_MOBILE
+    // A tablet takes the larger menu; a phone has too little screen to navigate it, so split at a 600 short side.
     static const uint32_t index = []() {
         auto window = Ship::Context::GetRawInstance()->GetWindow();
         if (window == nullptr) {
             return 0u;
         }
-        return std::min(window->GetWidth(), window->GetHeight()) >= 600 ? 2u : 0u;
+        float shortSide = static_cast<float>(std::min(window->GetWidth(), window->GetHeight()));
+#ifdef __ANDROID__
+        // Android measures windows in pixels, and 600 is a count of density-independent ones.
+        float ddpi = 0.0f;
+        float hdpi = 0.0f;
+        float vdpi = 0.0f;
+        if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) == 0 && vdpi > 0.0f) {
+            shortSide = shortSide * 160.0f / vdpi;
+        }
+#endif
+        return shortSide >= 600.0f ? 2u : 0u;
     }();
     return index;
 #else
@@ -157,11 +166,13 @@ bool VerifyArchiveVersion(OTRVersion version) {
 }
 
 GameEngine::GameEngine() {
+#ifdef LIGHTHOUSE_MOBILE
+    // Otherwise the accelerometer appears as a phantom joystick in the device list.
+    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+#endif
 #ifdef __IOS__
     // Play through the ring/silent switch like other games do.
     SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "playback");
-    // Otherwise the accelerometer appears as a phantom joystick in the device list.
-    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
     // Hides the home indicator and defers the edge swipes that would otherwise reach the
     // touch controls sitting along the bottom of the screen.
     SDL_SetHint(SDL_HINT_IOS_HIDE_HOME_INDICATOR, "2");
@@ -1212,8 +1223,8 @@ void GameEngine::RelaunchIfRequested(int argc, char* argv[]) {
             SPDLOG_ERROR("Relaunch failed: CreateProcess error {}", GetLastError());
         }
     }
-#elif defined(__IOS__)
-    // exec is unavailable to sandboxed apps; the user relaunches from the home screen.
+#elif defined(LIGHTHOUSE_MOBILE)
+    // exec is unavailable to sandboxed apps; the user relaunches the app themselves.
     (void)argc;
     (void)argv;
 #elif defined(__linux__) || defined(__APPLE__)
