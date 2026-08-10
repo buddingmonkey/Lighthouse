@@ -222,7 +222,7 @@ void GameplayTools_ObjectSpawner() {
 
         ImGui::Text("Pos X: ");
         ImGui::TableNextColumn();
-        ImGui::Text(std::to_string(playerPosition[0]).c_str());
+        ImGui::TextUnformatted(std::to_string(playerPosition[0]).c_str());
         ImGui::TableNextColumn();
         if (UIWidgets::SliderInt("##offsetX", &spawnOffset[0],
                                  UIWidgets::IntSliderOptions()
@@ -238,7 +238,7 @@ void GameplayTools_ObjectSpawner() {
 
         ImGui::Text("Pos Y: ");
         ImGui::TableNextColumn();
-        ImGui::Text(std::to_string(playerPosition[1]).c_str());
+        ImGui::TextUnformatted(std::to_string(playerPosition[1]).c_str());
         ImGui::TableNextColumn();
         if (UIWidgets::SliderInt("##offsetY", &spawnOffset[1],
                                  UIWidgets::IntSliderOptions()
@@ -254,7 +254,7 @@ void GameplayTools_ObjectSpawner() {
 
         ImGui::Text("Pos Z: ");
         ImGui::TableNextColumn();
-        ImGui::Text(std::to_string(playerPosition[2]).c_str());
+        ImGui::TextUnformatted(std::to_string(playerPosition[2]).c_str());
         ImGui::TableNextColumn();
         if (UIWidgets::SliderInt("##offsetZ", &spawnOffset[2],
                                  UIWidgets::IntSliderOptions()
@@ -485,7 +485,7 @@ void DrawMonitoringTools() {
                     }
 
                     ImGui::TableNextColumn();
-                    ImGui::Text(flagData.flagName);
+                    ImGui::TextUnformatted(flagData.flagName);
                     ImGui::TableNextColumn();
                     ImGui::PopID();
                 }
