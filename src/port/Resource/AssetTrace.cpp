@@ -17,7 +17,8 @@
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
 #elif defined(__has_include)
-#if __has_include(<execinfo.h>)
+// Bionic ships the header but only declares backtrace() from API 33.
+#if __has_include(<execinfo.h>) && (!defined(__ANDROID__) || __ANDROID_API__ >= 33)
 #define LH_HAVE_EXECINFO 1
 #include <execinfo.h>
 #include <csignal>
