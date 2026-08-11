@@ -20,6 +20,7 @@
 
 #include "Controller/TouchControls.h"
 #include "DevTools/ThreadWatchdog.h"
+#include "FilePicker.h"
 #include "GameStatus.h"
 #include "Interpolation/FrameInterpolation.h"
 #include "Nametag/Nametag.h"
@@ -407,6 +408,7 @@ int SDL_main(int argc, char* argv[]) {
         // Pump events every iteration: a task-starved pass must not starve
         // input and window messages.
         Ship::Context::GetRawInstance()->GetWindow()->HandleEvents();
+        Lighthouse::PumpFilePicker();
         TouchControls_Poll();
         OS_SiService();
 #ifdef LIGHTHOUSE_MOBILE

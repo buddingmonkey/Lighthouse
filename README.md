@@ -55,7 +55,7 @@ Your ROM needs to be in .z64 format. If it's in .n64 format, use the following t
 
 #### Android
 * Build the APK with Gradle and sideload it. See the [building instructions](https://github.com/HarbourMasters/Lighthouse/blob/main/docs/BUILDING.md#android).
-* Copy your compatible ROM onto the device, then launch the app and pick it in the file picker that opens.
+* Copy your compatible ROM onto the device, then launch the app and pick it in the file picker it opens.
 
 # Configuration
 

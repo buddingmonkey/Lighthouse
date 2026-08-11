@@ -312,7 +312,7 @@ _Note: with no keystore given the release APK is signed with the debug key, whic
 
 ### Getting the game onto a device
 1. Copy a supported Banjo-Kazooie ROM (`.z64`) onto the device, anywhere you like — Downloads is fine.
-2. Install and launch the app. The first launch opens the system file picker; choose the ROM.
+2. Install and launch the app. It asks for a ROM and opens the system file picker; choose the ROM.
 3. Let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
 
 _Note: the app keeps its data in `Android/data/<applicationId>/files`, which Android 11 closed to the Files app, to USB, and to the file picker alike. That is why the ROM is imported through the picker rather than copied in by hand, and it is also why saves and mods are not reachable from the device itself; use `adb` for those._

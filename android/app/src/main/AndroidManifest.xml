@@ -17,23 +17,18 @@
         android:theme="@style/LighthouseTheme">
 
         <activity
-            android:name=".RomSetupActivity"
+            android:name=".LighthouseActivity"
+            android:alwaysRetainTaskState="true"
+            android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:exported="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            android:launchMode="singleInstance"
+            android:preferMinimalPostProcessing="true"
+            android:screenOrientation="sensorLandscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <activity
-            android:name=".LighthouseActivity"
-            android:alwaysRetainTaskState="true"
-            android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
-            android:exported="false"
-            android:launchMode="singleInstance"
-            android:preferMinimalPostProcessing="true"
-            android:screenOrientation="sensorLandscape" />
 
     </application>
 
