@@ -15,12 +15,18 @@
 namespace fs = std::filesystem;
 
 int16_t selectedFileNum = DEFAULT_FILE_NUM;
-const fs::path randomizerFolderPath(Ship::Context::GetPathRelativeToAppDirectory("randomizer", "bk64"));
+
+// Resolved on first use: the app directory comes from the platform at runtime, and on Android
+// that is SDL's JNI bridge, which does not exist yet while static initialisers run.
+static const fs::path& RandomizerFolderPath() {
+    static const fs::path path(Ship::Context::GetPathRelativeToAppDirectory("randomizer", "bk64"));
+    return path;
+}
 
 // Entry point for the module, run once on game boot
 void Rando::Init() {
-    if (!fs::exists(randomizerFolderPath)) {
-        fs::create_directory(randomizerFolderPath);
+    if (!fs::exists(RandomizerFolderPath())) {
+        fs::create_directory(RandomizerFolderPath());
     }
 
     Rando::Spoiler::RefreshSpoilerLogs();
