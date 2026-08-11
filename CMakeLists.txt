@@ -171,8 +171,8 @@ endif()
 
 # Set game compilation version
 set(VERSION us)
-# SDL2_net isn't part of the iOS dependency set, and Anchor multiplayer is desktop-only.
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+# SDL2_net isn't part of the mobile dependency sets, and Anchor multiplayer is desktop-only.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "Android")
     set(USE_NETWORKING_DEFAULT OFF)
 else()
     set(USE_NETWORKING_DEFAULT ON)
@@ -196,7 +196,8 @@ add_compile_definitions(
 )
 
 # Find necessary libraries
-if (UNIX AND NOT APPLE)
+# Android is UNIX and not APPLE, but it has no desktop GL: libultraship links GLESv3 there.
+if (UNIX AND NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
     find_package(OpenGL REQUIRED)
 endif()
 
@@ -242,7 +243,7 @@ file(GLOB_RECURSE ALL_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
 
 list(FILTER ALL_FILES EXCLUDE REGEX "src/unused/")
 
-if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
     list(APPEND ALL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resource.rc)
 endif()
 
@@ -299,6 +300,10 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     )
     message(STATUS "Xcode scheme '${PROJECT_NAME}' runs the ${IOS_SCHEME_CONFIGURATION} "
                    "configuration (set IOS_SCHEME_CONFIGURATION to change)")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # SDLActivity loads libmain.so and calls SDL_main in it; there is no executable.
+    add_library(${PROJECT_NAME} SHARED ${ALL_FILES})
+    set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME main)
 else()
     add_executable(${PROJECT_NAME} ${ALL_FILES})
 endif()
@@ -494,6 +499,13 @@ endif()
 if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     # libultraship defines __IOS__ only for its own target; the game needs it too.
     target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_IOS=1 __IOS__)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Android")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_ANDROID=1)
+endif()
+
+# Shared by every touchscreen handheld: app lifecycle, read-only bundle, no self-relaunch.
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "Android")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE LIGHTHOUSE_MOBILE=1 LIGHTHOUSE_TOUCH_CONTROLS=1)
 endif()
 
 if(USE_NETWORKING)
@@ -547,6 +559,9 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         find_library(IOS_FW_${framework} ${framework} REQUIRED)
         list(APPEND ADDITIONAL_LIBRARY_DEPENDENCIES ${IOS_FW_${framework}})
     endforeach()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # Ogg/Vorbis are unreferenced here too, so Android skips them as iOS does.
+    set(ADDITIONAL_LIBRARY_DEPENDENCIES log android EGL GLESv3)
 else()
     find_package(Ogg REQUIRED)
     find_package(Vorbis REQUIRED)
@@ -766,7 +781,8 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
           >
       )
   else()
-      if(NOT DEFINED CPU_OPTION)
+      # -mcpu=native describes the build machine, so it is wrong for a cross-compile.
+      if(NOT DEFINED CPU_OPTION AND NOT CMAKE_CROSSCOMPILING)
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
           set(CPU_OPTION -msse2 -mfpmath=sse)
         elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
@@ -833,6 +849,11 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     execute_process(COMMAND sw_vers -productVersion
         OUTPUT_VARIABLE TORCH_HOST_MACOS_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
     list(APPEND TORCH_HOST_ARGS -DCMAKE_OSX_DEPLOYMENT_TARGET=${TORCH_HOST_MACOS_VERSION})
+    set(TORCH_HOST_GENERATOR CMAKE_GENERATOR "Unix Makefiles")
+    set(TORCH_MULTI_CONFIG FALSE)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # Same insurance as iOS, against the NDK toolchain and the ANDROID_* Gradle passes with it.
+    list(APPEND TORCH_HOST_ARGS -DCMAKE_TOOLCHAIN_FILE= -DANDROID_ABI= -DANDROID_PLATFORM=)
     set(TORCH_HOST_GENERATOR CMAKE_GENERATOR "Unix Makefiles")
     set(TORCH_MULTI_CONFIG FALSE)
 endif()
