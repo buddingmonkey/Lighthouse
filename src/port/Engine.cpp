@@ -88,6 +88,25 @@ uint32_t DefaultImGuiScaleIndex() {
 #endif
 }
 
+// ImGui works in window units, and Android counts those in pixels where iOS counts points, so
+// the same menu comes out several times smaller there. Density brings the two back together.
+float ImGuiDensityScale() {
+#ifdef __ANDROID__
+    static const float density = []() {
+        float ddpi = 0.0f;
+        float hdpi = 0.0f;
+        float vdpi = 0.0f;
+        if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) == 0 && vdpi > 0.0f) {
+            return std::max(1.0f, vdpi / 160.0f);
+        }
+        return 1.0f;
+    }();
+    return density;
+#else
+    return 1.0f;
+#endif
+}
+
 int32_t previousImGuiScaleIndex = -1;
 // Tracks the scale already baked into the ImGui style, which always starts unscaled.
 float previousImGuiScale = 1.0f;
@@ -169,6 +188,10 @@ GameEngine::GameEngine() {
 #ifdef LIGHTHOUSE_MOBILE
     // Otherwise the accelerometer appears as a phantom joystick in the device list.
     SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+    // SDL sets the Android activity's orientation itself when it makes the window, and a
+    // resizable window with no hint becomes FULL_USER, which allows the portrait the
+    // manifest excludes.
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
 #ifdef __IOS__
     // Play through the ring/silent switch like other games do.
@@ -1087,7 +1110,7 @@ void GameEngine::ScaleImGui() {
         return;
     }
 
-    float scale = imguiScaleOptionToValue[imGuiScaleIndex];
+    float scale = imguiScaleOptionToValue[imGuiScaleIndex] * ImGuiDensityScale();
     float newScale = scale / previousImGuiScale;
     ImGui::GetStyle().ScaleAllSizes(newScale);
     ImGui::GetIO().FontGlobalScale = scale;
