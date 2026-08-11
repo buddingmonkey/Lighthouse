@@ -151,8 +151,10 @@ androidComponents {
         val target = outputRoot.resolve("lighthouse-${variant.name}.apk")
         val publish = tasks.register("publish${suffix}Apk") {
             // Only the one file is declared: naming the directory would claim every other
-            // task's output under build-android/ as this one's.
+            // task's output under build-android/ as this one's. That leaves nothing for Gradle
+            // to compare, so the copy is unconditional rather than silently skipped as stale.
             outputs.file(target)
+            outputs.upToDateWhen { false }
             doLast {
                 val dir = apkDir.get().asFile
                 val apk = dir.listFiles { f: File -> f.extension == "apk" }?.firstOrNull()

@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Lighthouse</string>
+    <string name="rom_needed_title">Banjo-Kazooie ROM needed</string>
+    <string name="rom_needed_message">Lighthouse ships with no game assets. Choose a copy of Banjo-Kazooie in .z64 format and the game will extract what it needs. The file is copied into the app and stays on your device.</string>
+    <string name="rom_needed_choose">Choose ROM</string>
+    <string name="rom_import_failed">Could not read that file.</string>
+    <string name="rom_not_a_rom">That file is not a Banjo-Kazooie ROM.</string>
+    <string name="rom_wrong_format">That ROM is in .n64 or .v64 byte order. Convert it to .z64 first.</string>
 </resources>
