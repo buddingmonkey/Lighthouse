@@ -500,7 +500,8 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     # libultraship defines __IOS__ only for its own target; the game needs it too.
     target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_IOS=1 __IOS__)
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Android")
-    target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_ANDROID=1)
+    # The decompiled game code assumes a signed char; AArch64 Linux does not.
+    target_compile_options(${PROJECT_NAME} PRIVATE -fsigned-char)
 endif()
 
 # Shared by every touchscreen handheld: app lifecycle, read-only bundle, no self-relaunch.
@@ -702,10 +703,6 @@ if(MSVC)
 endif()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-    # The decompiled game code is written for a compiler with a signed char. AArch64 Linux,
-    # which covers Android and the Switch, makes char unsigned; x86, Windows and Apple do not.
-    target_compile_options(${PROJECT_NAME} PRIVATE -fsigned-char)
-
     if (CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
         target_compile_options(${PROJECT_NAME} PRIVATE
             -Wall -Wextra -Wno-error
