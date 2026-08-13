@@ -6,6 +6,7 @@
 
 #include <libultraship/libultraship.h>
 #include "port/Controller/TouchControls.h"
+#include "port/Controller/DebugPad.h"
 
 #include <atomic>
 #include <cstring>
@@ -65,6 +66,9 @@ extern "C" int OS_SiService(void) {
         // Merged here rather than through a mapping so it survives mapping reloads and
         // stays on the thread that polls SDL.
         TouchControls_MergeInto(&sLatch[0]);
+#ifdef __ANDROID__
+        DebugPad_MergeInto(&sLatch[0]);
+#endif
     }
     sLatchValid.store(true, std::memory_order_release);
     OS_SendEventMesg(OS_EVENT_SI);
