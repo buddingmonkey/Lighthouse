@@ -397,8 +397,7 @@ bool GameExtractor::GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<siz
     delete Companion::Instance;
     Companion::Instance = nullptr;
 
-    // Torch stops without an exception when it has no configuration for the ROM, and leaves the
-    // output path empty. Without this the move below reports "No such file or directory".
+    // Torch stops with no exception and an empty output path when it has no configuration for the ROM.
     if (produced.empty() || !fs::exists(produced, stagingEc)) {
         const std::string hash = Companion::CalculateHash(this->mGameData);
         SPDLOG_ERROR("The extractor made no archive for ROM {} ({})", this->mGamePath.string(), hash);
@@ -461,8 +460,7 @@ void GameExtractor::WritePortVersion() {
 }
 #endif
 
-// The header answers before the hash does: the extractor can only report a hash that it does not
-// know, which reads as "wrong game" instead of "wrong byte order" or "not a ROM".
+// The header answers before the hash does: an unknown hash reads as "wrong game", not "wrong byte order".
 static bool IsN64Rom(const std::vector<uint8_t>& rom) {
     static const uint8_t z64[] = { 0x80, 0x37, 0x12, 0x40 };
     return rom.size() >= 4 && std::equal(std::begin(z64), std::end(z64), rom.begin());

@@ -28,25 +28,13 @@ import org.libsdl.app.SDLActivity;
 
 /**
  * Unpacks the shipped read-only data before SDL starts the game, and serves the file picker.
- *
- * <p>APK assets are not files, and libultraship resolves both {@code GetAppBundlePath()} and
- * {@code GetAppDirectoryPath()} to the external files directory on Android, so there is no
- * read-only location for the engine to fall back to. Everything therefore has to be copied out
- * once, into the same directory that holds saves, mods and the user's own bk.o2r.
- *
- * <p>The same directory is closed to the Files app and to the Storage Access Framework since
- * Android 11, so a ROM cannot be put there by hand. The game asks for one through the system
- * picker instead, and the chosen document is copied in. See {@code src/port/FilePicker.cpp}.
- *
- * <p>It also owns the window: {@code SDLActivity.onCreate} calls {@code setWindowStyle(false)},
- * which undoes the fullscreen theme, and the game never makes the SDL window fullscreen, so SDL's
- * own immersive path never runs. What is left of the screen is reported to the touch controls.
+ * It also owns the window: it hides the system bars and reports the safe area to the game.
  */
 public class LighthouseActivity extends SDLActivity {
     private static final String TAG = "Lighthouse";
     private static final String STAMP = ".unpacked";
     private static final int REQUEST_PICK_FILE = 1;
-    /** The picked document is copied here, because the game reads paths and not content URIs. */
+    /** The picked document is copied here: the game reads paths, not content URIs. */
     private static final String IMPORT_DIR = "import";
     private static final String FALLBACK_IMPORT_NAME = "import.tmp";
 
@@ -89,7 +77,6 @@ public class LighthouseActivity extends SDLActivity {
         }
     }
 
-    /** Hides the status and navigation bars until the user swipes an edge. */
     private void goImmersive() {
         Window window = getWindow();
         // SDLActivity sets this to force the status bar on; it beats every other request.
@@ -109,10 +96,7 @@ public class LighthouseActivity extends SDLActivity {
         }
     }
 
-    /**
-     * Tells the game which edges it may not draw controls on, and asks the system not to read a
-     * back gesture where the on-screen pad is.
-     */
+    /** Tells the game which edges it may not draw on, and keeps the back gesture off the pad. */
     private void reportInsets(View view, WindowInsets insets) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             nativeSafeAreaInsets(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
@@ -124,8 +108,7 @@ public class LighthouseActivity extends SDLActivity {
             insets.getInsets(WindowInsets.Type.displayCutout() | WindowInsets.Type.systemBars());
         nativeSafeAreaInsets(reserved.left, reserved.top, reserved.right, reserved.bottom);
 
-        // The stick is swept from the bottom corner, which is where a back gesture starts. The
-        // system keeps 200 dp of each edge at most and drops the rest, nearest the bottom first.
+        // The system keeps at most 200 dp of each edge and drops the rest, nearest the bottom first.
         if (view.getWidth() <= 0 || view.getHeight() <= 0) {
             return;
         }
@@ -145,8 +128,7 @@ public class LighthouseActivity extends SDLActivity {
     /** Called from the game thread. The answer goes back through {@link #nativeFilePicked}. */
     public void openFilePicker() {
         runOnUiThread(() -> {
-            // No MIME type is registered for .z64, and filtering on a guess would leave the ROM
-            // unselectable wherever a provider reports something else.
+            // No MIME type exists for .z64, and a guess would make the ROM unselectable.
             Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             pick.addCategory(Intent.CATEGORY_OPENABLE);
             pick.setType("*/*");
@@ -174,10 +156,9 @@ public class LighthouseActivity extends SDLActivity {
         new Thread(() -> nativeFilePicked(importDocument(source)), "FileImport").start();
     }
 
-    /** Copies a picked document into the app directory; null when it could not be read. */
+    /** Returns the path of the copy, or null when the document could not be read. */
     private String importDocument(Uri source) {
-        // Its own directory, emptied first: the game names the file it works on, and one import
-        // is never worth keeping once the next one is made.
+        // Its own directory, emptied first: an import is never worth keeping after the next one.
         File files = getExternalFilesDir(null);
         if (files == null) {
             Log.e(TAG, "No external files directory to import into");
@@ -275,7 +256,6 @@ public class LighthouseActivity extends SDLActivity {
         }
     }
 
-    /** Copies one asset, or every asset below it when the path names a directory. */
     private void copyAsset(AssetManager assets, String path, File target) throws IOException {
         String[] children = assets.list(path);
         if (children != null && children.length > 0) {

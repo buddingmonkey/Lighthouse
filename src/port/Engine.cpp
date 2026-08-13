@@ -89,8 +89,7 @@ uint32_t DefaultImGuiScaleIndex() {
 #endif
 }
 
-// ImGui works in window units, and Android counts those in pixels where iOS counts points, so
-// the same menu comes out several times smaller there. Density brings the two back together.
+// Android counts window units in pixels where iOS counts points, so the menu comes out much smaller there.
 float ImGuiDensityScale() {
 #ifdef __ANDROID__
     static const float density = []() {
@@ -189,9 +188,7 @@ GameEngine::GameEngine() {
 #ifdef LIGHTHOUSE_MOBILE
     // Otherwise the accelerometer appears as a phantom joystick in the device list.
     SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
-    // SDL sets the Android activity's orientation itself when it makes the window, and a
-    // resizable window with no hint becomes FULL_USER, which allows the portrait the
-    // manifest excludes.
+    // Without this hint SDL sets the Android activity to FULL_USER, which allows the portrait the manifest excludes.
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
 #ifdef __IOS__

@@ -64,8 +64,7 @@ struct Vec2 {
     float y = 0.0f;
 };
 
-// What the OS keeps for itself and the pad must stay off: a display cutout, and any system bar
-// that is still on screen. Height units, like everything else here.
+// The display cutout and any system bar still on screen, in height units.
 struct Insets {
     float left = 0.0f;
     float right = 0.0f;
@@ -75,7 +74,7 @@ struct Insets {
     bool operator==(const Insets&) const = default;
 };
 
-// Where the four edges of the usable screen sit, once the margin and the insets are taken off it.
+// The usable screen edges, once the margin and the insets are taken off.
 struct Bounds {
     float left = 0.0f;
     float right = 0.0f;
@@ -274,8 +273,7 @@ enum InsetEdge {
     INSET_COUNT,
 };
 
-// Written by the activity's inset listener on the UI thread, read by the window thread. Pixels,
-// which is what SDL sizes an Android window in.
+// In pixels, which is the unit SDL uses for an Android window. The UI thread writes, the window thread reads.
 std::atomic<int> sInsetPx[INSET_COUNT] = {};
 #endif
 
@@ -289,8 +287,7 @@ Insets SafeArea(float pointHeight) {
         return sInsetPx[which].load(std::memory_order_relaxed) / pointHeight;
     };
     const Insets in = { edge(INSET_LEFT), edge(INSET_RIGHT), edge(INSET_TOP), edge(INSET_BOTTOM) };
-    // Half the screen is a bad reading rather than a real cutout, and the pad is better off in the
-    // wrong place than crushed into nothing.
+    // Half the screen is a bad reading, not a real cutout.
     if (in.left + in.right >= 0.5f || in.top + in.bottom >= 0.5f) {
         return {};
     }
@@ -301,13 +298,10 @@ Insets SafeArea(float pointHeight) {
 #endif
 }
 
-// The layout works in whatever unit the platform sizes its windows in, so all it needs is how
-// many of those cover a millimetre; nothing past this point deals in inches.
 constexpr float kMmPerInch = 25.4f;
 
 #ifdef __ANDROID__
-// Android sizes its windows in pixels, so the plausible band is a screen density rather than
-// Apple's fixed point size, and a tablet is told apart by physical width instead of a unit count.
+// Android sizes its windows in pixels, so the plausible band is a density and not a point size.
 constexpr float kMinPlausiblePpi = 200.0f;
 constexpr float kMaxPlausiblePpi = 900.0f;
 constexpr float kNominalPhonePpi = 400.0f;
@@ -519,8 +513,7 @@ void BuildLayout(const LayoutKey& key) {
     const auto arc = [unit, size, &key](float millimetres) { return millimetres * unit * size * key.reach; };
 
     const float margin = mm(key.margin);
-    // MirrorLayout reflects the pad but not the menu button, so a cutout down one side is taken
-    // off both. It costs a millimetre or two of a side that a notch never covers more of.
+    // MirrorLayout reflects the pad but not the menu button, so a cutout on one side is taken off both.
     const float side = margin + std::max(key.insets.left, key.insets.right);
     const float left = side;
     const float right = key.aspect - side;
