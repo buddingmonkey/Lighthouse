@@ -12,6 +12,10 @@ val outputRoot: File = repoRoot.resolve("build-android")
 // than into the module. Set before anything below reads layout.buildDirectory.
 layout.buildDirectory.set(outputRoot.resolve("app"))
 
+val lighthouseVersion: String = Regex("""project\(Lighthouse\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)""")
+    .find(repoRoot.resolve("CMakeLists.txt").readText())?.groupValues?.get(1)
+    ?: error("Could not read the project version from ${repoRoot.resolve("CMakeLists.txt").path}")
+
 val sdl2Src: File = outputRoot.resolve("sdl2-src")
 val stagedAssets: File = layout.buildDirectory.dir("lighthouse-assets").get().asFile
 
@@ -25,7 +29,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0.2"
+        versionName = lighthouseVersion
 
         externalNativeBuild {
             cmake {
@@ -122,10 +126,7 @@ val stageLighthouseAssets by tasks.registering(Copy::class) {
     into(stagedAssets)
     from(repoRoot.resolve("config.yml"))
     from(repoRoot.resolve("assets/yaml")) { into("assets/yaml") }
-    from(repoRoot.resolve("lighthouse.o2r")) {
-        // Torch writes a zero-byte file when a pack fails; that is worse than none at all.
-        rename { name -> name }
-    }
+    from(repoRoot.resolve("lighthouse.o2r"))
     doFirst {
         val o2r = repoRoot.resolve("lighthouse.o2r")
         if (!o2r.exists() || o2r.length() == 0L) {

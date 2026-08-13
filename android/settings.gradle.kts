@@ -26,7 +26,12 @@ val sdl2Tag: String = extra.properties["sdl2Tag"] as? String
     ?: error("sdl2Tag is not set in android/gradle.properties")
 
 val sdl2Dir = rootDir.parentFile.resolve("build-android/sdl2-src")
-if (!sdl2Dir.resolve("android-project").isDirectory) {
+// Inside the checkout, so the CI cache of build-android/sdl2-src carries it.
+val sdl2Stamp = sdl2Dir.resolve(".lighthouse-sdl2-tag")
+if (!sdl2Dir.resolve("android-project").isDirectory ||
+    !sdl2Stamp.isFile ||
+    sdl2Stamp.readText().trim() != sdl2Tag
+) {
     sdl2Dir.parentFile.mkdirs()
     sdl2Dir.deleteRecursively()
     logger.lifecycle("Cloning SDL2 $sdl2Tag into ${sdl2Dir.path}")
@@ -40,4 +45,5 @@ if (!sdl2Dir.resolve("android-project").isDirectory) {
     if (result.result.get().exitValue != 0) {
         error("Failed to clone SDL2 $sdl2Tag:\n${result.standardError.asText.get()}")
     }
+    sdl2Stamp.writeText(sdl2Tag)
 }
