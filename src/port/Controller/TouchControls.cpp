@@ -79,7 +79,6 @@ struct Insets {
 struct Bounds {
     float left = 0.0f;
     float right = 0.0f;
-    float top = 0.0f;
     float bottom = 0.0f;
 };
 
@@ -527,7 +526,7 @@ void BuildLayout(const LayoutKey& key) {
     const float right = key.aspect - side;
     const float top = margin + key.insets.top;
     const float bottom = 1.0f - margin - key.insets.bottom;
-    const Bounds edge = { left, right, top, bottom };
+    const Bounds edge = { left, right, bottom };
 
     const Vec2 shoulder = { sz(7.0f), sz(4.2f) };
     // Z is held down for most of a fight, so it takes the corner and a wider pill than the rest.
