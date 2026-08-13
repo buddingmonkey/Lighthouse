@@ -130,7 +130,7 @@ void port_tickDemoAudioHold(void);
 int port_audioHeld(void);
 void port_noteMainLoopAlive(void);
 int port_audioStallHold(void);
-int32_t port_audioCatchupFrames(void);
+int32_t port_audioPumpShouldWait(void);
 
 // False while the app is off screen, when nothing may be rendered
 int port_appIsOnScreen(void);

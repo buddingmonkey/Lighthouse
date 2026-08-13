@@ -106,6 +106,13 @@ int port_checkHeap(const char* label) {
 }
 
 // Wrappers to use SPDLOG from C code
+void BK_LOG_DEBUG(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    bk_log_vfmt(spdlog::level::debug, fmt, args);
+    va_end(args);
+}
+
 void BK_LOG_INFO(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -314,6 +321,23 @@ float port_getRumbleScale(void) {
         return (low + high) * 0.5f;
     }
     return 1.0f;
+}
+
+u8* jiggyscore_getPtr(void);
+u8* honeycombscore_get_ptr(void);
+
+u32 port_jiggyscore_isCollectedRaw(enum jiggy_e jiggy_id) {
+    if (jiggy_id <= 0 || jiggy_id >= 0x65) {
+        return 0;
+    }
+    return (jiggyscore_getPtr()[(jiggy_id - 1) / 8] & (1 << (jiggy_id & 7))) != 0;
+}
+
+bool port_honeycombscore_getRaw(enum honeycomb_e indx) {
+    if (indx <= 0 || indx >= 0x19) { // HONEYCOMB_COUNT
+        return 0;
+    }
+    return (honeycombscore_get_ptr()[(indx - 1) / 8] & (1 << (indx & 7))) != 0;
 }
 
 } // extern "C"
