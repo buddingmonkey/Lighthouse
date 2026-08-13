@@ -74,9 +74,6 @@ void LighthouseModalWindow::DrawElement() {
                 }
                 UIWidgets::PopStyleButton();
             }
-            // EndPopup() is only valid when BeginPopupModal() returned true. Calling it
-            // unconditionally corrupts ImGui's window stack on any frame where the popup is
-            // not open -- the closePopup branch above reaches exactly that state.
             ImGui::EndPopup();
         }
     }
