@@ -36,6 +36,9 @@ bool TouchControls_Active() {
 #include <SDL2/SDL.h>
 #include <imgui.h>
 #include <fast/Fast3dWindow.h>
+#ifdef ENABLE_OPENXR
+#include <fast/backends/gfx_xr_pointer.h>
+#endif
 #include <libultraship/bridge/consolevariablebridge.h>
 #include <libultraship/libultra/controller.h>
 #include <ship/Context.h>
@@ -978,6 +981,28 @@ bool TouchControls_Active() {
 }
 
 namespace {
+void DrawXrPointer() {
+#ifdef ENABLE_OPENXR
+    float u = 0.0f;
+    float v = 0.0f;
+    bool down = false;
+    if (!Fast::GetXrPointer(&u, &v, &down)) {
+        return;
+    }
+
+    const ImGuiIO& io = ImGui::GetIO();
+    const ImVec2 at(u * io.DisplaySize.x, v * io.DisplaySize.y);
+    const float radius = io.DisplaySize.y * (down ? 0.020f : 0.024f);
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    dl->AddCircleFilled(at, radius, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, down ? 0.45f : 0.25f)));
+    dl->AddCircle(at, radius, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, down ? 0.90f : 0.60f)), 0,
+                  io.DisplaySize.y * 0.004f);
+#endif
+}
+} // namespace
+
+namespace {
 ImU32 Shade(float alpha, bool pressed) {
     const float a = pressed ? std::min(alpha * 2.0f, 0.95f) : alpha;
     return ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, a));
@@ -1011,6 +1036,7 @@ void DrawArrow(ImDrawList* dl, ImVec2 center, float radius, Vec2 outward, ImU32 
 } // namespace
 
 void TouchControls_Draw() {
+    DrawXrPointer();
     if (!TouchControls_Active()) {
         return;
     }
