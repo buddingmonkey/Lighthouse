@@ -12,6 +12,7 @@
 #include "port/Save/SaveConverter.h"
 #include "UIWidgets.hpp"
 #include <fast/Fast3dWindow.h>
+#include <fast/backends/gfx_xr_view.h>
 #include <spdlog/fmt/fmt.h>
 
 #include "variables.h"
@@ -442,8 +443,19 @@ void LighthouseMenu::AddMenuSettings() {
                               "and makes it smaller, which is what puts depth in it.")
                      .Min(1)
                      .Max(8)
-                     .DefaultValue(3));
+                     .DefaultValue(8));
 #endif
+    AddWidget(path, "Recentre Window", WIDGET_BUTTON)
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) {
+            info.isHidden = Ship::Context::GetRawInstance()->GetWindow()->GetWindowBackend() !=
+                            Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+        })
+#ifdef ENABLE_OPENXR
+        .Callback([](WidgetInfo&) { Fast::RecentreXrWindow(); })
+#endif
+        .Options(
+            ButtonOptions().Size(Sizes::Inline).Tooltip("Puts the window in front of you, where you are looking now."));
     AddWidget(path, "Stereo", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_SETTING("XrStereo"))
         .RaceDisable(false)
