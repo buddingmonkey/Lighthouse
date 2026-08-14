@@ -13,6 +13,7 @@
 #include <libultraship/libultraship.h>
 
 #include <fast/Fast3dWindow.h>
+#include <fast/backends/gfx_xr_view.h>
 #include <fast/interpreter.h>
 #include "fast/resource/ResourceType.h"
 #include <fast/resource/factory/DisplayListFactory.h>
@@ -102,10 +103,18 @@ float ImGuiDensityScale() {
         return 1.0f;
     }();
 
-    // A headset reads the menu on a quad two metres away, not at arm's length, and the display
-    // DPI above describes neither.
+    // A headset reads the menu on a window in the room, not at arm's length, and the display DPI
+    // above describes neither. The 0.66 was measured on a window 43.6 degrees wide, so the scale
+    // follows the width the window actually has: a wider one spreads the same pixels over more of
+    // the eye and needs fewer of them per letter.
     auto window = Ship::Context::GetRawInstance()->GetWindow();
     if (window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL) {
+#ifdef ENABLE_OPENXR
+        const float angularWidth = Fast::GetXrWindowAngularWidth();
+        if (angularWidth > 0.0f) {
+            return density * 0.66f * (0.761f / angularWidth);
+        }
+#endif
         return density * 0.66f;
     }
     return density;
@@ -1402,18 +1411,23 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
             auto runT0 = Clock::now();
             auto gui = wndBase->GetGui();
             wndBase->GetMouseStateManager()->StartFrame();
-            gui->StartDraw();
-            interpreter->StartFrame();
-            interpreter->Run(Commands, m);
-            if (OS_ViBlackActive()) {
-                interpreter->mGfxFrameBuffer = 0;
-                auto rapi = interpreter->GetCurrentRenderingAPI();
-                rapi->StartDrawToFramebuffer(0, 1.0f);
-                rapi->ClearFramebuffer(true, false);
+            // A headset draws the sub-frame once per eye, each with its own off-axis projection.
+            const uint32_t views = wnd->BeginRenderFrame();
+            for (uint32_t view = 0; view < views; view++) {
+                wnd->BeginRenderView(view);
+                gui->StartDraw();
+                interpreter->StartFrame();
+                interpreter->Run(Commands, m);
+                if (OS_ViBlackActive()) {
+                    interpreter->mGfxFrameBuffer = 0;
+                    auto rapi = interpreter->GetCurrentRenderingAPI();
+                    rapi->StartDrawToFramebuffer(0, 1.0f);
+                    rapi->ClearFramebuffer(true, false);
+                }
+                gui->EndDraw();
+                interpreter->EndFrame();
             }
-            gui->EndDraw();
             sLastSubFrameNs = NsSince(runT0);
-            interpreter->EndFrame();
             CALL_EVENT(FrameDrawEnd);
         }
         interpreter->mInterpolationIndex++;
