@@ -101,6 +101,13 @@ float ImGuiDensityScale() {
         }
         return 1.0f;
     }();
+
+    // A headset reads the menu on a quad two metres away, not at arm's length, and the display
+    // DPI above describes neither.
+    auto window = Ship::Context::GetRawInstance()->GetWindow();
+    if (window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL) {
+        return density * 0.8f;
+    }
     return density;
 #else
     return 1.0f;
