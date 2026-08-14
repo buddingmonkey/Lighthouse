@@ -162,6 +162,9 @@ void func_802E39D0(Gfx **gfx, Mtx **mtx, Vtx **vtx, s32 framebuffer_idx, bool ar
     extern bool gcpausemenu_isCapturing(void);
     bool capturing = gcpausemenu_isCapturing();
 
+    // [port] Hold the HUD on the window plane in a headset; it is not part of the world behind it.
+    port_xr_beginFlat(gfx);
+
     if(!game_is_frozen() && gsworld_getEnableDraw() && !capturing){
         core2_A5BC0_drawScreenOverlayMarkers(gfx, mtx, vtx);
     }
@@ -182,6 +185,8 @@ void func_802E39D0(Gfx **gfx, Mtx **mtx, Vtx **vtx, s32 framebuffer_idx, bool ar
         CALL_EVENT(OnHudDraw, gfx, mtx, vtx);
         printbuffer_draw(gfx, mtx, vtx);
     }
+
+    port_xr_endFlat(gfx);
 
     if ((D_8037E8E0.game_mode != GAME_MODE_A_SNS_PICTURE) || (D_8037E8E0.unk19 == 6) || (D_8037E8E0.unk19 == 5)) {
         // [port] Snapshot the composed frame for the falling-jiggy piece textures.

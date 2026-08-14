@@ -11,6 +11,7 @@
 #include "port/Localization/Language.h"
 #include "port/Save/SaveConverter.h"
 #include "UIWidgets.hpp"
+#include <fast/Fast3dWindow.h>
 #include <spdlog/fmt/fmt.h>
 
 #include "variables.h"
@@ -423,7 +424,37 @@ void LighthouseMenu::AddMenuSettings() {
     AddWidget(path, "Match Refresh Rate", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_SETTING("MatchRefreshRate"))
         .RaceDisable(false)
-        .Options(CheckboxOptions().Tooltip("Matches interpolation value to the refresh rate of your display."));
+        .Options(CheckboxOptions()
+                     .Tooltip("Matches interpolation value to the refresh rate of your display.")
+                     .DefaultValue(Ship::Context::GetRawInstance()->GetWindow()->GetWindowBackend() ==
+                                   Fast::WindowBackend::FAST3D_OPENXR_OPENGL));
+#ifdef ENABLE_OPENXR
+    AddWidget(path, "Diorama Depth", WIDGET_CVAR_SLIDER_INT)
+        .CVar(CVAR_SETTING("XrDepth"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) {
+            info.isHidden = Ship::Context::GetRawInstance()->GetWindow()->GetWindowBackend() !=
+                            Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+        })
+        .Options(IntSliderOptions()
+                     .Tooltip("How deep the world looks through the window. The window keeps the field of view the "
+                              "game asks for, so this does not crop the picture: it brings the whole diorama nearer "
+                              "and makes it smaller, which is what puts depth in it.")
+                     .Min(1)
+                     .Max(8)
+                     .DefaultValue(3));
+#endif
+    AddWidget(path, "Stereo", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_SETTING("XrStereo"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) {
+            info.isHidden = Ship::Context::GetRawInstance()->GetWindow()->GetWindowBackend() !=
+                            Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+        })
+        .Options(CheckboxOptions()
+                     .Tooltip("Draws the frame once per eye so the world has depth. Turn it off to draw one image "
+                              "for both eyes, which costs half as much and sends one layer to the compositor.")
+                     .DefaultValue(true));
     AddWidget(path, "Renderer API (Needs reload)", WIDGET_VIDEO_BACKEND).RaceDisable(false);
     AddWidget(path, "Enable Vsync", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_VSYNC_ENABLED)

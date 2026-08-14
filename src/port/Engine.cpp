@@ -1541,6 +1541,14 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
 
     SelectDisplayRefreshRate(wnd.get());
 
+#ifdef ENABLE_OPENXR
+    // The window keeps the angular size the game's field of view gives it, so a shorter range does
+    // not change the framing. It scales the whole diorama towards the viewer, and a smaller world
+    // close by has more depth in it than a large one far away.
+    Fast::SetXrWindowDistance(5.0f / (float)CVarGetInteger(CVAR_SETTING("XrDepth"), 3));
+    Fast::SetXrStereo(CVarGetInteger(CVAR_SETTING("XrStereo"), 1) != 0);
+#endif
+
     // if(gEnableGammaBoost) {
     //     wnd->EnableSRGBMode();
     // }
