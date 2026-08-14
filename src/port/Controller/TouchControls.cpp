@@ -171,6 +171,9 @@ constexpr int kTargetStick = -2;
 constexpr int kTargetMenu = -3;
 constexpr int kTargetRightStick = -4;
 
+// Well outside anything SDL hands out for a real finger.
+constexpr SDL_FingerID kXrFingerId = -1;
+
 struct Finger {
     SDL_FingerID id = 0;
     int target = kTargetNone;
@@ -845,6 +848,19 @@ extern "C" void TouchControls_Poll(void) {
             live.push_back(entry);
         }
     }
+
+#ifdef ENABLE_OPENXR
+    // A pinch is not an SDL touch, so it never reaches the device list above.
+    float pointerU = 0.0f;
+    float pointerV = 0.0f;
+    bool pointerDown = false;
+    if (Fast::GetXrPointer(&pointerU, &pointerV, &pointerDown) && pointerDown) {
+        Finger entry;
+        entry.id = kXrFingerId;
+        entry.pos = { pointerU * sLayout.aspect, pointerV };
+        live.push_back(entry);
+    }
+#endif
 
     // Carry assignments forward; classify only newly-landed fingers.
     for (auto& finger : live) {
