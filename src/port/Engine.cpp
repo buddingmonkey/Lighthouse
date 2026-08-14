@@ -106,7 +106,7 @@ float ImGuiDensityScale() {
     // DPI above describes neither.
     auto window = Ship::Context::GetRawInstance()->GetWindow();
     if (window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL) {
-        return density * 0.8f;
+        return density * 0.66f;
     }
     return density;
 #else
