@@ -90,6 +90,11 @@ uint32_t DefaultImGuiScaleIndex() {
 #endif
 }
 
+bool IsHeadsetWindow() {
+    auto window = Ship::Context::GetRawInstance()->GetWindow();
+    return window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+}
+
 // Android counts window units in pixels where iOS counts points, so the menu comes out much smaller there.
 float ImGuiDensityScale() {
 #ifdef __ANDROID__
@@ -107,8 +112,7 @@ float ImGuiDensityScale() {
     // above describes neither. The 0.66 was measured on a window 43.6 degrees wide, so the scale
     // follows the width the window actually has: a wider one spreads the same pixels over more of
     // the eye and needs fewer of them per letter.
-    auto window = Ship::Context::GetRawInstance()->GetWindow();
-    if (window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL) {
+    if (IsHeadsetWindow()) {
 #ifdef ENABLE_OPENXR
         const float angularWidth = Fast::GetXrWindowAngularWidth();
         if (angularWidth > 0.0f) {
@@ -1407,14 +1411,17 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
         Nametag::SetSubframeBlend(subframeBlend);
         bool isFinalFrame = (frameIdx == frameCount - 1);
         if (frameCount > 1 || wndBase->IsFrameReady()) {
-            // Sample the full CPU cost of producing this sub-frame.
-            auto runT0 = Clock::now();
             auto gui = wndBase->GetGui();
             wndBase->GetMouseStateManager()->StartFrame();
             // A headset draws the sub-frame once per eye, each with its own off-axis projection.
             const uint32_t views = wnd->BeginRenderFrame();
+            long long drawNs = 0;
             for (uint32_t view = 0; view < views; view++) {
                 wnd->BeginRenderView(view);
+                // Sample the CPU cost of producing this sub-frame, both eyes and neither present.
+                // A present waits for the display, and the budget below must weigh the work, not
+                // the wait, or a sub-frame that exactly fills its slot looks like one that misses.
+                auto runT0 = Clock::now();
                 gui->StartDraw();
                 interpreter->StartFrame();
                 interpreter->Run(Commands, m);
@@ -1425,9 +1432,10 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
                     rapi->ClearFramebuffer(true, false);
                 }
                 gui->EndDraw();
+                drawNs += NsSince(runT0);
                 interpreter->EndFrame();
             }
-            sLastSubFrameNs = NsSince(runT0);
+            sLastSubFrameNs = drawNs;
             CALL_EVENT(FrameDrawEnd);
         }
         interpreter->mInterpolationIndex++;
@@ -1454,6 +1462,30 @@ struct SubframePacing {
     int fps;       // target present fps for this tick
     int viPerTick; // VIs of game time this tick covers
 };
+
+// A headset only looks right when its refresh rate is a whole multiple of the game's logic rate:
+// the sub-frame count below is an integer, so anything else beats against the panel. Banjo-Kazooie
+// runs its logic at 30 Hz, and a 72 Hz panel therefore presents 60. Ask for the fastest rate that
+// divides, once, and let ComputeSubframePacing read it back through GetCurrentRefreshRate.
+void SelectDisplayRefreshRate(Fast::Fast3dWindow* wnd) {
+    static bool asked = false;
+    if (asked) {
+        return;
+    }
+    asked = true;
+
+    const float logicRate = 60.0f / gVIsPerFrame;
+    float wanted = 0.0f;
+    for (float rate : wnd->GetSupportedRefreshRates()) {
+        const float multiple = rate / logicRate;
+        if (fabsf(multiple - roundf(multiple)) < 0.01f && rate > wanted) {
+            wanted = rate;
+        }
+    }
+    if (wanted > 0.0f) {
+        wnd->SetRefreshRate(wanted);
+    }
+}
 
 SubframePacing ComputeSubframePacing() {
     int target_fps = (int)GameEngine::Instance->GetInterpolationFPS();
@@ -1506,6 +1538,8 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     if (wnd == nullptr) {
         return;
     }
+
+    SelectDisplayRefreshRate(wnd.get());
 
     // if(gEnableGammaBoost) {
     //     wnd->EnableSRGBMode();
@@ -1575,7 +1609,10 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
 }
 
 uint32_t GameEngine::GetInterpolationFPS() {
-    if (CVarGetInteger(CVAR_SETTING("MatchRefreshRate"), 0)) {
+    // A headset is not a screen a player chooses a frame rate for. Anything below the panel rate
+    // beats against it, and the parallax the off-axis frustum bakes into each eye only updates as
+    // often as the game presents. The setting stays reachable, it just starts on.
+    if (CVarGetInteger(CVAR_SETTING("MatchRefreshRate"), IsHeadsetWindow() ? 1 : 0)) {
         return Ship::Context::GetRawInstance()->GetWindow()->GetCurrentRefreshRate();
 
     } else if (CVarGetInteger(CVAR_VSYNC_ENABLED, 1) ||
