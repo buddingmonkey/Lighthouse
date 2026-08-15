@@ -1,6 +1,6 @@
 #include "DebugPad.h"
 
-#ifdef __ANDROID__
+#ifdef ENABLE_DEBUG_TOOLS
 
 #include <chrono>
 #include <cstdint>

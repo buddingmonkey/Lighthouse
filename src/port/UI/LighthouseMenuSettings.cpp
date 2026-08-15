@@ -23,6 +23,11 @@ extern std::shared_ptr<LighthouseMenu> mLighthouseMenu;
 extern std::shared_ptr<LighthouseModalWindow> mModalWindow;
 using namespace UIWidgets;
 
+static bool HeadsetWindow() {
+    auto window = Ship::Context::GetRawInstance()->GetWindow();
+    return window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+}
+
 static std::unordered_map<int32_t, const char*> imguiScaleOptions = {
     { 0, "Small" },
     { 1, "Normal" },
@@ -427,16 +432,12 @@ void LighthouseMenu::AddMenuSettings() {
         .RaceDisable(false)
         .Options(CheckboxOptions()
                      .Tooltip("Matches interpolation value to the refresh rate of your display.")
-                     .DefaultValue(Ship::Context::GetRawInstance()->GetWindow()->GetWindowBackend() ==
-                                   Fast::WindowBackend::FAST3D_OPENXR_OPENGL));
+                     .DefaultValue(HeadsetWindow()));
 #ifdef ENABLE_OPENXR
     AddWidget(path, "Diorama Depth", WIDGET_CVAR_SLIDER_INT)
         .CVar(CVAR_SETTING("XrDepth"))
         .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) {
-            info.isHidden = Ship::Context::GetRawInstance()->GetWindow()->GetWindowBackend() !=
-                            Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
-        })
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
         .Options(IntSliderOptions()
                      .Tooltip("How deep the world looks through the window. The window keeps the field of view the "
                               "game asks for, so this does not crop the picture: it brings the whole diorama nearer "
@@ -444,29 +445,21 @@ void LighthouseMenu::AddMenuSettings() {
                      .Min(1)
                      .Max(8)
                      .DefaultValue(8));
-#endif
     AddWidget(path, "Recentre Window", WIDGET_BUTTON)
         .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) {
-            info.isHidden = Ship::Context::GetRawInstance()->GetWindow()->GetWindowBackend() !=
-                            Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
-        })
-#ifdef ENABLE_OPENXR
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
         .Callback([](WidgetInfo&) { Fast::RecentreXrWindow(); })
-#endif
         .Options(
             ButtonOptions().Size(Sizes::Inline).Tooltip("Puts the window in front of you, where you are looking now."));
     AddWidget(path, "Stereo", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_SETTING("XrStereo"))
         .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) {
-            info.isHidden = Ship::Context::GetRawInstance()->GetWindow()->GetWindowBackend() !=
-                            Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
-        })
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
         .Options(CheckboxOptions()
                      .Tooltip("Draws the frame once per eye so the world has depth. Turn it off to draw one image "
                               "for both eyes, which costs half as much and sends one layer to the compositor.")
                      .DefaultValue(true));
+#endif
     AddWidget(path, "Renderer API (Needs reload)", WIDGET_VIDEO_BACKEND).RaceDisable(false);
     AddWidget(path, "Enable Vsync", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_VSYNC_ENABLED)

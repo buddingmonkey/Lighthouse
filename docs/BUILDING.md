@@ -323,6 +323,7 @@ _Note: the app keeps its data in `Android/data/<applicationId>/files`, which And
 * The on-screen controls are configured in *Settings > Controls*, under **On-Screen Controls**, and are sized from the reported screen density rather than a fixed point size.
 * Mods go in the `mods` folder, which is only reachable over `adb` for the reason above. Applying a mod list needs the app to be closed and reopened, since Android apps can't relaunch themselves.
 * Networking (Anchor multiplayer) is off, SDL2_net isn't part of the Android dependency set.
+* An Android device hands out neither a screenshot nor a controller. Build with `-PdebugTools=ON` to add two bring-up tools that make up for it: `android/capture.sh` asks the app for its frames, and `android/pad.sh` drives the pad from the host. They are off by default and must stay out of a release build.
 
 # Compatible Roms
 Any retail version. See [the readme](https://github.com/HarbourMasters/Lighthouse/blob/develop/README.md#1-verify-your-rom-dump)

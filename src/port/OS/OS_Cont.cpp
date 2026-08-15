@@ -66,7 +66,7 @@ extern "C" int OS_SiService(void) {
         // Merged here rather than through a mapping so it survives mapping reloads and
         // stays on the thread that polls SDL.
         TouchControls_MergeInto(&sLatch[0]);
-#ifdef __ANDROID__
+#ifdef ENABLE_DEBUG_TOOLS
         DebugPad_MergeInto(&sLatch[0]);
 #endif
     }

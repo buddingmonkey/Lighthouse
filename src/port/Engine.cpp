@@ -1542,10 +1542,12 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     SelectDisplayRefreshRate(wnd.get());
 
 #ifdef ENABLE_OPENXR
-    // The window keeps the angular size the game's field of view gives it, so a shorter range does
-    // not change the framing. It scales the whole diorama towards the viewer, and a smaller world
-    // close by has more depth in it than a large one far away.
-    Fast::SetXrWindowDistance(4.0f / (float)CVarGetInteger(CVAR_SETTING("XrDepth"), 8));
+    // The setting counts depth, which is the reciprocal of the range the window hangs at: the
+    // window keeps the angular size the game's field of view gives it, so a shorter range does not
+    // change the framing. It scales the whole diorama towards the viewer, and a smaller world close
+    // by has more depth in it than a large one far away. 1 puts the glass at 4 m, 8 at 0.5 m.
+    const int32_t depth = std::clamp(CVarGetInteger(CVAR_SETTING("XrDepth"), 8), 1, 8);
+    Fast::SetXrWindowDistance(4.0f / (float)depth);
     Fast::SetXrStereo(CVarGetInteger(CVAR_SETTING("XrStereo"), 1) != 0);
 #endif
 

@@ -97,10 +97,6 @@ int port_mirror_active(void);
 void port_mirror_beginScene(void);
 void port_mirror_endScene(void);
 void port_mirror_undoProjection(Gfx** gfx, Mtx** mtx);
-
-// Hold the draws between them on the window plane in a headset. See XrPatches.cpp.
-void port_xr_beginFlat(Gfx** gfx);
-void port_xr_endFlat(Gfx** gfx);
 void port_viewport_applyMirror(Gfx** gfx, Mtx** mtx);
 void port_mirror_markCapture(void);
 int port_mirror_shouldFlipPauseBg(void);
@@ -227,6 +223,11 @@ void port_warnPropNotInCube(int32_t index, int32_t propCnt);
 
 // Rate-limited: a cube's node-prop split index passed 31, where the old :5 field wrapped.
 void port_warnNodePropSplit(int32_t splitIndex, int32_t nodeCnt);
+
+// Headset window (XrPatches.cpp)
+
+void port_xr_beginFlat(Gfx** gfx);
+void port_xr_endFlat(Gfx** gfx);
 
 #ifdef __cplusplus
 }
