@@ -434,17 +434,31 @@ void LighthouseMenu::AddMenuSettings() {
                      .Tooltip("Matches interpolation value to the refresh rate of your display.")
                      .DefaultValue(HeadsetWindow()));
 #ifdef ENABLE_OPENXR
-    AddWidget(path, "Diorama Depth", WIDGET_CVAR_SLIDER_INT)
+    AddWidget(path, "Diorama Depth", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrDepth"))
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
-        .Options(IntSliderOptions()
+        .Options(FloatSliderOptions()
                      .Tooltip("How deep the world looks through the window. The window keeps the field of view the "
                               "game asks for, so this does not crop the picture: it brings the whole diorama nearer "
-                              "and makes it smaller, which is what puts depth in it.")
-                     .Min(1)
-                     .Max(8)
-                     .DefaultValue(8));
+                              "and makes it smaller, which is what puts depth in it.\n\nThe move bar under the "
+                              "window sets the same range, so this reads back what a pull towards you left.")
+                     .Min(1.0f)
+                     .Max(8.0f)
+                     .DefaultValue(8.0f)
+                     .Format("%.1f"));
+    AddWidget(path, "Window Size", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("XrWindowScale"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(FloatSliderOptions()
+                     .Tooltip("How large the window is drawn, against the size the game's field of view gives it. "
+                              "It holds the range and widens the angle, so a larger window shows a larger diorama "
+                              "where a shorter range shows a deeper one.\n\nThe corner handles set the same size.")
+                     .Min(0.5f)
+                     .Max(2.0f)
+                     .DefaultValue(1.0f)
+                     .Format("%.2f"));
     AddWidget(path, "Recentre Window", WIDGET_BUTTON)
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
