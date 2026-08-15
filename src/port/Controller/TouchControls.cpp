@@ -36,9 +36,6 @@ bool TouchControls_Active() {
 #include <SDL2/SDL.h>
 #include <imgui.h>
 #include <fast/Fast3dWindow.h>
-#ifdef ENABLE_OPENXR
-#include <fast/backends/gfx_xr_pointer.h>
-#endif
 #include <libultraship/bridge/consolevariablebridge.h>
 #include <libultraship/libultra/controller.h>
 #include <ship/Context.h>
@@ -170,9 +167,6 @@ constexpr int kTargetNone = -1;
 constexpr int kTargetStick = -2;
 constexpr int kTargetMenu = -3;
 constexpr int kTargetRightStick = -4;
-
-// Well outside anything SDL hands out for a real finger.
-constexpr SDL_FingerID kXrFingerId = -1;
 
 struct Finger {
     SDL_FingerID id = 0;
@@ -828,7 +822,8 @@ extern "C" void TouchControls_Poll(void) {
     const bool padActive = PadActive();
     // While the menu is open its own close button takes over: leaving ours on top would
     // also click whatever menu widget sits underneath, since SDL mirrors touches as mouse.
-    const bool menuButtonActive = !MenuVisible();
+    // A headset has its own button outside the window, so this one is not drawn there.
+    const bool menuButtonActive = !MenuVisible() && !HeadsetActive();
 
     // Collect the fingers SDL currently reports. Positions are normalized to the window,
     // which sidesteps the point/pixel difference between ImGui and the drawable.
@@ -848,19 +843,6 @@ extern "C" void TouchControls_Poll(void) {
             live.push_back(entry);
         }
     }
-
-#ifdef ENABLE_OPENXR
-    // A pinch is not an SDL touch, so it never reaches the device list above.
-    float pointerU = 0.0f;
-    float pointerV = 0.0f;
-    bool pointerDown = false;
-    if (Fast::GetXrPointer(&pointerU, &pointerV, &pointerDown) && pointerDown) {
-        Finger entry;
-        entry.id = kXrFingerId;
-        entry.pos = { pointerU * sLayout.aspect, pointerV };
-        live.push_back(entry);
-    }
-#endif
 
     // Carry assignments forward; classify only newly-landed fingers.
     for (auto& finger : live) {
@@ -997,28 +979,6 @@ bool TouchControls_Active() {
 }
 
 namespace {
-void DrawXrPointer() {
-#ifdef ENABLE_OPENXR
-    float u = 0.0f;
-    float v = 0.0f;
-    bool down = false;
-    if (!Fast::GetXrPointer(&u, &v, &down)) {
-        return;
-    }
-
-    const ImGuiIO& io = ImGui::GetIO();
-    const ImVec2 at(u * io.DisplaySize.x, v * io.DisplaySize.y);
-    const float radius = io.DisplaySize.y * (down ? 0.020f : 0.024f);
-
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
-    dl->AddCircleFilled(at, radius, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, down ? 0.45f : 0.25f)));
-    dl->AddCircle(at, radius, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, down ? 0.90f : 0.60f)), 0,
-                  io.DisplaySize.y * 0.004f);
-#endif
-}
-} // namespace
-
-namespace {
 ImU32 Shade(float alpha, bool pressed) {
     const float a = pressed ? std::min(alpha * 2.0f, 0.95f) : alpha;
     return ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, a));
@@ -1052,7 +1012,6 @@ void DrawArrow(ImDrawList* dl, ImVec2 center, float radius, Vec2 outward, ImU32 
 } // namespace
 
 void TouchControls_Draw() {
-    DrawXrPointer();
     if (!TouchControls_Active()) {
         return;
     }
@@ -1069,7 +1028,7 @@ void TouchControls_Draw() {
 
     // Drawn even when the pad is hidden, so the settings stay reachable -- but not over
     // the menu itself, which has its own close button.
-    if (!MenuVisible()) {
+    if (!MenuVisible() && !HeadsetActive()) {
         const ImVec2 menuMin =
             px({ sLayout.menuCenter.x - sLayout.menuHalfExtent.x, sLayout.menuCenter.y - sLayout.menuHalfExtent.y });
         const ImVec2 menuMax =
