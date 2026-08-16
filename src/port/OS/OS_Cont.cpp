@@ -7,6 +7,7 @@
 #include <libultraship/libultraship.h>
 #include "port/Controller/TouchControls.h"
 #include "port/Controller/DebugPad.h"
+#include "port/Controller/XrControls.h"
 
 #include <atomic>
 #include <cstring>
@@ -66,6 +67,7 @@ extern "C" int OS_SiService(void) {
         // Merged here rather than through a mapping so it survives mapping reloads and
         // stays on the thread that polls SDL.
         TouchControls_MergeInto(&sLatch[0]);
+        XrControls_MergeInto(&sLatch[0]);
 #ifdef ENABLE_DEBUG_TOOLS
         DebugPad_MergeInto(&sLatch[0]);
 #endif

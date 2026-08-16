@@ -484,6 +484,20 @@ void LighthouseMenu::AddMenuSettings() {
                      .Max(3.0f)
                      .DefaultValue(0.36f)
                      .Format("%.2f"));
+    AddWidget(path, "Max Refresh Rate", WIDGET_CVAR_SLIDER_INT)
+        .CVar(CVAR_SETTING("XrMaxRate"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(IntSliderOptions()
+                     .Tooltip("The fastest the headset is asked to run. The game draws a whole number of frames a "
+                              "tick, so it can only use a rate its 30 Hz logic divides into, and it takes the "
+                              "fastest one the headset offers. Hold it down for battery or for heat.\n\nA rate the "
+                              "device cannot keep runs the game slowly rather than dropping frames, so if the game "
+                              "ticks under 30 a second, set this lower.")
+                     .Min(60)
+                     .Max(120)
+                     .DefaultValue(120)
+                     .Format("%d Hz"));
     AddWidget(path, "Recenter Window", WIDGET_BUTTON)
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })

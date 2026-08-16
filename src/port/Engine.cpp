@@ -1468,17 +1468,20 @@ struct SubframePacing {
 // runs its logic at 30 Hz, and a 72 Hz panel therefore presents 60. Ask for the fastest rate that
 // divides, once, and let ComputeSubframePacing read it back through GetCurrentRefreshRate.
 void SelectDisplayRefreshRate(Fast::Fast3dWindow* wnd) {
-    static bool asked = false;
-    if (asked) {
+    // Quest offers 120 as well as 90, and both divide. The setting is how a user who would rather
+    // have the battery, or who finds the tick rate falling short, holds it down.
+    const int cap = CVarGetInteger(CVAR_SETTING("XrMaxRate"), 120);
+    static int askedCap = 0;
+    if (askedCap == cap) {
         return;
     }
-    asked = true;
+    askedCap = cap;
 
     const float logicRate = 60.0f / gVIsPerFrame;
     float wanted = 0.0f;
     for (float rate : wnd->GetSupportedRefreshRates()) {
         const float multiple = rate / logicRate;
-        if (fabsf(multiple - roundf(multiple)) < 0.01f && rate > wanted) {
+        if (fabsf(multiple - roundf(multiple)) < 0.01f && rate > wanted && rate <= (float)cap) {
             wanted = rate;
         }
     }
