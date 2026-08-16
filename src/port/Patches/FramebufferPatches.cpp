@@ -12,6 +12,7 @@
 // From Patches.h; declared here because this file's definitions use concrete
 // Gfx/model types where the header declares void*.
 extern "C" void port_runOnRenderThread(void (*fn)(void*), void* arg);
+bool IsHeadsetWindow();
 
 extern "C" {
 
@@ -19,6 +20,7 @@ extern "C" {
 #include "model.h"
 
 void gfx_register_fb_texture(const void* cpuAddr, int fbId);
+void gfx_register_stereo_fb_pair(int fbId, int rightFbId);
 BKGfxList* modelbin_getGfxList(BKModelBin* arg0);
 s32 getGameMode(void);
 
@@ -293,6 +295,13 @@ static void createTransitionFb(void* arg) {
     sTransitionGpuFbId = gfx_create_framebuffer(DEFAULT_FRAMEBUFFER_WIDTH, DEFAULT_FRAMEBUFFER_HEIGHT,
                                                 DEFAULT_FRAMEBUFFER_WIDTH, DEFAULT_FRAMEBUFFER_HEIGHT, 1, 0);
     gfx_register_fb_texture(sTransitionFbDummy, sTransitionGpuFbId);
+    // A headset runs the display list once per eye and each pass captures its own view, so the
+    // right eye copies into and samples a second framebuffer: a stereoscopic photo on the pieces.
+    if (IsHeadsetWindow()) {
+        s32 rightFb = gfx_create_framebuffer(DEFAULT_FRAMEBUFFER_WIDTH, DEFAULT_FRAMEBUFFER_HEIGHT,
+                                             DEFAULT_FRAMEBUFFER_WIDTH, DEFAULT_FRAMEBUFFER_HEIGHT, 1, 0);
+        gfx_register_stereo_fb_pair(sTransitionGpuFbId, rightFb);
+    }
 }
 
 s32 port_getTransitionGpuFbId(void) {

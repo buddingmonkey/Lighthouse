@@ -186,15 +186,17 @@ void func_802E39D0(Gfx **gfx, Mtx **mtx, Vtx **vtx, s32 framebuffer_idx, bool ar
         printbuffer_draw(gfx, mtx, vtx);
     }
 
-    port_xr_endFlat(gfx);
-
     if ((D_8037E8E0.game_mode != GAME_MODE_A_SNS_PICTURE) || (D_8037E8E0.unk19 == 6) || (D_8037E8E0.unk19 == 5)) {
         // [port] Snapshot the composed frame for the falling-jiggy piece textures.
+        // Stays inside the flat bracket: the pieces are a picture of the screen,
+        // so in a headset they belong on the window plane with the HUD.
         if (port_shouldCaptureTransition()) {
             port_captureTransitionFb(gfx);
         }
         gctransition_draw(gfx, mtx, vtx);
     }
+
+    port_xr_endFlat(gfx);
     // [port] Populate gFramebuffers from the GPU via gDPReadFB at native resolution.
     // Transitions and particles read from gFramebuffers during game logic.
     // On N64, gFramebuffers was the render target directly; on PC the GPU renders
