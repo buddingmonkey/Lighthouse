@@ -62,6 +62,9 @@
 #endif
 
 const float imguiScaleOptionToValue[4] = { 0.75f, 1.0f, 1.5f, 2.0f };
+
+// Radians of the window one unit of ImGui scale covers, for a menu drawn on a window in the room.
+static constexpr float MENU_ANGLE_PER_UNIT = 0.0009f;
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
 
 uint32_t DefaultImGuiScaleIndex() {
@@ -108,15 +111,19 @@ float ImGuiDensityScale() {
         return 1.0f;
     }();
 
-    // A headset reads the menu on a window in the room, not at arm's length, and the display DPI
-    // above describes neither. The 0.66 was measured on a window 43.6 degrees wide, so the scale
-    // follows the width the window actually has: a wider one spreads the same pixels over more of
-    // the eye and needs fewer of them per letter.
+    // A headset reads the menu on a window in the room, and the only thing that decides whether a
+    // letter can be read is the angle it covers in the eye. That angle is the angle the window
+    // spans over the width of the picture drawn on it, so the scale is the width over the angle and
+    // the display DPI does not come into it. DPI stood in for the width before, which held on a
+    // headset whose panel is the picture and failed on one that draws the game across a whole
+    // binocular panel: Quest hands the game 4128 pixels where Galaxy XR hands it 1536, and the same
+    // DPI gave letters a third of the angle.
     if (IsHeadsetWindow()) {
 #ifdef ENABLE_OPENXR
+        auto window = Ship::Context::GetRawInstance()->GetWindow();
         const float angularWidth = Fast::GetXrWindowAngularWidth();
-        if (angularWidth > 0.0f) {
-            return density * 0.66f * (0.761f / angularWidth);
+        if (angularWidth > 0.0f && window != nullptr && window->GetWidth() > 0) {
+            return MENU_ANGLE_PER_UNIT * static_cast<float>(window->GetWidth()) / angularWidth;
         }
 #endif
         return density * 0.66f;
@@ -127,7 +134,6 @@ float ImGuiDensityScale() {
 #endif
 }
 
-int32_t previousImGuiScaleIndex = -1;
 // Tracks the scale already baked into the ImGui style, which always starts unscaled.
 float previousImGuiScale = 1.0f;
 bool portArchiveVersionMatch = false;
@@ -273,7 +279,6 @@ GameEngine::GameEngine() {
         ImGui::GetIO().FontDefault = fontStandardLarger;
     }
 
-    previousImGuiScaleIndex = -1;
     previousImGuiScale = 1.0f;
     ScaleImGui();
 }
@@ -1125,16 +1130,17 @@ ImFont* GameEngine::CreateFontWithSize(float size, std::string fontPath) {
 
 void GameEngine::ScaleImGui() {
     int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", DefaultImGuiScaleIndex());
-    if (imGuiScaleIndex == previousImGuiScaleIndex) {
+    float scale = imguiScaleOptionToValue[imGuiScaleIndex] * ImGuiDensityScale();
+    // On a headset the scale follows the window as well as the setting, and the window resizes when
+    // the game first says what field of view it needs and whenever a hand pulls a corner.
+    if (fabsf(scale - previousImGuiScale) < 0.001f) {
         return;
     }
 
-    float scale = imguiScaleOptionToValue[imGuiScaleIndex] * ImGuiDensityScale();
     float newScale = scale / previousImGuiScale;
     ImGui::GetStyle().ScaleAllSizes(newScale);
     ImGui::GetIO().FontGlobalScale = scale;
     previousImGuiScale = scale;
-    previousImGuiScaleIndex = imGuiScaleIndex;
 }
 
 void GameEngine::Create(int argc, char* argv[]) {
