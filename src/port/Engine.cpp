@@ -111,12 +111,13 @@ float ImGuiDensityScale() {
     // A headset reads the menu on a window in the room, not at arm's length, and the display DPI
     // above describes neither. The 0.66 was measured on a window 43.6 degrees wide, so the scale
     // follows the width the window actually has: a wider one spreads the same pixels over more of
-    // the eye and needs fewer of them per letter.
+    // the eye and needs fewer of them per letter. A window put far away and left small asks for
+    // more than the menu can give, so the letters stop growing before they stop fitting.
     if (IsHeadsetWindow()) {
 #ifdef ENABLE_OPENXR
         const float angularWidth = Fast::GetXrWindowAngularWidth();
         if (angularWidth > 0.0f) {
-            return density * 0.66f * (0.761f / angularWidth);
+            return density * 0.66f * std::clamp(0.761f / angularWidth, 0.5f, 2.0f);
         }
 #endif
         return density * 0.66f;
@@ -1534,8 +1535,8 @@ SubframePacing ComputeSubframePacing() {
 #ifdef ENABLE_OPENXR
 // The menu and the window's own handles write the same number. Push it when the menu moved it since
 // the last frame, and read the window back when the menu did not, so the one that moved last wins
-// and a slider always shows where the hand left the window. Depth is the reciprocal of the range,
-// and size is itself; both conversions are their own inverse, so one of them serves both ways.
+// and a slider always shows where the hand left the window. Both numbers are themselves, so the
+// same conversion serves both ways.
 void SyncXrSetting(const char* cVar, float low, float high, float defaultValue, float& pushed, float held,
                    void (*apply)(float), float (*convert)(float)) {
     const float shown = std::clamp(CVarGetFloat(cVar, defaultValue), low, high);
@@ -1563,16 +1564,15 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     SelectDisplayRefreshRate(wnd.get());
 
 #ifdef ENABLE_OPENXR
-    // The setting counts depth, which is the reciprocal of the range the window hangs at: the
-    // window keeps the angular size the game's field of view gives it, so a shorter range does not
-    // change the framing. It scales the whole diorama towards the viewer, and a smaller world close
-    // by has more depth in it than a large one far away. 1 puts the glass at 4 m, 8 at 0.5 m.
-    // The move bar and the corner handle write the same two numbers from inside the headset.
-    static float pushedDepth = 0.0f;
+    // The range is meters from the user to the glass, and the size is meters of glass. They are
+    // apart: a range that goes out leaves the window the width it had, so it goes small in the eye
+    // and takes the diorama into the room with it. The move bar and the corner handles write the
+    // same two numbers from inside the headset.
+    static float pushedRange = 0.0f;
     static float pushedScale = 0.0f;
-    SyncXrSetting(CVAR_SETTING("XrDepth"), 1.0f, 8.0f, 8.0f, pushedDepth, Fast::GetXrWindowDistance(),
-                  Fast::SetXrWindowDistance, [](float value) { return 4.0f / value; });
-    SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 2.0f, 1.0f, pushedScale, Fast::GetXrWindowScale(),
+    SyncXrSetting(CVAR_SETTING("XrWindowRange"), 0.5f, 4.0f, 0.5f, pushedRange, Fast::GetXrWindowDistance(),
+                  Fast::SetXrWindowDistance, [](float value) { return value; });
+    SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 8.0f, 1.0f, pushedScale, Fast::GetXrWindowScale(),
                   Fast::SetXrWindowScale, [](float value) { return value; });
 
     Fast::SetXrStereo(CVarGetInteger(CVAR_SETTING("XrStereo"), 1) != 0);
