@@ -459,6 +459,31 @@ void LighthouseMenu::AddMenuSettings() {
                      .Max(2.0f)
                      .DefaultValue(1.0f)
                      .Format("%.2f"));
+    AddWidget(path, "Edge Float", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("XrEdgeFloat"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(FloatSliderOptions()
+                     .Tooltip("How far the side edges of the window come towards you, against the space between your "
+                              "eyes. At a side edge one eye sees a little of the world the other cannot, as it does "
+                              "at any window. Floating the edge forward makes that sliver read as something behind a "
+                              "near frame instead of as one eye covered.\n\nEach eye gives up this much width at one "
+                              "side, so a large value takes a visible strip off the picture. Zero turns it off.")
+                     .Min(0.0f)
+                     .Max(1.0f)
+                     .DefaultValue(0.15f)
+                     .Format("%.2f"));
+    AddWidget(path, "Edge Softness", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("XrEdgeSoftness"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(FloatSliderOptions()
+                     .Tooltip("How far the picture fades out at the edge of the window. It softens the frame but it "
+                              "does not change what each eye sees through it, so use Edge Float for that.")
+                     .Min(0.0f)
+                     .Max(3.0f)
+                     .DefaultValue(0.36f)
+                     .Format("%.2f"));
     AddWidget(path, "Recenter Window", WIDGET_BUTTON)
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })

@@ -1576,6 +1576,8 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
                   Fast::SetXrWindowScale, [](float value) { return value; });
 
     Fast::SetXrStereo(CVarGetInteger(CVAR_SETTING("XrStereo"), 1) != 0);
+    Fast::SetXrEdgeSoftness(CVarGetFloat(CVAR_SETTING("XrEdgeSoftness"), 0.36f));
+    Fast::SetXrEdgeFloat(CVarGetFloat(CVAR_SETTING("XrEdgeFloat"), 0.15f));
 #endif
 
     // if(gEnableGammaBoost) {
