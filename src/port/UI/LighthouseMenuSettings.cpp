@@ -459,10 +459,10 @@ void LighthouseMenu::AddMenuSettings() {
                      .Max(2.0f)
                      .DefaultValue(1.0f)
                      .Format("%.2f"));
-    AddWidget(path, "Recentre Window", WIDGET_BUTTON)
+    AddWidget(path, "Recenter Window", WIDGET_BUTTON)
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
-        .Callback([](WidgetInfo&) { Fast::RecentreXrWindow(); })
+        .Callback([](WidgetInfo&) { Fast::RecenterXrWindow(); })
         .Options(
             ButtonOptions().Size(Sizes::Inline).Tooltip("Puts the window in front of you, where you are looking now."));
     AddWidget(path, "Stereo", WIDGET_CVAR_CHECKBOX)
