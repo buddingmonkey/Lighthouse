@@ -4,6 +4,9 @@
 #include <fstream>
 #include <chrono>
 #include <future>
+#ifdef ENABLE_DEBUG_TOOLS
+#include <android/log.h>
+#endif
 #if defined(__linux__) || defined(__APPLE__)
 #include <unistd.h>
 #include <cerrno>
@@ -1496,6 +1499,43 @@ void SelectDisplayRefreshRate(Fast::Fast3dWindow* wnd) {
     }
 }
 
+// A display the game cannot keep up with does not drop frames, it runs the game slowly: the VI
+// retrace gates a tick on the render finishing. So the speed of the game is the measurement that
+// decides whether a refresh rate can be used, and the present rate on its own says nothing.
+void ReportTickRate(int subframes) {
+#ifdef ENABLE_DEBUG_TOOLS
+    static auto since = std::chrono::steady_clock::now();
+    static int ticks = 0;
+    static long long subframeTotal = 0;
+
+    ticks++;
+    subframeTotal += subframes;
+
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds = std::chrono::duration<double>(now - since).count();
+    if (seconds < 5.0) {
+        return;
+    }
+
+    uint32_t rate = 0;
+    auto window = Ship::Context::GetRawInstance()->GetWindow();
+    if (window != nullptr) {
+        rate = window->GetCurrentRefreshRate();
+    }
+    SPDLOG_INFO("game ticks {:.2f} of {} a second at {:.2f} sub-frames a tick, display {} Hz", ticks / seconds,
+                60 / gVIsPerFrame, (double)subframeTotal / ticks, rate);
+    __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
+                        "game ticks %.2f of %d a second at %.2f sub-frames a tick, display %u Hz", ticks / seconds,
+                        60 / gVIsPerFrame, (double)subframeTotal / ticks, rate);
+
+    since = now;
+    ticks = 0;
+    subframeTotal = 0;
+#else
+    (void)subframes;
+#endif
+}
+
 SubframePacing ComputeSubframePacing() {
     int target_fps = (int)GameEngine::Instance->GetInterpolationFPS();
 
@@ -1607,6 +1647,7 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     const SubframePacing pacing = ComputeSubframePacing();
     const int subframesPerTick = pacing.subframes;
     const int fps = pacing.fps;
+    ReportTickRate(pacing.subframes);
 
     // Emit exactly subframesPerTick sub-frames with t values evenly spaced.
     // No accumulator carry: each tick is independent so VI changes don't
