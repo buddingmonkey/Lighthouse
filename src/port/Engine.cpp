@@ -1584,6 +1584,11 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 2.0f, 1.0f, pushedScale, Fast::GetXrWindowScale(),
                   Fast::SetXrWindowScale, [](float value) { return value; });
 
+    // The window covers part of the view, and everything the game draws past what that window can
+    // show is thrown away. Internal Resolution multiplies that fit rather than the panel, so 1 is
+    // one game pixel to an eye pixel and 2 is a picture the blit resolves down.
+    wnd->SetResolutionMultiplier(CVarGetFloat(CVAR_INTERNAL_RESOLUTION, 1.0f) * Fast::GetXrRenderScale());
+
     Fast::SetXrStereo(CVarGetInteger(CVAR_SETTING("XrStereo"), 1) != 0);
     Fast::SetXrEdgeSoftness(CVarGetFloat(CVAR_SETTING("XrEdgeSoftness"), 0.36f));
     Fast::SetXrEdgeFloat(CVarGetFloat(CVAR_SETTING("XrEdgeFloat"), 0.15f));
