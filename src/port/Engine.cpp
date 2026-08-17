@@ -1386,10 +1386,15 @@ inline long long NsSince(Clock::time_point t0) {
 // In-flight async builds of interpolated sub-frame replacement maps
 std::vector<std::future<void>> sMapBuildFutures;
 
-// Cost of the most recent sub-frame, and the wall time this pass may spend:
-// subframes/paceFps is exactly the game time one task represents.
-long long sLastSubFrameNs = 0;
+// The wall time this pass may spend: subframes/paceFps is exactly the game time one task
+// represents.
 long long sPassBudgetNs = 0;
+
+// The cost of a sub-frame, filtered, and how many sub-frames the last tick put on the screen. One
+// raw sample flaps too much to decide on, and the requested count says nothing about what was
+// delivered.
+long long sFilteredSubFrameNs = 0;
+int sDeliveredSubFrames = 0;
 } // namespace
 
 void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map<Mtx*, MtxF>>& mtx_replacements,
@@ -1412,13 +1417,14 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
     // physical memory so gFramebuffers always had valid pixel data after rendering.
     auto wndBase = Ship::Context::GetRawInstance()->GetWindow();
     const auto passT0 = Clock::now();
+    sDeliveredSubFrames = 0;
     for (size_t frameIdx = 0; frameIdx < frameCount; frameIdx++) {
         if (frameIdx >= 1 && frameIdx - 1 < sMapBuildFutures.size()) {
             sMapBuildFutures[frameIdx - 1].wait();
         }
         // Stop once another sub-frame no longer fits in what the tick's worth
         // of wall time has left.
-        if (frameIdx > 0 && sLastSubFrameNs > 0 && (sPassBudgetNs - NsSince(passT0)) < sLastSubFrameNs) {
+        if (frameIdx > 0 && sFilteredSubFrameNs > 0 && (sPassBudgetNs - NsSince(passT0)) < sFilteredSubFrameNs) {
             break;
         }
         const auto& m = mtx_replacements[frameIdx];
@@ -1458,7 +1464,14 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
                 drawNs += NsSince(runT0);
                 interpreter->EndFrame();
             }
-            sLastSubFrameNs = drawNs;
+            // Believe a rise at once, so a scene that gets heavy does not overrun even one tick.
+            // Ease a fall in, so one cheap sub-frame does not ask for the full count again.
+            if (drawNs > sFilteredSubFrameNs) {
+                sFilteredSubFrameNs = drawNs;
+            } else {
+                sFilteredSubFrameNs += (drawNs - sFilteredSubFrameNs) / 8;
+            }
+            sDeliveredSubFrames++;
             CALL_EVENT(FrameDrawEnd);
         }
         interpreter->mInterpolationIndex++;
@@ -1516,14 +1529,16 @@ void SelectDisplayRefreshRate(Fast::Fast3dWindow* wnd) {
 // A display the game cannot keep up with does not drop frames, it runs the game slowly: the VI
 // retrace gates a tick on the render finishing. So the speed of the game is the measurement that
 // decides whether a refresh rate can be used, and the present rate on its own says nothing.
-void ReportTickRate(int subframes) {
+void ReportTickRate(int subframes, int delivered) {
 #ifdef ENABLE_DEBUG_TOOLS
     static auto since = std::chrono::steady_clock::now();
     static int ticks = 0;
     static long long subframeTotal = 0;
+    static long long deliveredTotal = 0;
 
     ticks++;
     subframeTotal += subframes;
+    deliveredTotal += delivered;
 
     const auto now = std::chrono::steady_clock::now();
     const double seconds = std::chrono::duration<double>(now - since).count();
@@ -1536,19 +1551,27 @@ void ReportTickRate(int subframes) {
     if (window != nullptr) {
         rate = window->GetCurrentRefreshRate();
     }
-    SPDLOG_INFO("game ticks {:.2f} of {} a second at {:.2f} sub-frames a tick, display {} Hz", ticks / seconds,
-                60 / gVIsPerFrame, (double)subframeTotal / ticks, rate);
+    SPDLOG_INFO("game ticks {:.2f} of {} a second, {:.2f} sub-frames a tick asked and {:.2f} drawn, display {} Hz",
+                ticks / seconds, 60 / gVIsPerFrame, (double)subframeTotal / ticks, (double)deliveredTotal / ticks,
+                rate);
     __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
-                        "game ticks %.2f of %d a second at %.2f sub-frames a tick, display %u Hz", ticks / seconds,
-                        60 / gVIsPerFrame, (double)subframeTotal / ticks, rate);
+                        "game ticks %.2f of %d a second, %.2f sub-frames a tick asked and %.2f drawn, display %u Hz",
+                        ticks / seconds, 60 / gVIsPerFrame, (double)subframeTotal / ticks,
+                        (double)deliveredTotal / ticks, rate);
 
     since = now;
     ticks = 0;
     subframeTotal = 0;
+    deliveredTotal = 0;
 #else
     (void)subframes;
+    (void)delivered;
 #endif
 }
+
+// Ticks between two attempts to raise the sub-frame count again. One truncated tick is the cost of
+// finding out that a scene got cheaper, so pay it about twice a second, not every tick.
+constexpr int PACING_PROBE_TICKS = 60;
 
 SubframePacing ComputeSubframePacing() {
     int target_fps = (int)GameEngine::Instance->GetInterpolationFPS();
@@ -1580,6 +1603,39 @@ SubframePacing ComputeSubframePacing() {
     int subframesPerTick = target_fps / effective_logic_fps;
     if (subframesPerTick < 1) {
         subframesPerTick = 1;
+    }
+
+    // A sub-frame the tick has no time for is not drawn: RunCommands leaves the pass part way
+    // through, and the interpolation map it built is thrown away. Ask for what the tick really
+    // delivers instead, so a heavy scene settles on a steady count rather than asking for six and
+    // putting three on the screen.
+    //
+    // The measurement is the delivered count, not the draw time. Draw time is only the part of a
+    // sub-frame between StartDraw and EndDraw: it leaves out the frame submission and the wait for
+    // the display, which on a headset is most of the cost. The delivered count already holds all
+    // of it. Pacing on the wall time of a sub-frame would not do, because the pacing itself puts
+    // the wait there, so the number would chase its own tail down to one.
+    {
+        static int allowed = 0;
+        static int probeCountdown = 0;
+        if (allowed < 1) {
+            allowed = subframesPerTick;
+        } else if (sDeliveredSubFrames > 0 && sDeliveredSubFrames < allowed) {
+            // The tick ran out of time. Believe it at once.
+            allowed = sDeliveredSubFrames;
+            probeCountdown = PACING_PROBE_TICKS;
+        } else if (--probeCountdown <= 0) {
+            // Ask for one more now and then, or a scene that gets cheaper never gets it back.
+            allowed++;
+            probeCountdown = PACING_PROBE_TICKS;
+        }
+        if (allowed < 1) {
+            allowed = 1;
+        }
+        if (allowed > subframesPerTick) {
+            allowed = subframesPerTick;
+        }
+        subframesPerTick = allowed;
     }
 
     // paceFps drives DXGI's per-present wait so that subframes * 1/paceFps =
@@ -1661,7 +1717,6 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     const SubframePacing pacing = ComputeSubframePacing();
     const int subframesPerTick = pacing.subframes;
     const int fps = pacing.fps;
-    ReportTickRate(pacing.subframes);
 
     // Emit exactly subframesPerTick sub-frames with t values evenly spaced.
     // No accumulator carry: each tick is independent so VI changes don't
@@ -1705,6 +1760,7 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     }
 
     RunCommands(commands, mtx_replacements, activeFrames);
+    ReportTickRate(pacing.subframes, sDeliveredSubFrames);
 
     // Drain any builds the render loop didn't consume (debugger path, early
     // return) before the next tick's StartRecord resets the trees they read.
