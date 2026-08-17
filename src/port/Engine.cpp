@@ -1625,10 +1625,11 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     // same two numbers from inside the headset.
     static float pushedRange = 0.0f;
     static float pushedScale = 0.0f;
-    SyncXrSetting(CVAR_SETTING("XrWindowRange"), 0.5f, 4.0f, 0.5f, pushedRange, Fast::GetXrWindowDistance(),
+    SyncXrSetting(CVAR_SETTING("XrWindowRange"), 0.5f, 4.0f, 1.3f, pushedRange, Fast::GetXrWindowDistance(),
                   Fast::SetXrWindowDistance, [](float value) { return value; });
-    SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 8.0f, 1.0f, pushedScale, Fast::GetXrWindowScale(),
+    SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 8.0f, 2.6f, pushedScale, Fast::GetXrWindowScale(),
                   Fast::SetXrWindowScale, [](float value) { return value; });
+    Fast::SetXrDioramaDepth(CVarGetFloat(CVAR_SETTING("XrDioramaDepth"), 2.0f));
 
     // The window covers part of the view, and everything the game draws past what that window can
     // show is thrown away. Internal Resolution multiplies that fit rather than the panel, so 1 is
