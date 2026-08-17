@@ -1395,6 +1395,45 @@ long long sPassBudgetNs = 0;
 // delivered.
 long long sFilteredSubFrameNs = 0;
 int sDeliveredSubFrames = 0;
+
+// A headset walks the display list once per eye, so a list the processor is slow to walk is slow
+// twice. This tells a sub-frame the processor holds up from one the graphics chip holds up: the
+// draw time goes up with the first and stays where it is with the second.
+void ReportDrawTime(long long drawNs, uint32_t views) {
+#ifdef ENABLE_DEBUG_TOOLS
+    static auto since = std::chrono::steady_clock::now();
+    static long long total = 0;
+    static long long worst = 0;
+    static int subframes = 0;
+
+    total += drawNs;
+    if (drawNs > worst) {
+        worst = drawNs;
+    }
+    subframes++;
+
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds = std::chrono::duration<double>(now - since).count();
+    if (seconds < 5.0) {
+        return;
+    }
+
+    SPDLOG_INFO("draw {:.2f} ms a sub-frame, worst {:.2f} ms, {} views, {:.1f} sub-frames a second",
+                total / (double)subframes / 1.0e6, worst / 1.0e6, views, subframes / seconds);
+    __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
+                        "draw %.2f ms a sub-frame, worst %.2f ms, %u views, %.1f sub-frames a second",
+                        total / (double)subframes / 1.0e6, worst / 1.0e6, views, subframes / seconds);
+
+    since = now;
+    total = 0;
+    worst = 0;
+    subframes = 0;
+#else
+    (void)drawNs;
+    (void)views;
+#endif
+}
+
 } // namespace
 
 void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map<Mtx*, MtxF>>& mtx_replacements,
@@ -1472,6 +1511,7 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
                 sFilteredSubFrameNs += (drawNs - sFilteredSubFrameNs) / 8;
             }
             sDeliveredSubFrames++;
+            ReportDrawTime(drawNs, views);
             CALL_EVENT(FrameDrawEnd);
         }
         interpreter->mInterpolationIndex++;
