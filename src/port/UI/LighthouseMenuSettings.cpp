@@ -440,12 +440,12 @@ void LighthouseMenu::AddMenuSettings() {
         .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
         .Options(FloatSliderOptions()
                      .Tooltip("How far away the window hangs. The window keeps the size it has, so a further range "
-                              "makes it small in the eye and takes the whole diorama out into the room with it. A "
-                              "near window holds a small world with more depth in it.\n\nThe move bar under the "
-                              "window sets the same range, so this reads back what a pull towards you left.")
+                              "makes it small in the eye and takes it out into the room. The depth of the world "
+                              "behind it does not change with the range.\n\nThe move bar under the window sets the "
+                              "same range, so this reads back what a pull towards you left.")
                      .Min(0.5f)
                      .Max(4.0f)
-                     .DefaultValue(0.5f)
+                     .DefaultValue(1.3f)
                      .Format("%.2f m"));
     AddWidget(path, "Window Size", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrWindowScale"))
@@ -457,8 +457,22 @@ void LighthouseMenu::AddMenuSettings() {
                               "move the window out, then make it larger.\n\nThe corner handles set the same size.")
                      .Min(0.5f)
                      .Max(8.0f)
-                     .DefaultValue(1.0f)
+                     .DefaultValue(2.6f)
                      .Format("%.2f"));
+    AddWidget(path, "Diorama Depth", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("XrDioramaDepth"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(FloatSliderOptions()
+                     .Tooltip("How deep the world reaches behind the glass. The farthest thing the game draws sits "
+                              "this far behind the window, and everything nearer sorts itself in between, whatever "
+                              "the range and size of the window.\n\nA small depth keeps the whole world near the "
+                              "glass, which is the easiest to look at for a long session. No depth can make the "
+                              "eyes diverge.")
+                     .Min(0.5f)
+                     .Max(4.0f)
+                     .DefaultValue(2.0f)
+                     .Format("%.2f m"));
     AddWidget(path, "Edge Float", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrEdgeFloat"))
         .RaceDisable(false)
