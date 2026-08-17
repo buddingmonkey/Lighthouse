@@ -11,3 +11,11 @@ extern "C" void port_xr_beginFlat(Gfx** gfx) {
 extern "C" void port_xr_endFlat(Gfx** gfx) {
     gSPXrFlatProjection((*gfx)++, 0);
 }
+
+extern "C" void port_xr_beginNoSceneDepth(Gfx** gfx) {
+    gSPXrSceneDepth((*gfx)++, 0);
+}
+
+extern "C" void port_xr_endNoSceneDepth(Gfx** gfx) {
+    gSPXrSceneDepth((*gfx)++, 1);
+}
