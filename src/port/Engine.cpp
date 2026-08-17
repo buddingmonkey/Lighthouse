@@ -73,6 +73,11 @@ static constexpr float MENU_ANGLE_PER_UNIT = 0.0009f;
 static constexpr float MENU_ANGLE_MIN = 0.75f;
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
 
+bool IsHeadsetWindow() {
+    auto window = Ship::Context::GetRawInstance()->GetWindow();
+    return window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+}
+
 uint32_t DefaultImGuiScaleIndex() {
 #ifdef LIGHTHOUSE_MOBILE
     // A tablet takes the larger menu; a phone has too little screen to navigate it, so split at a 600 short side.
@@ -80,6 +85,11 @@ uint32_t DefaultImGuiScaleIndex() {
         auto window = Ship::Context::GetRawInstance()->GetWindow();
         if (window == nullptr) {
             return 0u;
+        }
+        // A headset window is measured in an angle, not in a screen size, so it takes the unit the
+        // angle is set in rather than the phone or tablet step.
+        if (IsHeadsetWindow()) {
+            return 1u;
         }
         float shortSide = static_cast<float>(std::min(window->GetWidth(), window->GetHeight()));
 #ifdef __ANDROID__
@@ -97,11 +107,6 @@ uint32_t DefaultImGuiScaleIndex() {
 #else
     return 1;
 #endif
-}
-
-bool IsHeadsetWindow() {
-    auto window = Ship::Context::GetRawInstance()->GetWindow();
-    return window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
 }
 
 // Android counts window units in pixels where iOS counts points, so the menu comes out much smaller there.
@@ -1224,6 +1229,8 @@ void GameEngine::Destroy() {
 }
 
 void GameEngine::StartFrame() const {
+    ScaleImGui();
+
     using Ship::KbScancode;
     const int32_t dwScancode = this->context->GetWindow()->GetLastScancode();
     this->context->GetWindow()->SetLastScancode(-1);
