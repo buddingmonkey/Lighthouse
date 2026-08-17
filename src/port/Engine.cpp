@@ -4,6 +4,9 @@
 #include <fstream>
 #include <chrono>
 #include <future>
+#ifdef ENABLE_DEBUG_TOOLS
+#include <android/log.h>
+#endif
 #if defined(__linux__) || defined(__APPLE__)
 #include <unistd.h>
 #include <cerrno>
@@ -62,6 +65,12 @@
 #endif
 
 const float imguiScaleOptionToValue[4] = { 0.75f, 1.0f, 1.5f, 2.0f };
+
+// Radians of the window one unit of ImGui scale covers, for a menu drawn on a window in the room,
+// and the smallest angle the menu is laid out for. The floor holds about 830 units of menu width,
+// which is what the widest row needs.
+static constexpr float MENU_ANGLE_PER_UNIT = 0.0009f;
+static constexpr float MENU_ANGLE_MIN = 0.75f;
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
 
 uint32_t DefaultImGuiScaleIndex() {
@@ -108,16 +117,23 @@ float ImGuiDensityScale() {
         return 1.0f;
     }();
 
-    // A headset reads the menu on a window in the room, not at arm's length, and the display DPI
-    // above describes neither. The 0.66 was measured on a window 43.6 degrees wide, so the scale
-    // follows the width the window actually has: a wider one spreads the same pixels over more of
-    // the eye and needs fewer of them per letter. A window put far away and left small asks for
-    // more than the menu can give, so the letters stop growing before they stop fitting.
+    // A headset reads the menu on a window in the room, and the only thing that decides whether a
+    // letter can be read is the angle it covers in the eye. That angle is the angle the window
+    // spans over the width of the picture drawn on it, so the scale is the width over the angle and
+    // the display DPI does not come into it. DPI stood in for the width before, which held on a
+    // headset whose panel is the picture and failed on one that draws the game across a whole
+    // binocular panel: Quest hands the game 4128 pixels where Galaxy XR hands it 1536, and the same
+    // DPI gave letters a third of the angle.
+    //
+    // A window put far away and left small covers too small an angle to hold a menu at that rate.
+    // The angle has a floor, so the letters give up their angle rather than the menu its width.
     if (IsHeadsetWindow()) {
 #ifdef ENABLE_OPENXR
+        auto window = Ship::Context::GetRawInstance()->GetWindow();
         const float angularWidth = Fast::GetXrWindowAngularWidth();
-        if (angularWidth > 0.0f) {
-            return density * 0.66f * std::clamp(0.761f / angularWidth, 0.5f, 2.0f);
+        if (angularWidth > 0.0f && window != nullptr && window->GetWidth() > 0) {
+            return MENU_ANGLE_PER_UNIT * static_cast<float>(window->GetWidth()) /
+                   std::max(angularWidth, MENU_ANGLE_MIN);
         }
 #endif
         return density * 0.66f;
@@ -128,7 +144,6 @@ float ImGuiDensityScale() {
 #endif
 }
 
-int32_t previousImGuiScaleIndex = -1;
 // Tracks the scale already baked into the ImGui style, which always starts unscaled.
 float previousImGuiScale = 1.0f;
 bool portArchiveVersionMatch = false;
@@ -274,7 +289,6 @@ GameEngine::GameEngine() {
         ImGui::GetIO().FontDefault = fontStandardLarger;
     }
 
-    previousImGuiScaleIndex = -1;
     previousImGuiScale = 1.0f;
     ScaleImGui();
 }
@@ -1126,16 +1140,17 @@ ImFont* GameEngine::CreateFontWithSize(float size, std::string fontPath) {
 
 void GameEngine::ScaleImGui() {
     int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", DefaultImGuiScaleIndex());
-    if (imGuiScaleIndex == previousImGuiScaleIndex) {
+    float scale = imguiScaleOptionToValue[imGuiScaleIndex] * ImGuiDensityScale();
+    // On a headset the scale follows the window as well as the setting, and the window resizes when
+    // the game first says what field of view it needs and whenever a hand pulls a corner.
+    if (fabsf(scale - previousImGuiScale) < 0.001f) {
         return;
     }
 
-    float scale = imguiScaleOptionToValue[imGuiScaleIndex] * ImGuiDensityScale();
     float newScale = scale / previousImGuiScale;
     ImGui::GetStyle().ScaleAllSizes(newScale);
     ImGui::GetIO().FontGlobalScale = scale;
     previousImGuiScale = scale;
-    previousImGuiScaleIndex = imGuiScaleIndex;
 }
 
 void GameEngine::Create(int argc, char* argv[]) {
@@ -1469,23 +1484,63 @@ struct SubframePacing {
 // runs its logic at 30 Hz, and a 72 Hz panel therefore presents 60. Ask for the fastest rate that
 // divides, once, and let ComputeSubframePacing read it back through GetCurrentRefreshRate.
 void SelectDisplayRefreshRate(Fast::Fast3dWindow* wnd) {
-    static bool asked = false;
-    if (asked) {
+    // Quest offers 120 as well as 90, and both divide. The setting is how a user who would rather
+    // have the battery, or who finds the tick rate falling short, holds it down.
+    const int cap = CVarGetInteger(CVAR_SETTING("XrMaxRate"), 120);
+    static int askedCap = 0;
+    if (askedCap == cap) {
         return;
     }
-    asked = true;
+    askedCap = cap;
 
     const float logicRate = 60.0f / gVIsPerFrame;
     float wanted = 0.0f;
     for (float rate : wnd->GetSupportedRefreshRates()) {
         const float multiple = rate / logicRate;
-        if (fabsf(multiple - roundf(multiple)) < 0.01f && rate > wanted) {
+        if (fabsf(multiple - roundf(multiple)) < 0.01f && rate > wanted && rate <= (float)cap) {
             wanted = rate;
         }
     }
     if (wanted > 0.0f) {
         wnd->SetRefreshRate(wanted);
     }
+}
+
+// A display the game cannot keep up with does not drop frames, it runs the game slowly: the VI
+// retrace gates a tick on the render finishing. So the speed of the game is the measurement that
+// decides whether a refresh rate can be used, and the present rate on its own says nothing.
+void ReportTickRate(int subframes) {
+#ifdef ENABLE_DEBUG_TOOLS
+    static auto since = std::chrono::steady_clock::now();
+    static int ticks = 0;
+    static long long subframeTotal = 0;
+
+    ticks++;
+    subframeTotal += subframes;
+
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds = std::chrono::duration<double>(now - since).count();
+    if (seconds < 5.0) {
+        return;
+    }
+
+    uint32_t rate = 0;
+    auto window = Ship::Context::GetRawInstance()->GetWindow();
+    if (window != nullptr) {
+        rate = window->GetCurrentRefreshRate();
+    }
+    SPDLOG_INFO("game ticks {:.2f} of {} a second at {:.2f} sub-frames a tick, display {} Hz", ticks / seconds,
+                60 / gVIsPerFrame, (double)subframeTotal / ticks, rate);
+    __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
+                        "game ticks %.2f of %d a second at %.2f sub-frames a tick, display %u Hz", ticks / seconds,
+                        60 / gVIsPerFrame, (double)subframeTotal / ticks, rate);
+
+    since = now;
+    ticks = 0;
+    subframeTotal = 0;
+#else
+    (void)subframes;
+#endif
 }
 
 SubframePacing ComputeSubframePacing() {
@@ -1575,6 +1630,11 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 8.0f, 1.0f, pushedScale, Fast::GetXrWindowScale(),
                   Fast::SetXrWindowScale, [](float value) { return value; });
 
+    // The window covers part of the view, and everything the game draws past what that window can
+    // show is thrown away. Internal Resolution multiplies that fit rather than the panel, so 1 is
+    // one game pixel to an eye pixel and 2 is a picture the blit resolves down.
+    wnd->SetResolutionMultiplier(CVarGetFloat(CVAR_INTERNAL_RESOLUTION, 1.0f) * Fast::GetXrRenderScale());
+
     Fast::SetXrStereo(CVarGetInteger(CVAR_SETTING("XrStereo"), 1) != 0);
     Fast::SetXrEdgeSoftness(CVarGetFloat(CVAR_SETTING("XrEdgeSoftness"), 0.36f));
     Fast::SetXrEdgeFloat(CVarGetFloat(CVAR_SETTING("XrEdgeFloat"), 0.15f));
@@ -1593,6 +1653,7 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     const SubframePacing pacing = ComputeSubframePacing();
     const int subframesPerTick = pacing.subframes;
     const int fps = pacing.fps;
+    ReportTickRate(pacing.subframes);
 
     // Emit exactly subframesPerTick sub-frames with t values evenly spaced.
     // No accumulator carry: each tick is independent so VI changes don't
