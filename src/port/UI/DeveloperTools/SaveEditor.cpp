@@ -1,10 +1,12 @@
 #include "SaveEditor.h"
+#include "SaveEditorTooltips.h"
 #include "port/Rando/Rando.h"
 #include "port/Rando/Logic/Logic.h"
 #include "port/Rando/CustomObject/CustomObject.h"
 #include "port/Enhancements/Events/Hooks/Events.h"
 #include "port/UI/UIWidgets.hpp"
 #include "port/UI/Notification.h"
+#include "port/Save/Types.h"
 #include "port/ShipUtils.h"
 
 #include <string>
@@ -21,14 +23,13 @@
 #define DEFAULT_MAX_RED_FEATHERS 50
 #define DEFAULT_MAX_GOLD_FEATHERS 10
 
-#define JIGGY_ID_MULTIPLIER(levelId) (1 + (10 * (levelId - 1)))
-#define HONEYCOMB_ID_MULTIPLIER(levelId) (1 + (2 * (levelId - 1)))
-
 extern "C" {
 bool ability_isUnlocked(enum ability_e uid);
 void jiggyscore_setCollected(s32 indx, s32 val);
 void honeycombscore_set(enum honeycomb_e indx, bool val);
 void mumboscore_set(enum mumbotoken_e indx, bool val);
+s32 itemscore_noteScores_get(enum level_e lvl_id);
+extern u8 D_80385FF0[0xE];
 
 extern struct {
     u8 D_803832C0[0xD];
@@ -36,6 +37,7 @@ extern struct {
 } jiggyscore;
 
 extern u8 sHoneycombScore[3];
+extern u8 sMumboTokenScore[16];
 }
 
 std::vector<std::string> warpCauldronList = {
@@ -82,39 +84,53 @@ bool SaveEditor_IsHoneycombCollected(honeycomb_e honeycombId) {
     return (sHoneycombScore[(honeycombId - 1) / 8] & (1 << (honeycombId & 7))) != 0;
 }
 
+bool SaveEditor_IsMumboTokenCollected(mumbotoken_e tokenId) {
+    return (sMumboTokenScore[(tokenId - 1) / 8] & (1 << (tokenId & 7))) != 0;
+}
+
+static const WorldDef* SaveEditor_GetWorldDef(int32_t levelId) {
+    for (const WorldDef& world : kWorlds) {
+        if (world.levelId == levelId) {
+            return &world;
+        }
+    }
+    return nullptr;
+}
+
 void SaveEditor_UpdateCheckTracker(RandoSaveCheck randoSaveCheck) {
-    if (randoSaveCheck.obtained) {
+    if (randoSaveCheck.eligible) {
         CustomObject::CheckObtainedEX(randoSaveCheck.randoCheckId);
     }
 
     for (auto& pool : Rando::Logic::shuffledPool) {
         if (pool.randoCheckId == randoSaveCheck.randoCheckId) {
             pool.isShuffled = randoSaveCheck.isShuffled;
-            pool.obtained = randoSaveCheck.obtained;
+            pool.eligible = randoSaveCheck.eligible;
             pool.skipped = randoSaveCheck.skipped;
             break;
         }
     }
 
-    int32_t itemIncr = randoSaveCheck.obtained ? 1 : -1;
+    int32_t itemIncr = randoSaveCheck.eligible ? 1 : -1;
 
-    switch (randoSaveCheck.randoItemId) {
-        case RI_JIGGY:
-            jiggyscore_setCollected(randoSaveCheck.randoCollectionId, randoSaveCheck.obtained);
+    Rando::StaticData::RandoStaticItem randoItem = Rando::StaticData::Items[randoSaveCheck.randoItemId];
+    switch (randoItem.randoItemType) {
+        case RITYPE_JIGGY:
+            jiggyscore_setCollected(randoSaveCheck.randoCollectionId, randoSaveCheck.eligible);
             item_adjustByDiffWithoutHud(ITEM_26_JIGGY_TOTAL, itemIncr);
             break;
-        case RI_EMPTY_HONEYCOMB:
-            honeycombscore_set((honeycomb_e)randoSaveCheck.randoCollectionId, randoSaveCheck.obtained);
+        case RITYPE_EMPTY_HONEYCOMB:
+            honeycombscore_set((honeycomb_e)randoSaveCheck.randoCollectionId, randoSaveCheck.eligible);
             break;
-        case RI_MOLEHILL:
-            if (randoSaveCheck.obtained) {
+        case RITYPE_MOLEHILL:
+            if (randoSaveCheck.eligible) {
                 ability_unlock((ability_e)randoSaveCheck.randoCollectionId);
             } else {
                 ability_setLearned((ability_e)randoSaveCheck.randoCollectionId, 0);
             }
             break;
-        case RI_MUMBO_TOKEN:
-            mumboscore_set((mumbotoken_e)randoSaveCheck.randoCollectionId, randoSaveCheck.obtained);
+        case RITYPE_MUMBO_TOKEN:
+            mumboscore_set((mumbotoken_e)randoSaveCheck.randoCollectionId, randoSaveCheck.eligible);
             item_adjustByDiffWithoutHud(ITEM_1C_MUMBO_TOKEN, itemIncr);
             break;
         default:
@@ -289,28 +305,42 @@ void SaveEditor_DrawProgressTab() {
     if (ImGui::BeginChild("ProgressChild")) {
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
         for (auto& level : levelOrder) {
-            int32_t jiggyId = JIGGY_ID_MULTIPLIER(level);
-            int32_t combId = HONEYCOMB_ID_MULTIPLIER(level);
-
-            if (level > LEVEL_6_LAIR) {
-                combId = HONEYCOMB_ID_MULTIPLIER(level - 1);
+            const WorldDef* world = SaveEditor_GetWorldDef(level);
+            if (world == nullptr) {
+                continue;
             }
 
             ImGui::SeparatorText(worldNameList[level - 1].c_str());
             if (ImGui::BeginTable("WorldTable", 2, ImGuiTableFlags_SizingFixedFit)) {
                 ImGui::TableNextColumn();
 
-                if (level != LEVEL_B_SPIRAL_MOUNTAIN) {
+                if (world->hasNoteScore) {
+                    ImGui::Text("100 Notes");
+                    ImGui::TableNextColumn();
+                    bool hasAllNotes = itemscore_noteScores_get(level) >= 100;
+                    std::string noteLabel = "##notes" + std::to_string(level);
+
+                    ImGui::SameLine();
+                    if (UIWidgets::Checkbox(noteLabel.c_str(), &hasAllNotes,
+                                            { .labelPosition = UIWidgets::LabelPositions::None })) {
+                        D_80385FF0[level] = hasAllNotes ? 100 : 0;
+                    }
+                    ImGui::TableNextColumn();
+                }
+
+                if (world->jiggyCount > 0) {
                     ImGui::Text("Jiggies");
                     ImGui::TableNextColumn();
-                    for (int i = jiggyId; i <= (jiggyId + 9); i++) {
+                    for (int i = world->jiggyStart; i < (world->jiggyStart + world->jiggyCount); i++) {
                         std::string labelStr = "##jiggy" + std::to_string(i);
                         bool isCollected = SaveEditor_IsJiggyCollected((jiggy_e)i);
                         int32_t curJiggyCount = item_getCount(ITEM_26_JIGGY_TOTAL);
 
                         ImGui::SameLine();
                         if (UIWidgets::Checkbox(labelStr.c_str(), &isCollected,
-                                                { .labelPosition = UIWidgets::LabelPositions::None })) {
+                                                UIWidgets::CheckboxOptions()
+                                                    .LabelPosition(UIWidgets::LabelPositions::None)
+                                                    .Tooltip(SaveEditor_GetJiggyTooltip((jiggy_e)i)))) {
                             if (SaveEditor_IsJiggyCollected((jiggy_e)i)) {
                                 jiggyscore_setCollected(i, false);
                                 item_set(ITEM_26_JIGGY_TOTAL, (curJiggyCount - 1));
@@ -325,24 +355,62 @@ void SaveEditor_DrawProgressTab() {
                 }
 
                 ImGui::TableNextColumn();
-                if (level != LEVEL_6_LAIR) {
-                    ImGui::Text("Honeycombs");
+                if (world->mumboCount > 0) {
+                    ImGui::Text("Mumbo Tokens");
                     ImGui::TableNextColumn();
-                    int32_t maxHoneycombs = level == LEVEL_B_SPIRAL_MOUNTAIN ? 6 : 2;
-                    for (int i = 1; i <= (maxHoneycombs); i++) {
+                    int32_t tokenCount = world->mumboCount;
+                    if (level == LEVEL_A_MAD_MONSTER_MANSION &&
+                        CVarGetInteger(CVAR_ENHANCEMENT("Fixes.MumboTokenMMM"), 0)) {
+                        tokenCount++;
+                    }
+                    for (int i = 1; i <= tokenCount; i++) {
+                        int32_t tokenId =
+                            (i > world->mumboCount) ? RP_MUMBO_TOKEN_INSIDE_LOGGO : world->mumboStart + (i - 1);
+                        std::string labelStr = "##token" + std::to_string(tokenId);
+                        bool isCollected = SaveEditor_IsMumboTokenCollected((mumbotoken_e)tokenId);
+                        int32_t curTokenCount = item_getCount(ITEM_1C_MUMBO_TOKEN);
+
+                        // Wrap every 10 so the wider worlds don't run off the window.
+                        if (i == 1 || (i % 10) != 1) {
+                            ImGui::SameLine();
+                        }
+                        if (UIWidgets::Checkbox(labelStr.c_str(), &isCollected,
+                                                UIWidgets::CheckboxOptions()
+                                                    .LabelPosition(UIWidgets::LabelPositions::None)
+                                                    .Tooltip(SaveEditor_GetMumboTokenTooltip((mumbotoken_e)tokenId)))) {
+                            if (SaveEditor_IsMumboTokenCollected((mumbotoken_e)tokenId)) {
+                                mumboscore_set((mumbotoken_e)tokenId, false);
+                                item_set(ITEM_1C_MUMBO_TOKEN, (curTokenCount - 1));
+                            } else {
+                                mumboscore_set((mumbotoken_e)tokenId, true);
+                                item_set(ITEM_1C_MUMBO_TOKEN, (curTokenCount + 1));
+                            }
+                        }
+                    }
+                } else {
+                    ImGui::TableNextColumn();
+                }
+
+                ImGui::TableNextColumn();
+                if (world->honeycombCount > 0) {
+                    ImGui::Text("Empty Honeycombs");
+                    ImGui::TableNextColumn();
+                    for (int combId = world->honeycombStart; combId < (world->honeycombStart + world->honeycombCount);
+                         combId++) {
                         std::string labelStr = "##comb" + std::to_string(combId);
                         bool isCollected = SaveEditor_IsHoneycombCollected((honeycomb_e)combId);
 
                         ImGui::SameLine();
                         if (UIWidgets::Checkbox(labelStr.c_str(), &isCollected,
-                                                { .labelPosition = UIWidgets::LabelPositions::None })) {
+                                                UIWidgets::CheckboxOptions()
+                                                    .LabelPosition(UIWidgets::LabelPositions::None)
+                                                    .Tooltip(SaveEditor_GetHoneycombTooltip((honeycomb_e)combId)))) {
                             if (SaveEditor_IsHoneycombCollected((honeycomb_e)combId)) {
                                 honeycombscore_set((honeycomb_e)combId, false);
                             } else {
                                 honeycombscore_set((honeycomb_e)combId, true);
                             }
                         }
-                        combId++;
                     }
                 }
                 ImGui::EndTable();
@@ -387,13 +455,16 @@ void DrawRandoCheckEditor() {
         }
 
         if (ImGui::BeginChild("RandoToolsChild", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
-            if (ImGui::BeginTable("RandoSaveEditorTable", 6)) {
+            if (ImGui::BeginTable("RandoSaveEditorTable", 7)) {
                 ImGui::TableSetupColumn("shuffled", ImGuiTableColumnFlags_WidthFixed, 34.0f);
-                ImGui::TableSetupColumn("obtained", ImGuiTableColumnFlags_WidthFixed, 34.0f);
+                ImGui::TableSetupColumn("eligible", ImGuiTableColumnFlags_WidthFixed, 34.0f);
+                ImGui::TableSetupColumn("received", ImGuiTableColumnFlags_WidthFixed, 34.0f);
                 ImGui::TableSetupColumn("skipped", ImGuiTableColumnFlags_WidthFixed, 34.0f);
-                ImGui::TableSetupColumn("checkName", ImGuiTableColumnFlags_WidthStretch, 3.5f);
-                ImGui::TableSetupColumn("itemName", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-                ImGui::TableSetupColumn("collectionId", ImGuiTableColumnFlags_WidthStretch, 0.5f);
+                ImGui::TableSetupColumn("checkName", ImGuiTableColumnFlags_WidthFixed,
+                                        (ImGui::GetContentRegionAvail().x - 34.0f) * 0.60f);
+                ImGui::TableSetupColumn("itemName", ImGuiTableColumnFlags_WidthFixed,
+                                        (ImGui::GetContentRegionAvail().x - 34.0f) * 0.25f);
+                ImGui::TableSetupColumn("collectionId", ImGuiTableColumnFlags_WidthFixed, 34.0f);
                 ImGui::TableNextColumn();
 
                 for (auto& check : RANDO_SAVE_CHECKS) {
@@ -414,25 +485,35 @@ void DrawRandoCheckEditor() {
                     ImGui::PushID(check.randoCheckId);
                     bool isChanged = false;
                     bool isShuffled = check.isShuffled;
-                    bool obtained = check.obtained;
+                    bool eligible = check.eligible;
+                    bool received = check.received;
                     bool skipped = check.skipped;
 
+                    std::string checkId = std::to_string((uint32_t)check.randoCheckId);
+
                     if (UIWidgets::Checkbox(
-                            "isShuffled", &isShuffled,
+                            ("isShuffled##" + checkId).c_str(), &isShuffled,
                             UIWidgets::CheckboxOptions().LabelPosition(UIWidgets::LabelPositions::None))) {
                         RANDO_SAVE_CHECKS[check.randoCheckId].isShuffled = !check.isShuffled;
                         isChanged = true;
                     }
                     ImGui::TableNextColumn();
                     if (UIWidgets::Checkbox(
-                            "obtained", &obtained,
+                            ("eligible##" + checkId).c_str(), &eligible,
                             UIWidgets::CheckboxOptions().LabelPosition(UIWidgets::LabelPositions::None))) {
-                        RANDO_SAVE_CHECKS[check.randoCheckId].obtained = !check.obtained;
+                        RANDO_SAVE_CHECKS[check.randoCheckId].eligible = !check.eligible;
                         isChanged = true;
                     }
                     ImGui::TableNextColumn();
                     if (UIWidgets::Checkbox(
-                            "skipped", &skipped,
+                            ("received##" + checkId).c_str(), &received,
+                            UIWidgets::CheckboxOptions().LabelPosition(UIWidgets::LabelPositions::None))) {
+                        RANDO_SAVE_CHECKS[check.randoCheckId].received = !check.received;
+                        isChanged = true;
+                    }
+                    ImGui::TableNextColumn();
+                    if (UIWidgets::Checkbox(
+                            ("skipped##" + checkId).c_str(), &skipped,
                             UIWidgets::CheckboxOptions().LabelPosition(UIWidgets::LabelPositions::None))) {
                         RANDO_SAVE_CHECKS[check.randoCheckId].skipped = !check.skipped;
                         isChanged = true;
@@ -446,18 +527,11 @@ void DrawRandoCheckEditor() {
                     ImGui::TextWrapped("%s", checkName);
                     ImGui::TableNextColumn();
 
-                    if (check.randoItemId == RI_MOLEHILL) {
-                        TableCellCenteredText(abilityNameList[check.randoCollectionId].c_str());
-                    } else {
-                        TableCellCenteredText(itemName != nullptr ? itemName : "");
-                    }
+                    ImGui::TextWrapped(Rando::StaticData::Items[check.randoItemId].name);
                     ImGui::TableNextColumn();
 
-                    auto shuffledEntry = Rando::StaticData::Checks.find(check.shuffledCheckId);
-                    const RandoCheckType shuffledType = (shuffledEntry != Rando::StaticData::Checks.end())
-                                                            ? shuffledEntry->second.randoCheckType
-                                                            : RCTYPE_UNKNOWN;
-                    if (shuffledType != RCTYPE_JINJO && shuffledType != RCTYPE_MUSIC_NOTE) {
+                    Rando::StaticData::RandoStaticItem randoItem = Rando::StaticData::Items[check.randoItemId];
+                    if (randoItem.randoItemType != RITYPE_JINJO && randoItem.randoItemType != RITYPE_MUSIC_NOTE) {
                         TableCellCenteredText(std::to_string(check.randoCollectionId).c_str());
                     }
                     ImGui::TableNextColumn();

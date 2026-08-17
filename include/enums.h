@@ -870,7 +870,8 @@ enum comusic_e
     COMUSIC_A9_TOOTY = 0xA9,
     COMUSIC_AA_BEACH = 0xAA,
     JINGLE_JINJOATOR_FINAL_HIT,
-    COMUSIC_AC_GOOD_ENDING = 0xAC
+    COMUSIC_AC_GOOD_ENDING = 0xAC,
+    COMUSIC_NUM_TRACKS
 };
 
 // SFXR_ = Repeating SFX
@@ -2426,7 +2427,9 @@ typedef enum actor_e
     ACTOR_3C9_FURNACE_FUN_PICK_PRICE,
     ACTOR_3CA_ROCK_TRAPPING_GRUNTY,
     ACTOR_3CB_UNKNOWN,
-    ACTOR_3CC_DUMMY_PLAYER_ANCHOR = 0x3CC // Lighthouse [port] network anchor dummy player
+    ACTOR_3CC_DUMMY_PLAYER_ANCHOR = 0x3CC, // Lighthouse [port] network anchor dummy player
+    ACTOR_3CD_CUSTOM_COLLECTIBLE = 0x3CD, // Lighthouse [port] rando custom collectible
+
 } ActorID;
 
 enum bundle_e {
@@ -5969,6 +5972,7 @@ enum marker_e{
     MARKER_29E_BIGBUTT_KNOCKED_DOWN,
 
     MARKER_29F_DUMMY_PLAYER_ANCHOR,
+    MARKER_300_CUSTOM_COLLECTIBLE,
 };
 
 enum hitbox_e{

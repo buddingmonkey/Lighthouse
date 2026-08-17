@@ -8,6 +8,8 @@
 #include "port/UI/cvar_prefixes.h"
 #include "port/UI/LighthouseModMenuWindow.h"
 #include "port/UI/Notification.h"
+#include <cstddef>
+#include <cstring>
 #include <fstream>
 #include <filesystem>
 #include <regex>
@@ -147,18 +149,18 @@ static uint32_t ClampPuzzleCount(int puzzle, uint32_t value, const char* name) {
 }
 
 void RandoSaveCheck_to_json(nlohmann::json& j, const RandoSaveCheck& randoSaveCheck) {
-    j = nlohmann::json::array({ randoSaveCheck.randoCheckId, randoSaveCheck.randoItemId, randoSaveCheck.shuffledCheckId,
-                                randoSaveCheck.randoCollectionId, randoSaveCheck.isShuffled, randoSaveCheck.obtained,
-                                randoSaveCheck.skipped });
+    j = nlohmann::json::array({ randoSaveCheck.randoCheckId, randoSaveCheck.randoItemId,
+                                randoSaveCheck.randoCollectionId, randoSaveCheck.isShuffled, randoSaveCheck.eligible,
+                                randoSaveCheck.received, randoSaveCheck.skipped });
 }
 
 RandoSaveCheck RandoSaveCheck_from_json(const nlohmann::json& j, RandoSaveCheck& randoSaveCheck) {
     j.at(0).get_to(randoSaveCheck.randoCheckId);
     j.at(1).get_to(randoSaveCheck.randoItemId);
-    j.at(2).get_to(randoSaveCheck.shuffledCheckId);
-    j.at(3).get_to(randoSaveCheck.randoCollectionId);
-    j.at(4).get_to(randoSaveCheck.isShuffled);
-    j.at(5).get_to(randoSaveCheck.obtained);
+    j.at(2).get_to(randoSaveCheck.randoCollectionId);
+    j.at(3).get_to(randoSaveCheck.isShuffled);
+    j.at(4).get_to(randoSaveCheck.eligible);
+    j.at(5).get_to(randoSaveCheck.received);
     j.at(6).get_to(randoSaveCheck.skipped);
 
     return randoSaveCheck;
@@ -897,17 +899,7 @@ void SaveManager_Init() {
     REGISTER_LISTENER(OnSaveClear, EVENT_PRIORITY_NORMAL, [](IEvent* event) {
         OnSaveClear* ev = (OnSaveClear*)event;
         SaveData* saveData = (SaveData*)ev->result;
-
-        ShipSaveData ship = saveData->shipSaveData; // Retain ShipSaveData during Save Process
-
-        u8* savedata = (u8*)saveData;
-        int i;
-        for (i = 0; i < sizeof(SaveData); i++) {
-            savedata[i] = 0;
-        }
-
-        saveData = (SaveData*)savedata;
-        saveData->shipSaveData = ship;
+        memset(saveData, 0, offsetof(SaveData, shipSaveData));
 
         event->Cancelled = true;
     });
@@ -934,7 +926,7 @@ void SaveManager_Init() {
     // Decomp clears global arrays (e.g. gCompletedBottlesBonusGames) just before
     // gameFile_load fires OnGameLoad. Restore them from global.json here before
     // other OnGameLoad listeners read them.
-    REGISTER_LISTENER(OnGameLoad, EVENT_PRIORITY_HIGH, [](IEvent* event) { LoadGlobalData(); });
+    REGISTER_LISTENER(OnGameLoad, EVENT_PRIORITY_LOW, [](IEvent* event) { LoadGlobalData(); });
 }
 
 static void RegisterPersistBottlesBonus_Init() {
