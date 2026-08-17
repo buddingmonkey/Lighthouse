@@ -82,8 +82,10 @@ std::vector<std::shared_ptr<Ship::IResource>> sSoundfontResources;
 // Frame pacing and rendering
 bool sInterpolationRecorded = false;
 std::vector<std::future<void>> sMapBuildFutures;
-long long sLastSubFrameNs = 0;
 long long sPassBudgetNs = 0;
+
+long long sFilteredSubFrameNs = 0;
+int sDeliveredSubFrames = 0;
 } // namespace
 
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
@@ -580,11 +582,12 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
     interpreter->mInterpolationIndex = 0;
     auto wndBase = Ship::Context::GetRawInstance()->GetWindow();
     const auto passT0 = Clock::now();
+    sDeliveredSubFrames = 0;
     for (size_t frameIdx = 0; frameIdx < frameCount; frameIdx++) {
         if (frameIdx >= 1 && frameIdx - 1 < sMapBuildFutures.size()) {
             sMapBuildFutures[frameIdx - 1].wait();
         }
-        if (frameIdx > 0 && sLastSubFrameNs > 0 && (sPassBudgetNs - NsSince(passT0)) < sLastSubFrameNs) {
+        if (frameIdx > 0 && sFilteredSubFrameNs > 0 && (sPassBudgetNs - NsSince(passT0)) < sFilteredSubFrameNs) {
             break;
         }
         const auto& m = mtx_replacements[frameIdx];
@@ -608,7 +611,14 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
                 rapi->ClearFramebuffer(true, false);
             }
             gui->EndDraw();
-            sLastSubFrameNs = NsSince(runT0);
+            const long long subFrameNs = NsSince(runT0);
+            const long long sample = (sPassBudgetNs > 0 && subFrameNs > sPassBudgetNs) ? sPassBudgetNs : subFrameNs;
+            if (sample > sFilteredSubFrameNs) {
+                sFilteredSubFrameNs = sample;
+            } else {
+                sFilteredSubFrameNs += (sample - sFilteredSubFrameNs) / 8;
+            }
+            sDeliveredSubFrames++;
             interpreter->EndFrame();
             CALL_EVENT(FrameDrawEnd);
         }
@@ -658,6 +668,8 @@ int SubframesForTarget(int targetFps) {
     return (subframes < 1) ? 1 : subframes;
 }
 
+constexpr int PACING_PROBE_TICKS = 30;
+
 SubframePacing ComputeSubframePacing() {
     int target_fps = (int)GameEngine::Instance->GetInterpolationFPS();
     int viPerTick = CurrentViPerTick();
@@ -665,6 +677,33 @@ SubframePacing ComputeSubframePacing() {
 
     if (!sInterpolationRecorded) {
         subframesPerTick = 1;
+    }
+
+    {
+        static int allowed = 0;
+        static int probeCountdown = 0;
+        static int asked = 0;
+        static bool wasShort = false;
+        if (allowed < 1) {
+            allowed = subframesPerTick;
+        }
+        const bool isShort = asked > 0 && sDeliveredSubFrames > 0 && sDeliveredSubFrames < asked;
+        if (isShort && wasShort) {
+            allowed = sDeliveredSubFrames;
+            probeCountdown = PACING_PROBE_TICKS;
+        } else if (!isShort && --probeCountdown <= 0) {
+            allowed++;
+            probeCountdown = PACING_PROBE_TICKS;
+        }
+        wasShort = isShort;
+        if (allowed < 1) {
+            allowed = 1;
+        }
+        if (allowed > subframesPerTick + 1) {
+            allowed = subframesPerTick + 1;
+        }
+        asked = (allowed < subframesPerTick) ? allowed : subframesPerTick;
+        subframesPerTick = asked;
     }
 
     int fps = subframesPerTick * 60 / viPerTick;
