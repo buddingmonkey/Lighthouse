@@ -1399,16 +1399,22 @@ int sDeliveredSubFrames = 0;
 // A headset walks the display list once per eye, so a list the processor is slow to walk is slow
 // twice. This tells a sub-frame the processor holds up from one the graphics chip holds up: the
 // draw time goes up with the first and stays where it is with the second.
-void ReportDrawTime(long long drawNs, uint32_t views) {
+void ReportDrawTime(long long drawNs, uint32_t views, uint32_t drawCalls) {
 #ifdef ENABLE_DEBUG_TOOLS
     static auto since = std::chrono::steady_clock::now();
     static long long total = 0;
     static long long worst = 0;
+    static long long callTotal = 0;
+    static uint32_t callWorst = 0;
     static int subframes = 0;
 
     total += drawNs;
     if (drawNs > worst) {
         worst = drawNs;
+    }
+    callTotal += drawCalls;
+    if (drawCalls > callWorst) {
+        callWorst = drawCalls;
     }
     subframes++;
 
@@ -1418,19 +1424,26 @@ void ReportDrawTime(long long drawNs, uint32_t views) {
         return;
     }
 
-    SPDLOG_INFO("draw {:.2f} ms a sub-frame, worst {:.2f} ms, {} views, {:.1f} sub-frames a second",
-                total / (double)subframes / 1.0e6, worst / 1.0e6, views, subframes / seconds);
+    SPDLOG_INFO("draw {:.2f} ms a sub-frame, worst {:.2f} ms, {:.0f} draws a sub-frame, worst {}, {} views, "
+                "{:.1f} sub-frames a second",
+                total / (double)subframes / 1.0e6, worst / 1.0e6, (double)callTotal / subframes, callWorst, views,
+                subframes / seconds);
     __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
-                        "draw %.2f ms a sub-frame, worst %.2f ms, %u views, %.1f sub-frames a second",
-                        total / (double)subframes / 1.0e6, worst / 1.0e6, views, subframes / seconds);
+                        "draw %.2f ms a sub-frame, worst %.2f ms, %.0f draws a sub-frame, worst %u, %u views, "
+                        "%.1f sub-frames a second",
+                        total / (double)subframes / 1.0e6, worst / 1.0e6, (double)callTotal / subframes, callWorst,
+                        views, subframes / seconds);
 
     since = now;
     total = 0;
     worst = 0;
+    callTotal = 0;
+    callWorst = 0;
     subframes = 0;
 #else
     (void)drawNs;
     (void)views;
+    (void)drawCalls;
 #endif
 }
 
@@ -1484,6 +1497,7 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
             // A headset draws the sub-frame once per eye, each with its own off-axis projection.
             const uint32_t views = wnd->BeginRenderFrame();
             long long drawNs = 0;
+            interpreter->mDrawCallCount = 0;
             for (uint32_t view = 0; view < views; view++) {
                 wnd->BeginRenderView(view);
                 // Sample the CPU cost of producing this sub-frame, both eyes and neither present.
@@ -1511,7 +1525,7 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
                 sFilteredSubFrameNs += (drawNs - sFilteredSubFrameNs) / 8;
             }
             sDeliveredSubFrames++;
-            ReportDrawTime(drawNs, views);
+            ReportDrawTime(drawNs, views, interpreter->mDrawCallCount);
             CALL_EVENT(FrameDrawEnd);
         }
         interpreter->mInterpolationIndex++;
