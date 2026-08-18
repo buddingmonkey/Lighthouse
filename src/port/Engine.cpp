@@ -824,26 +824,67 @@ struct SubframePacing {
 // the sub-frame count below is an integer, so anything else beats against the panel. Banjo-Kazooie
 // runs its logic at 30 Hz, and a 72 Hz panel therefore presents 60. Ask for the fastest rate that
 // divides, once, and let ComputeSubframePacing read it back through GetCurrentRefreshRate.
+// Ticks to let a rate settle before the next one down is taken. The window re-asks a refused rate
+// a few times, each on an event from the runtime, so the wait has to outlast that.
+constexpr int RATE_SETTLE_TICKS = 90;
+
 void SelectDisplayRefreshRate(Fast::Fast3dWindow* wnd) {
+    if (!IsHeadsetWindow()) {
+        return;
+    }
     // Quest offers 120 as well as 90, and both divide. The setting is how a user who would rather
     // have the battery, or who finds the tick rate falling short, holds it down.
     const int cap = CVarGetInteger(CVAR_SETTING("XrMaxRate"), 120);
-    static int askedCap = 0;
-    if (askedCap == cap) {
-        return;
-    }
-    askedCap = cap;
 
+    // The rates come with the session, which is up after the first frames draw. Asking once and
+    // counting the ask as spent left the panel wherever the runtime put it, because the list was
+    // still empty at the only tick that looked at it.
     const float logicRate = 60.0f / gVIsPerFrame;
-    float wanted = 0.0f;
+    std::vector<float> rates;
     for (float rate : wnd->GetSupportedRefreshRates()) {
         const float multiple = rate / logicRate;
-        if (fabsf(multiple - roundf(multiple)) < 0.01f && rate > wanted && rate <= (float)cap) {
-            wanted = rate;
+        if (fabsf(multiple - roundf(multiple)) < 0.01f && rate <= (float)cap) {
+            rates.push_back(rate);
         }
     }
-    if (wanted > 0.0f) {
-        wnd->SetRefreshRate(wanted);
+    if (rates.empty()) {
+        return;
+    }
+    std::sort(rates.begin(), rates.end(), std::greater<float>());
+
+    static int askedCap = -1;
+    static float asked = 0.0f;
+    static int waited = 0;
+    if (askedCap != cap) {
+        askedCap = cap;
+        asked = 0.0f;
+        waited = 0;
+    }
+
+    if (asked <= 0.0f) {
+        asked = rates.front();
+        wnd->SetRefreshRate(asked);
+        waited = 0;
+        return;
+    }
+
+    // A runtime is free to refuse the rate and say nothing more about it. Wait out the window's own
+    // retries, then take the next rate down, because a panel the logic rate does not divide beats
+    // against the game for the whole run.
+    if (fabsf((float)wnd->GetCurrentRefreshRate() - asked) < 0.5f) {
+        waited = 0;
+        return;
+    }
+    if (++waited < RATE_SETTLE_TICKS) {
+        return;
+    }
+    waited = 0;
+    for (size_t i = 0; i + 1 < rates.size(); i++) {
+        if (fabsf(rates[i] - asked) < 0.5f) {
+            asked = rates[i + 1];
+            wnd->SetRefreshRate(asked);
+            return;
+        }
     }
 }
 
