@@ -22,7 +22,12 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Enumeration;
 import java.util.List;
+import java.util.zip.CRC32;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 import org.libsdl.app.SDLActivity;
 
@@ -224,7 +229,7 @@ public class LighthouseActivity extends SDLActivity {
 
     private static native void nativeFilePicked(String path);
 
-    /** Copies {@link #SHIPPED} into the external files directory, once per installed version. */
+    /** Copies {@link #SHIPPED} into the external files directory whenever the shipped bytes change. */
     private void unpackAssets() throws IOException {
         File target = getExternalFilesDir(null);
         if (target == null) {
@@ -234,26 +239,53 @@ public class LighthouseActivity extends SDLActivity {
             throw new IOException("Could not create " + target);
         }
 
-        String version = String.valueOf(getVersionCode());
+        String fingerprint = shippedFingerprint();
         File stamp = new File(target, STAMP);
-        if (stamp.isFile() && version.equals(readText(stamp))) {
+        if (stamp.isFile() && fingerprint.equals(readText(stamp))) {
             return;
         }
+        // Removed first, so a copy that stops part way is done again rather than called complete.
+        stamp.delete();
 
         AssetManager assets = getAssets();
         for (String path : SHIPPED) {
             copyAsset(assets, path, new File(target, path));
         }
-        writeText(stamp, version);
-        Log.i(TAG, "Unpacked shipped assets for version " + version);
+        writeText(stamp, fingerprint);
+        Log.i(TAG, "Unpacked shipped assets " + fingerprint);
     }
 
-    private long getVersionCode() {
-        try {
-            return getPackageManager().getPackageInfo(getPackageName(), 0).getLongVersionCode();
-        } catch (Exception e) {
-            return 0L;
+    /**
+     * The size and CRC of every shipped APK entry, read from the zip directory. The version code
+     * cannot answer this: the archives are built by a host tree and no version number counts them.
+     * Nothing is inflated, and the answer comes from the installed file rather than from the build.
+     */
+    private String shippedFingerprint() throws IOException {
+        List<String> entries = new ArrayList<>();
+        try (ZipFile apk = new ZipFile(getApplicationInfo().sourceDir)) {
+            for (Enumeration<? extends ZipEntry> e = apk.entries(); e.hasMoreElements();) {
+                ZipEntry entry = e.nextElement();
+                if (entry.isDirectory()) {
+                    continue;
+                }
+                for (String root : SHIPPED) {
+                    String prefix = "assets/" + root;
+                    if (entry.getName().equals(prefix) || entry.getName().startsWith(prefix + "/")) {
+                        entries.add(entry.getName() + ":" + entry.getSize() + ":" + entry.getCrc());
+                        break;
+                    }
+                }
+            }
         }
+        // Zip order is not promised to hold from one build to the next, and an order the digest
+        // can see would ask for a copy at random.
+        Collections.sort(entries);
+        CRC32 digest = new CRC32();
+        for (String entry : entries) {
+            digest.update(entry.getBytes(StandardCharsets.UTF_8));
+        }
+        // readText reads 64 bytes, so the stamp stays short.
+        return String.format("%08x.%d", digest.getValue(), entries.size());
     }
 
     private void copyAsset(AssetManager assets, String path, File target) throws IOException {
