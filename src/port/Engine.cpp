@@ -79,6 +79,14 @@ static constexpr float MENU_ANGLE_PER_UNIT = 0.0009f;
 static constexpr float MENU_ANGLE_MIN = 0.75f;
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
 
+// [port] Bring-up only: the particle grouping counters in src/core2/particle/particle.c.
+extern "C" {
+extern int gPartGroupedEmitters;
+extern int gPartSingleEmitters;
+extern int gPartGroups;
+extern int gPartParticles;
+}
+
 bool IsHeadsetWindow() {
     auto window = Ship::Context::GetRawInstance()->GetWindow();
     return window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
@@ -684,13 +692,17 @@ inline long long NsSince(Clock::time_point t0) {
 // A headset walks the display list once per eye, so a list the processor is slow to walk is slow
 // twice. This tells a sub-frame the processor holds up from one the graphics chip holds up: the
 // draw time goes up with the first and stays where it is with the second.
-void ReportDrawTime(long long drawNs, uint32_t views, uint32_t drawCalls) {
+void ReportDrawTime(long long drawNs, uint32_t views, uint32_t drawCalls, uint32_t drawTextures, uint32_t markedCalls,
+                    uint32_t markedTextures, uint32_t* flushCauses) {
 #ifdef ENABLE_DEBUG_TOOLS
     static auto since = std::chrono::steady_clock::now();
     static long long total = 0;
     static long long worst = 0;
     static long long callTotal = 0;
     static uint32_t callWorst = 0;
+    static uint32_t worstTextures = 0;
+    static uint32_t worstMarkedCalls = 0;
+    static uint32_t worstMarkedTextures = 0;
     static int subframes = 0;
 
     total += drawNs;
@@ -699,7 +711,13 @@ void ReportDrawTime(long long drawNs, uint32_t views, uint32_t drawCalls) {
     }
     callTotal += drawCalls;
     if (drawCalls > callWorst) {
+        // Keep the four numbers of one sub-frame together. The average hides a burst, and the
+        // question the burst asks is what the same sub-frame would cost if the draws it issued were
+        // grouped by the texture they bind.
         callWorst = drawCalls;
+        worstTextures = drawTextures;
+        worstMarkedCalls = markedCalls;
+        worstMarkedTextures = markedTextures;
     }
     subframes++;
 
@@ -709,26 +727,43 @@ void ReportDrawTime(long long drawNs, uint32_t views, uint32_t drawCalls) {
         return;
     }
 
-    SPDLOG_INFO("draw {:.2f} ms a sub-frame, worst {:.2f} ms, {:.0f} draws a sub-frame, worst {}, {} views, "
-                "{:.1f} sub-frames a second",
-                total / (double)subframes / 1.0e6, worst / 1.0e6, (double)callTotal / subframes, callWorst, views,
-                subframes / seconds);
+    SPDLOG_INFO("draw {:.2f} ms a sub-frame, worst {:.2f} ms, {:.0f} draws a sub-frame, worst {} over {} textures "
+                "({} draws over {} textures in the marked pass), {} views, {:.1f} sub-frames a second",
+                total / (double)subframes / 1.0e6, worst / 1.0e6, (double)callTotal / subframes, callWorst,
+                worstTextures, worstMarkedCalls, worstMarkedTextures, views, subframes / seconds);
     __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
-                        "draw %.2f ms a sub-frame, worst %.2f ms, %.0f draws a sub-frame, worst %u, %u views, "
-                        "%.1f sub-frames a second",
+                        "draw %.2f ms a sub-frame, worst %.2f ms, %.0f draws a sub-frame, worst %u over %u textures "
+                        "(%u draws over %u textures in the marked pass), %u views, %.1f sub-frames a second",
                         total / (double)subframes / 1.0e6, worst / 1.0e6, (double)callTotal / subframes, callWorst,
-                        views, subframes / seconds);
+                        worstTextures, worstMarkedCalls, worstMarkedTextures, views, subframes / seconds);
+    if (flushCauses != nullptr) {
+        __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
+                            "marked flush causes: depth %u decal %u vp %u sciss %u tex %u sfb %u samp %u shader %u "
+                            "alpha %u cap %u",
+                            flushCauses[0], flushCauses[1], flushCauses[2], flushCauses[3], flushCauses[4],
+                            flushCauses[5], flushCauses[6], flushCauses[7], flushCauses[8], flushCauses[9]);
+        for (int i = 0; i < 10; i++) {
+            flushCauses[i] = 0;
+        }
+    }
 
     since = now;
     total = 0;
     worst = 0;
     callTotal = 0;
     callWorst = 0;
+    worstTextures = 0;
+    worstMarkedCalls = 0;
+    worstMarkedTextures = 0;
     subframes = 0;
 #else
     (void)drawNs;
     (void)views;
     (void)drawCalls;
+    (void)drawTextures;
+    (void)markedCalls;
+    (void)markedTextures;
+    (void)flushCauses;
 #endif
 }
 
@@ -769,6 +804,11 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
             const uint32_t views = wnd->BeginRenderFrame();
             long long drawNs = 0;
             interpreter->mDrawCallCount = 0;
+#ifdef ENABLE_DEBUG_TOOLS
+            interpreter->mMarkedDrawCount = 0;
+            interpreter->mDrawTextures.clear();
+            interpreter->mMarkedTextures.clear();
+#endif
             for (uint32_t view = 0; view < views; view++) {
                 wnd->BeginRenderView(view);
                 // Sample the CPU cost of producing this sub-frame, both eyes and neither present.
@@ -799,7 +839,13 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
                 sFilteredSubFrameNs += (sample - sFilteredSubFrameNs) / 8;
             }
             sDeliveredSubFrames++;
-            ReportDrawTime(drawNs, views, interpreter->mDrawCallCount);
+#ifdef ENABLE_DEBUG_TOOLS
+            ReportDrawTime(drawNs, views, interpreter->mDrawCallCount, (uint32_t)interpreter->mDrawTextures.size(),
+                           interpreter->mMarkedDrawCount, (uint32_t)interpreter->mMarkedTextures.size(),
+                           interpreter->mMarkedFlushCauses);
+#else
+            ReportDrawTime(drawNs, views, interpreter->mDrawCallCount, 0, 0, 0, nullptr);
+#endif
             CALL_EVENT(FrameDrawEnd);
         }
         interpreter->mInterpolationIndex++;
@@ -915,6 +961,15 @@ void ReportTickRate(int subframes, int delivered) {
     auto window = Ship::Context::GetRawInstance()->GetWindow();
     if (window != nullptr) {
         rate = window->GetCurrentRefreshRate();
+    }
+    {
+        __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
+                            "particles: %d grouped emitters in %d groups, %d single, %d particles drawn grouped",
+                            gPartGroupedEmitters, gPartGroups, gPartSingleEmitters, gPartParticles);
+        gPartGroupedEmitters = 0;
+        gPartSingleEmitters = 0;
+        gPartGroups = 0;
+        gPartParticles = 0;
     }
     SPDLOG_INFO("game ticks {:.2f} of {} a second, {:.2f} sub-frames a tick asked and {:.2f} drawn, display {} Hz",
                 ticks / seconds, 60 / gVIsPerFrame, (double)subframeTotal / ticks, (double)deliveredTotal / ticks,
