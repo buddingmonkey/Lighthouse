@@ -825,16 +825,20 @@ void partEmitMgr_update(void){
 
 void partEmitMgr_drawPass0(Gfx **gdl, Mtx **mptr, Vtx **vptr){
     int i;
+    gSPTextureBatch((*gdl)++, 1);
     for(i = 0; i < partEmitMgrLength; i++){
         __particleEmitter_drawOnPass(partEmitMgr[i], gdl, mptr, vptr, 4);
     }
+    gSPTextureBatch((*gdl)++, 0);
 }
 
 void partEmitMgr_drawPass1(Gfx **gdl, Mtx **mptr, Vtx **vptr){
     int i;
+    gSPTextureBatch((*gdl)++, 1);
     for(i = 0; i < partEmitMgrLength; i++){
         __particleEmitter_drawOnPass(partEmitMgr[i], gdl, mptr, vptr, 0);
     }
+    gSPTextureBatch((*gdl)++, 0);
 }
 
 void partEmitMgr_draw(Gfx **gdl, Mtx **mptr, Vtx **vptr){
