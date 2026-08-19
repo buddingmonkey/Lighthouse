@@ -789,11 +789,14 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
                 interpreter->EndFrame();
             }
             // Believe a rise at once, so a scene that gets heavy does not overrun even one tick.
-            // Ease a fall in, so one cheap sub-frame does not ask for the full count again.
-            if (drawNs > sFilteredSubFrameNs) {
-                sFilteredSubFrameNs = drawNs;
+            // Ease a fall in, so one cheap sub-frame does not ask for the full count again. A
+            // sub-frame longer than the whole tick is a hitch and not the price of the next one,
+            // so let it raise the estimate to the budget and no further.
+            const long long sample = (sPassBudgetNs > 0 && drawNs > sPassBudgetNs) ? sPassBudgetNs : drawNs;
+            if (sample > sFilteredSubFrameNs) {
+                sFilteredSubFrameNs = sample;
             } else {
-                sFilteredSubFrameNs += (drawNs - sFilteredSubFrameNs) / 8;
+                sFilteredSubFrameNs += (sample - sFilteredSubFrameNs) / 8;
             }
             sDeliveredSubFrames++;
             ReportDrawTime(drawNs, views, interpreter->mDrawCallCount);
@@ -932,8 +935,8 @@ void ReportTickRate(int subframes, int delivered) {
 }
 
 // Ticks between two attempts to raise the sub-frame count again. One truncated tick is the cost of
-// finding out that a scene got cheaper, so pay it about twice a second, not every tick.
-constexpr int PACING_PROBE_TICKS = 60;
+// finding out that a scene got cheaper, so pay it about once a second, not every tick.
+constexpr int PACING_PROBE_TICKS = 30;
 
 // Game-logic VI per tick: gVIsPerFrame (=2 -> 30 Hz) normally; demo
 // replay and cutscene stutter raise it for slow N64 frames.
@@ -981,27 +984,43 @@ SubframePacing ComputeSubframePacing() {
     // the display, which on a headset is most of the cost. The delivered count already holds all
     // of it. Pacing on the wall time of a sub-frame would not do, because the pacing itself puts
     // the wait there, so the number would chase its own tail down to one.
+    //
+    // A cutscene, a dialog and a demo each change the VI count, and with it both the length of a
+    // tick and the count of sub-frames that fits in one. So the learned count is measured against
+    // what the last tick asked for, and a target that drops is not written back into it: the
+    // number has to survive the way out of the cutscene as well as the way in.
     {
         static int allowed = 0;
         static int probeCountdown = 0;
+        static int asked = 0;
+        static bool wasShort = false;
+
         if (allowed < 1) {
             allowed = subframesPerTick;
-        } else if (sDeliveredSubFrames > 0 && sDeliveredSubFrames < allowed) {
-            // The tick ran out of time. Believe it at once.
+        }
+
+        const bool isShort = asked > 0 && sDeliveredSubFrames > 0 && sDeliveredSubFrames < asked;
+        if (isShort && wasShort) {
+            // Two ticks in a row ran out of time, so the scene is heavy. One tick on its own is a
+            // hitch - a map load, a first texture upload - and it must not cost seconds of a lower
+            // rate, which is what the transitions into and out of a cutscene showed.
             allowed = sDeliveredSubFrames;
             probeCountdown = PACING_PROBE_TICKS;
-        } else if (--probeCountdown <= 0) {
+        } else if (!isShort && --probeCountdown <= 0) {
             // Ask for one more now and then, or a scene that gets cheaper never gets it back.
             allowed++;
             probeCountdown = PACING_PROBE_TICKS;
         }
+        wasShort = isShort;
+
         if (allowed < 1) {
             allowed = 1;
         }
-        if (allowed > subframesPerTick) {
-            allowed = subframesPerTick;
+        if (allowed > subframesPerTick + 1) {
+            allowed = subframesPerTick + 1;
         }
-        subframesPerTick = allowed;
+        asked = (allowed < subframesPerTick) ? allowed : subframesPerTick;
+        subframesPerTick = asked;
     }
 
     // paceFps drives DXGI's per-present wait so that subframes * 1/paceFps =
