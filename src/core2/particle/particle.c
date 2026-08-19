@@ -951,13 +951,17 @@ static void partEmitMgr_drawGroupedPass(Gfx **gdl, Mtx **mptr, Vtx **vptr, u32 d
 
 void partEmitMgr_drawPass0(Gfx **gdl, Mtx **mptr, Vtx **vptr){
     port_xr_beginNoSceneDepth(gdl);
+    gSPTextureBatch((*gdl)++, 1);
     partEmitMgr_drawGroupedPass(gdl, mptr, vptr, 4);
+    gSPTextureBatch((*gdl)++, 0);
     port_xr_endNoSceneDepth(gdl);
 }
 
 void partEmitMgr_drawPass1(Gfx **gdl, Mtx **mptr, Vtx **vptr){
     port_xr_beginNoSceneDepth(gdl);
+    gSPTextureBatch((*gdl)++, 1);
     partEmitMgr_drawGroupedPass(gdl, mptr, vptr, 0);
+    gSPTextureBatch((*gdl)++, 0);
     port_xr_endNoSceneDepth(gdl);
 }
 
