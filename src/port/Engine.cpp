@@ -1084,9 +1084,10 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     Fast::SetXrDioramaDepth(CVarGetFloat(CVAR_SETTING("XrDioramaDepth"), 2.0f));
 
     // The window covers part of the view, and everything the game draws past what that window can
-    // show is thrown away. Internal Resolution multiplies that fit rather than the panel, so 1 is
-    // one game pixel to an eye pixel and 2 is a picture the blit resolves down.
-    wnd->SetResolutionMultiplier(CVarGetFloat(CVAR_INTERNAL_RESOLUTION, 1.0f) * Fast::GetXrRenderScale());
+    // show is thrown away. The window backend now reports the size of that fit as the window size,
+    // so the multiplier carries Internal Resolution alone: 1 is one game pixel to an eye pixel and
+    // 2 is a picture the blit resolves down.
+    wnd->SetResolutionMultiplier(CVarGetFloat(CVAR_INTERNAL_RESOLUTION, 1.0f));
 
     Fast::SetXrStereo(CVarGetInteger(CVAR_SETTING("XrStereo"), 1) != 0);
     Fast::SetXrEdgeSoftness(CVarGetFloat(CVAR_SETTING("XrEdgeSoftness"), 0.36f));
