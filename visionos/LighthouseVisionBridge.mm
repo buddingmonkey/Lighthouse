@@ -130,6 +130,7 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
     NSError* error = nil;
     id<MTLLibrary> library = [device newLibraryWithSource:source options:nil error:&error];
     if (library == nil) {
+        NSLog(@"Lighthouse: the visionOS screen library did not compile: %@", error);
         return false;
     }
     MTLRenderPipelineDescriptor* descriptor = [MTLRenderPipelineDescriptor new];
@@ -140,12 +141,18 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
     descriptor.rasterSampleCount = color.sampleCount;
     descriptor.maxVertexAmplificationCount = cp_drawable_get_view_count(drawable);
     pipeline.render = [device newRenderPipelineStateWithDescriptor:descriptor error:&error];
+    if (pipeline.render == nil) {
+        NSLog(@"Lighthouse: the visionOS screen pipeline failed: %@", error);
+    }
 
     MTLRenderPipelineDescriptor* fillDescriptor = [MTLRenderPipelineDescriptor new];
     fillDescriptor.vertexFunction = [library newFunctionWithName:@"gameVertex"];
     fillDescriptor.fragmentFunction = [library newFunctionWithName:@"gameFragment"];
     fillDescriptor.colorAttachments[0].pixelFormat = kGameTextureFormat;
     pipeline.fill = [device newRenderPipelineStateWithDescriptor:fillDescriptor error:&error];
+    if (pipeline.fill == nil) {
+        NSLog(@"Lighthouse: the visionOS game pipeline failed: %@", error);
+    }
 
     MTLTextureDescriptor* gameDescriptor =
         [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:kGameTextureFormat
@@ -286,6 +293,7 @@ void LighthouseVisionRun(cp_layer_renderer_t renderer) {
         cp_layer_renderer_layout layout = cp_layer_renderer_configuration_get_layout(
             cp_layer_renderer_get_configuration(renderer));
         ScreenPipeline screenPipeline;
+        bool screenPipelineFailed = false;
         simd_float4x4 originFromScreen = matrix_identity_float4x4;
         bool screenPositioned = false;
 
@@ -341,8 +349,9 @@ void LighthouseVisionRun(cp_layer_renderer_t renderer) {
                         screenPositioned = true;
                     }
                     cp_drawable_set_depth_range(drawable, simd_make_float2(100.0f, 0.1f));
-                    if (screenPipeline.render == nil) {
-                        InitScreenPipeline(screenPipeline, cp_layer_renderer_get_device(renderer), drawable);
+                    if (screenPipeline.render == nil && !screenPipelineFailed) {
+                        screenPipelineFailed =
+                            !InitScreenPipeline(screenPipeline, cp_layer_renderer_get_device(renderer), drawable);
                     }
 
                     ClearDrawable(drawable, commandBuffer, layout);
