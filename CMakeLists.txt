@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.26.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.28.0 FATAL_ERROR)
 
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
@@ -9,8 +9,17 @@ include(FetchContent)
 include(cmake/lighthouse-cvars.cmake)
 include(cmake/lus-cvars.cmake)
 
+set(LIGHTHOUSE_APPLE_MOBILE OFF)
+if(CMAKE_SYSTEM_NAME MATCHES "^(iOS|visionOS)$")
+    set(LIGHTHOUSE_APPLE_MOBILE ON)
+endif()
+
 if(APPLE)
+  enable_language(OBJC)
   enable_language(OBJCXX)
+  if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+    enable_language(Swift)
+  endif()
 endif()
 
 set(EXCLUDE_MPQ_SUPPORT ON)
@@ -68,7 +77,7 @@ set(CMAKE_PROJECT_GIT_COMMIT_TAG "${GIT_COMMIT_TAG}" CACHE STRING "Git commit ta
 
 # Set the minimum version of CMake and the deployment target for macOS.
 # Skipped for iOS, where this is the iOS version and 10.15 is not a valid value.
-if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if (NOT LIGHTHOUSE_APPLE_MOBILE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum OS X deployment version")
 endif()
 
@@ -123,19 +132,23 @@ endif()
 
 # iOS: the toolchain file (cmake/ios.toolchain.cmake) is supplied on the command line,
 # so CMAKE_SYSTEM_NAME is already "iOS" by the time we get here. See docs/BUILDING.md.
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(LIGHTHOUSE_APPLE_MOBILE)
     set(PROJECT_ID "com.harbormasters.lighthouse" CACHE STRING "iOS bundle identifier")
     set(IOS_DEVELOPMENT_TEAM "" CACHE STRING "Apple Developer Team ID used to sign the iOS app")
     set(BUNDLE_ID "${PROJECT_ID}" CACHE STRING "Bundle ID libultraship signs its targets with")
     # The minimum version comes from the toolchain's DEPLOYMENT_TARGET; mirror it into the plist.
     set(IOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
-    if(IOS_DEPLOYMENT_TARGET VERSION_LESS 14.0)
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND IOS_DEPLOYMENT_TARGET VERSION_LESS 14.0)
         # The plist uses UILaunchScreen (iOS 14+) and libultraship pulls in iOS 16 metal-cpp headers.
         message(WARNING "iOS deployment target is ${IOS_DEPLOYMENT_TARGET}; pass -DDEPLOYMENT_TARGET=16.0 "
                         "to the toolchain for a supported configuration.")
     endif()
     set(CMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${IOS_DEVELOPMENT_TEAM}")
-    set(CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2") # iPhone and iPad
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
+    else()
+        set(CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "7")
+    endif()
     # Keeps the static libraries out of an archive; the app target opts back in below.
     set(CMAKE_XCODE_ATTRIBUTE_SKIP_INSTALL "YES")
 endif()
@@ -172,7 +185,7 @@ endif()
 # Set game compilation version
 set(VERSION us)
 # SDL2_net isn't part of the mobile dependency sets, and Anchor multiplayer is desktop-only.
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "Android")
+if(LIGHTHOUSE_APPLE_MOBILE OR CMAKE_SYSTEM_NAME STREQUAL "Android")
     set(USE_NETWORKING_DEFAULT OFF)
 else()
     set(USE_NETWORKING_DEFAULT ON)
@@ -243,7 +256,15 @@ file(GLOB_RECURSE ALL_FILES CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DI
 
 list(FILTER ALL_FILES EXCLUDE REGEX "src/unused/")
 
-if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
+if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+    list(APPEND ALL_FILES
+        visionos/LighthouseVisionApp.swift
+        visionos/LighthouseVisionBridge.h
+        visionos/LighthouseVisionBridge.mm
+    )
+endif()
+
+if (NOT LIGHTHOUSE_APPLE_MOBILE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
     list(APPEND ALL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resource.rc)
 endif()
 
@@ -255,23 +276,36 @@ foreach(source IN LISTS ALL_FILES)
     source_group("${source_path_adjusted}" FILES "${source}")
 endforeach()
 
-if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if (LIGHTHOUSE_APPLE_MOBILE)
     set(IOS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ios)
+    if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+        set(APPLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Info.plist.in)
+    else()
+        set(APPLE_INFO_PLIST ${IOS_DIR}/Info.plist.in)
+    endif()
 
     add_executable(${PROJECT_NAME} ${ALL_FILES})
-    configure_file(${IOS_DIR}/Info.plist.in ${CMAKE_BINARY_DIR}/ios/Info.plist @ONLY)
+    configure_file(${APPLE_INFO_PLIST} ${CMAKE_BINARY_DIR}/ios/Info.plist @ONLY)
     set_target_properties(
         ${PROJECT_NAME}
         PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_BINARY_DIR}/ios/Info.plist
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${PROJECT_ID}"
-        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
         # CMake only fills INSTALL_PATH for shared libraries, and `xcodebuild archive` with an
         # empty one leaves the archive without an Applications/ directory to export from.
         XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
         XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
     )
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set_target_properties(${PROJECT_NAME} PROPERTIES
+            XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+        )
+    else()
+        set_target_properties(${PROJECT_NAME} PROPERTIES
+            XCODE_ATTRIBUTE_SWIFT_OBJC_BRIDGING_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/visionos/LighthouseVisionBridge.h"
+        )
+    endif()
     if(IOS_DEVELOPMENT_TEAM STREQUAL "")
         # Lets the project configure and compile without an Apple developer account;
         # set IOS_DEVELOPMENT_TEAM to produce an installable build.
@@ -490,16 +524,21 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU|Clang|AppleClang")
 	)
 endif()
 
-if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if (LIGHTHOUSE_APPLE_MOBILE)
     # libultraship defines __IOS__ only for its own target; the game needs it too.
-    target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_IOS=1 __IOS__)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE __IOS__)
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_IOS=1)
+    else()
+        target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_VISIONOS=1)
+    endif()
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Android")
     # The decompiled game code assumes a signed char; AArch64 Linux does not.
     target_compile_options(${PROJECT_NAME} PRIVATE -fsigned-char)
 endif()
 
 # Shared by every touchscreen handheld: app lifecycle, read-only bundle, no self-relaunch.
-if (CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "Android")
+if (LIGHTHOUSE_APPLE_MOBILE OR CMAKE_SYSTEM_NAME STREQUAL "Android")
     target_compile_definitions(${PROJECT_NAME} PRIVATE LIGHTHOUSE_MOBILE=1 LIGHTHOUSE_TOUCH_CONTROLS=1)
 endif()
 
@@ -544,7 +583,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "CafeOS")
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${DEVKITPRO}/portlibs/wiiu/include/
     )
-elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+elseif(LIGHTHOUSE_APPLE_MOBILE)
     # Ogg/Vorbis are linked but unreferenced by any source, so iOS skips them.
     # GameController/CoreHaptics back SDL2's MFi gamepad and rumble support. Metal,
     # QuartzCore, AVFoundation, AudioToolbox and Foundation already arrive through
@@ -554,6 +593,12 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         find_library(IOS_FW_${framework} ${framework} REQUIRED)
         list(APPEND ADDITIONAL_LIBRARY_DEPENDENCIES ${IOS_FW_${framework}})
     endforeach()
+    if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+        find_library(IOS_FW_ARKit ARKit REQUIRED)
+        find_library(IOS_FW_CompositorServices CompositorServices REQUIRED)
+        find_library(IOS_FW_Metal Metal REQUIRED)
+        list(APPEND ADDITIONAL_LIBRARY_DEPENDENCIES ${IOS_FW_ARKit} ${IOS_FW_CompositorServices} ${IOS_FW_Metal})
+    endif()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
     set(ADDITIONAL_LIBRARY_DEPENDENCIES log android EGL GLESv3)
 else()
@@ -696,19 +741,9 @@ if(MSVC)
 endif()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-    if (CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    if (CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR LIGHTHOUSE_APPLE_MOBILE)
         target_compile_options(${PROJECT_NAME} PRIVATE
-            -Wall -Wextra -Wno-error
-            -fno-strict-aliasing
-            -Wno-return-type
-            -Wno-unused-parameter
-            -Wno-unused-function
-            -Wno-unused-variable
-            -Wno-missing-field-initializers
-            -Wno-parentheses
-            -Wno-narrowing
-            -Wno-missing-braces
-            -Wno-int-conversion
+            "$<$<NOT:$<COMPILE_LANGUAGE:Swift>>:-Wall;-Wextra;-Wno-error;-fno-strict-aliasing;-Wno-return-type;-Wno-unused-parameter;-Wno-unused-function;-Wno-unused-variable;-Wno-missing-field-initializers;-Wno-parentheses;-Wno-narrowing;-Wno-missing-braces;-Wno-int-conversion;-pthread>"
             $<$<COMPILE_LANGUAGE:C>:
                 -Wno-implicit-function-declaration
                 -Wno-incompatible-pointer-types
@@ -719,12 +754,11 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
                 -Wno-c++11-narrowing
                 -Wno-deprecated-enum-enum-conversion
             >
-            -pthread
         )
 
-        target_link_options(${PROJECT_NAME} PRIVATE
-            -pthread
-        )
+        if(NOT CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+            target_link_options(${PROJECT_NAME} PRIVATE -pthread)
+        endif()
     elseif (CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
       target_compile_options(${PROJECT_NAME} PRIVATE
           -Wall -Wextra -Wno-error
@@ -832,7 +866,7 @@ set(TORCH_MULTI_CONFIG ${CMAKE_CONFIGURATION_TYPES})
 # instead.
 set(TORCH_HOST_ARGS -DCMAKE_BUILD_TYPE=Release)
 set(TORCH_HOST_GENERATOR "")
-if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if (LIGHTHOUSE_APPLE_MOBILE)
     # The empty toolchain file is insurance: this CMake doesn't forward it, but the
     # explicit -D takes precedence in versions that do.
     list(APPEND TORCH_HOST_ARGS -DCMAKE_TOOLCHAIN_FILE= -DCMAKE_OSX_SYSROOT=macosx)
@@ -924,7 +958,7 @@ add_custom_target(CreateOSXIcons
     ")
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(LIGHTHOUSE_APPLE_MOBILE)
     file(DOWNLOAD
         https://raw.githubusercontent.com/mdqinc/SDL_GameControllerDB/master/gamecontrollerdb.txt
         ${CMAKE_BINARY_DIR}/gamecontrollerdb.txt)
