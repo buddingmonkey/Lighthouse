@@ -3,6 +3,8 @@
 #import <Metal/Metal.h>
 #import <simd/simd.h>
 
+#include <fast/backends/gfx_visionos.h>
+
 static bool ClearPass(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffer, size_t textureIndex,
                       NSUInteger slice, NSUInteger arrayLength, MTLViewport viewport) {
     if (textureIndex >= cp_drawable_get_texture_count(drawable)) {
@@ -73,8 +75,8 @@ static bool ClearDrawable(cp_drawable_t drawable, id<MTLCommandBuffer> commandBu
     return true;
 }
 
-static const NSUInteger kGameTextureWidth = 1280;
-static const NSUInteger kGameTextureHeight = 720;
+static const uint32_t kGameTextureWidth = 1280;
+static const uint32_t kGameTextureHeight = 720;
 static const MTLPixelFormat kGameTextureFormat = MTLPixelFormatBGRA8Unorm;
 
 struct ScreenPipeline {
@@ -154,14 +156,10 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
         NSLog(@"Lighthouse: the visionOS game pipeline failed: %@", error);
     }
 
-    MTLTextureDescriptor* gameDescriptor =
-        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:kGameTextureFormat
-                                                           width:kGameTextureWidth
-                                                          height:kGameTextureHeight
-                                                       mipmapped:NO];
-    gameDescriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
-    gameDescriptor.storageMode = MTLStorageModePrivate;
-    pipeline.game = [device newTextureWithDescriptor:gameDescriptor];
+    pipeline.game = (__bridge id<MTLTexture>)Fast::GetVisionOSGameTexture();
+    if (pipeline.game == nil) {
+        NSLog(@"Lighthouse: the visionOS game texture was not published");
+    }
 
     MTLDepthStencilDescriptor* depthDescriptor = [MTLDepthStencilDescriptor new];
     depthDescriptor.depthCompareFunction = MTLCompareFunctionGreaterEqual;
@@ -278,10 +276,13 @@ static void DrawScreen(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffe
 
 void LighthouseVisionRun(cp_layer_renderer_t renderer) {
     @autoreleasepool {
-        id<MTLCommandQueue> queue = [cp_layer_renderer_get_device(renderer) newCommandQueue];
+        id<MTLDevice> device = cp_layer_renderer_get_device(renderer);
+        id<MTLCommandQueue> queue = [device newCommandQueue];
         if (queue == nil || !ar_world_tracking_provider_is_supported()) {
             return;
         }
+        Fast::SetVisionOSCompositor((__bridge void*)device, (__bridge void*)queue, kGameTextureWidth,
+                                    kGameTextureHeight);
 
         ar_session_t session = ar_session_create();
         ar_world_tracking_configuration_t trackingConfiguration = ar_world_tracking_configuration_create();
