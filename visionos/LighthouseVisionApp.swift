@@ -10,6 +10,15 @@ private struct LighthouseLayerConfiguration: CompositorLayerConfiguration {
         let options: LayerRenderer.Capabilities.SupportedLayoutsOptions = foveationEnabled ? [.foveationEnabled] : []
         let layouts = capabilities.supportedLayouts(options: options)
         configuration.layout = layouts.contains(.layered) ? .layered : .dedicated
+
+        // Tracking areas let the system draw the gaze highlight itself, out of process, so the app
+        // never learns where the eyes look.
+        // The widest index the device offers, so the count of tracking areas is not the limit.
+        // The default usage is already render target and shader read; narrowing it is refused.
+        let formats = capabilities.supportedTrackingAreasFormats
+        if let format = formats.first(where: { $0 == .r16Uint }) ?? formats.first {
+            configuration.trackingAreasFormat = format
+        }
     }
 }
 

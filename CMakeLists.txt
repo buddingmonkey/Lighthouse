@@ -138,6 +138,11 @@ if(LIGHTHOUSE_APPLE_MOBILE)
     set(BUNDLE_ID "${PROJECT_ID}" CACHE STRING "Bundle ID libultraship signs its targets with")
     # The minimum version comes from the toolchain's DEPLOYMENT_TARGET; mirror it into the plist.
     set(IOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    if(CMAKE_SYSTEM_NAME STREQUAL "visionOS" AND IOS_DEPLOYMENT_TARGET VERSION_LESS 26.0)
+        # Tracking areas, the hover effect and cp_frame_query_drawables all start at visionOS 26.
+        message(FATAL_ERROR "visionOS deployment target is ${IOS_DEPLOYMENT_TARGET}; pass "
+                            "-DDEPLOYMENT_TARGET=26.0 to the toolchain.")
+    endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND IOS_DEPLOYMENT_TARGET VERSION_LESS 14.0)
         # The plist uses UILaunchScreen (iOS 14+) and libultraship pulls in iOS 16 metal-cpp headers.
         message(WARNING "iOS deployment target is ${IOS_DEPLOYMENT_TARGET}; pass -DDEPLOYMENT_TARGET=16.0 "
