@@ -77,11 +77,9 @@ static bool ClearDrawable(cp_drawable_t drawable, id<MTLCommandBuffer> commandBu
 
 static const uint32_t kGameTextureWidth = 1280;
 static const uint32_t kGameTextureHeight = 720;
-static const MTLPixelFormat kGameTextureFormat = MTLPixelFormatBGRA8Unorm;
 
 struct ScreenPipeline {
     id<MTLRenderPipelineState> render = nil;
-    id<MTLRenderPipelineState> fill = nil;
     id<MTLDepthStencilState> depth = nil;
     id<MTLTexture> game = nil;
 };
@@ -97,24 +95,6 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
         #include <metal_stdlib>
         using namespace metal;
         struct VertexOut { float4 position [[position]]; float2 uv; };
-        vertex VertexOut gameVertex(uint vertexID [[vertex_id]]) {
-            const float2 positions[] = { {-1, -1}, {1, -1}, {-1, 1}, {1, 1} };
-            const float2 uvs[] = { {0, 1}, {1, 1}, {0, 0}, {1, 0} };
-            VertexOut out;
-            out.position = float4(positions[vertexID], 0, 1);
-            out.uv = uvs[vertexID];
-            return out;
-        }
-        fragment half4 gameFragment(VertexOut in [[stage_in]], constant float& time [[buffer(0)]]) {
-            float2 grid = abs(fract(in.uv * 8.0) - 0.5);
-            float line = 1.0 - smoothstep(0.43, 0.49, max(grid.x, grid.y));
-            float3 base = mix(float3(0.03, 0.08, 0.16), float3(0.08, 0.28, 0.55), in.uv.y);
-            float sweep = 1.0 - smoothstep(0.0, 0.05, abs(in.uv.x - fract(time * 0.25)));
-            float3 color = base + line * 0.2 + sweep * float3(0.9, 0.55, 0.1);
-            if (in.uv.x < 0.07 && in.uv.y < 0.12) { color = float3(0.9, 0.05, 0.05); }
-            if (in.uv.x < 0.16 && in.uv.y < 0.05) { color = float3(0.9, 0.05, 0.05); }
-            return half4(half3(color), 1.0);
-        }
         vertex VertexOut screenVertex(uint vertexID [[vertex_id]], ushort ampID [[amplification_id]],
                                       constant float4x4* mvp [[buffer(0)]]) {
             const float2 positions[] = { {-0.6, -0.3375}, {0.6, -0.3375}, {-0.6, 0.3375}, {0.6, 0.3375} };
@@ -147,15 +127,6 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
         NSLog(@"Lighthouse: the visionOS screen pipeline failed: %@", error);
     }
 
-    MTLRenderPipelineDescriptor* fillDescriptor = [MTLRenderPipelineDescriptor new];
-    fillDescriptor.vertexFunction = [library newFunctionWithName:@"gameVertex"];
-    fillDescriptor.fragmentFunction = [library newFunctionWithName:@"gameFragment"];
-    fillDescriptor.colorAttachments[0].pixelFormat = kGameTextureFormat;
-    pipeline.fill = [device newRenderPipelineStateWithDescriptor:fillDescriptor error:&error];
-    if (pipeline.fill == nil) {
-        NSLog(@"Lighthouse: the visionOS game pipeline failed: %@", error);
-    }
-
     pipeline.game = (__bridge id<MTLTexture>)Fast::GetVisionOSGameTexture();
     if (pipeline.game == nil) {
         NSLog(@"Lighthouse: the visionOS game texture was not published");
@@ -165,23 +136,7 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
     depthDescriptor.depthCompareFunction = MTLCompareFunctionGreaterEqual;
     depthDescriptor.depthWriteEnabled = YES;
     pipeline.depth = [device newDepthStencilStateWithDescriptor:depthDescriptor];
-    return pipeline.render != nil && pipeline.fill != nil && pipeline.game != nil && pipeline.depth != nil;
-}
-
-static void DrawGameTexture(ScreenPipeline& pipeline, id<MTLCommandBuffer> commandBuffer, float time) {
-    MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
-    pass.colorAttachments[0].texture = pipeline.game;
-    pass.colorAttachments[0].loadAction = MTLLoadActionDontCare;
-    pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-
-    id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:pass];
-    if (encoder == nil) {
-        return;
-    }
-    [encoder setRenderPipelineState:pipeline.fill];
-    [encoder setFragmentBytes:&time length:sizeof(time) atIndex:0];
-    [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
-    [encoder endEncoding];
+    return pipeline.render != nil && pipeline.game != nil && pipeline.depth != nil;
 }
 
 static simd_float4x4 ScreenMVP(cp_drawable_t drawable, size_t viewIndex, simd_float4x4 originFromDevice,
@@ -297,6 +252,7 @@ void LighthouseVisionRun(cp_layer_renderer_t renderer) {
         bool screenPipelineFailed = false;
         simd_float4x4 originFromScreen = matrix_identity_float4x4;
         bool screenPositioned = false;
+        uint64_t frameIndex = 0;
 
         for (;;) {
             cp_layer_renderer_state state = cp_layer_renderer_get_state(renderer);
@@ -322,6 +278,8 @@ void LighthouseVisionRun(cp_layer_renderer_t renderer) {
                 cp_frame_end_update(frame);
 
                 cp_time_wait_until(cp_frame_timing_get_optimal_input_time(timing));
+
+                Fast::RenderVisionOSTestPattern(frameIndex++);
 
                 id<MTLCommandBuffer> commandBuffer = [queue commandBuffer];
                 if (commandBuffer == nil) {
@@ -357,8 +315,6 @@ void LighthouseVisionRun(cp_layer_renderer_t renderer) {
 
                     ClearDrawable(drawable, commandBuffer, layout);
                     if (screenPipeline.render != nil) {
-                        DrawGameTexture(screenPipeline, commandBuffer,
-                                        static_cast<float>(fmod(presentationTime, 1024.0)));
                         DrawScreen(drawable, commandBuffer, screenPipeline, layout, originFromDevice, originFromScreen);
                     }
                 } else {
