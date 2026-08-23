@@ -22,6 +22,10 @@
     <string>@PROJECT_VERSION@</string>
     <key>MinimumOSVersion</key>
     <string>@IOS_DEPLOYMENT_TARGET@</string>
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>

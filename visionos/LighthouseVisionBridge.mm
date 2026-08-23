@@ -229,101 +229,154 @@ static void DrawScreen(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffe
     }
 }
 
-void LighthouseVisionRun(cp_layer_renderer_t renderer) {
+extern "C" int SDL_main(int argc, char* argv[]);
+extern "C" void SDL_SetMainReady(void);
+
+namespace {
+
+struct CompositorState {
+    cp_layer_renderer_t Renderer = nullptr;
+    id<MTLCommandQueue> Queue = nil;
+    ar_world_tracking_provider_t TrackingProvider = nullptr;
+    ar_device_anchor_t DeviceAnchor = nullptr;
+    cp_layer_renderer_layout Layout = cp_layer_renderer_layout_dedicated;
+    ScreenPipeline Screen;
+    bool ScreenFailed = false;
+    simd_float4x4 OriginFromScreen = matrix_identity_float4x4;
+    bool ScreenPositioned = false;
+    bool Running = true;
+
+    cp_frame_t Frame = nullptr;
+    cp_drawable_t Drawable = nullptr;
+    simd_float4x4 OriginFromDevice = matrix_identity_float4x4;
+    bool DeviceAnchorValid = false;
+};
+
+CompositorState gState;
+
+bool CompositorIsRunning() {
+    return gState.Running;
+}
+
+bool CompositorOpenFrame() {
     @autoreleasepool {
-        id<MTLDevice> device = cp_layer_renderer_get_device(renderer);
-        id<MTLCommandQueue> queue = [device newCommandQueue];
-        if (queue == nil || !ar_world_tracking_provider_is_supported()) {
-            return;
+    for (;;) {
+        cp_layer_renderer_state state = cp_layer_renderer_get_state(gState.Renderer);
+        if (state == cp_layer_renderer_state_paused) {
+            cp_layer_renderer_wait_until_running(gState.Renderer);
+            continue;
         }
-        Fast::SetVisionOSCompositor((__bridge void*)device, (__bridge void*)queue, kGameTextureWidth,
-                                    kGameTextureHeight);
+        if (state != cp_layer_renderer_state_running) {
+            gState.Running = false;
+            return false;
+        }
+        break;
+    }
 
-        ar_session_t session = ar_session_create();
-        ar_world_tracking_configuration_t trackingConfiguration = ar_world_tracking_configuration_create();
-        ar_world_tracking_provider_t trackingProvider = ar_world_tracking_provider_create(trackingConfiguration);
-        ar_data_providers_t providers = ar_data_providers_create();
-        ar_data_providers_add_data_provider(providers, trackingProvider);
-        ar_session_run(session, providers);
-        ar_device_anchor_t deviceAnchor = ar_device_anchor_create();
-        cp_layer_renderer_layout layout = cp_layer_renderer_configuration_get_layout(
-            cp_layer_renderer_get_configuration(renderer));
-        ScreenPipeline screenPipeline;
-        bool screenPipelineFailed = false;
-        simd_float4x4 originFromScreen = matrix_identity_float4x4;
-        bool screenPositioned = false;
-        uint64_t frameIndex = 0;
+    gState.Frame = cp_layer_renderer_query_next_frame(gState.Renderer);
+    cp_frame_timing_t timing = gState.Frame != nullptr ? cp_frame_predict_timing(gState.Frame) : nullptr;
+    if (timing == nullptr) {
+        gState.Frame = nullptr;
+        return false;
+    }
 
-        for (;;) {
-            cp_layer_renderer_state state = cp_layer_renderer_get_state(renderer);
-            if (state == cp_layer_renderer_state_paused) {
-                cp_layer_renderer_wait_until_running(renderer);
-                continue;
-            }
-            if (state != cp_layer_renderer_state_running) {
-                ar_session_stop(session);
-                return;
-            }
+    cp_frame_start_update(gState.Frame);
+    cp_frame_end_update(gState.Frame);
+    cp_time_wait_until(cp_frame_timing_get_optimal_input_time(timing));
 
-            @autoreleasepool {
-                cp_frame_t frame = cp_layer_renderer_query_next_frame(renderer);
-                if (frame == nullptr) {
-                    continue;
-                }
-                cp_frame_timing_t timing = cp_frame_predict_timing(frame);
-                if (timing == nullptr) {
-                    continue;
-                }
-                cp_frame_start_update(frame);
-                cp_frame_end_update(frame);
-
-                cp_time_wait_until(cp_frame_timing_get_optimal_input_time(timing));
-
-                Fast::RenderVisionOSTestPattern(frameIndex++);
-
-                id<MTLCommandBuffer> commandBuffer = [queue commandBuffer];
-                if (commandBuffer == nil) {
-                    continue;
-                }
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-                cp_drawable_t drawable = cp_frame_query_drawable(frame);
+    gState.Drawable = cp_frame_query_drawable(gState.Frame);
 #pragma clang diagnostic pop
-                if (drawable == nullptr) {
-                    continue;
-                }
-                cp_frame_start_submission(frame);
-                cp_frame_timing_t drawableTiming = cp_drawable_get_frame_timing(drawable);
-                CFTimeInterval presentationTime = cp_time_to_cf_time_interval(
-                    cp_frame_timing_get_presentation_time(drawableTiming));
-                if (ar_world_tracking_provider_query_device_anchor_at_timestamp(
-                        trackingProvider, presentationTime, deviceAnchor) == ar_device_anchor_query_status_success) {
-                    cp_drawable_set_device_anchor(drawable, deviceAnchor);
-                    simd_float4x4 originFromDevice =
-                        ar_device_anchor_get_origin_from_anchor_transform(deviceAnchor);
-                    if (!screenPositioned) {
-                        simd_float4x4 deviceFromScreen = matrix_identity_float4x4;
-                        deviceFromScreen.columns[3].z = -1.3f;
-                        originFromScreen = simd_mul(originFromDevice, deviceFromScreen);
-                        screenPositioned = true;
-                    }
-                    cp_drawable_set_depth_range(drawable, simd_make_float2(100.0f, 0.1f));
-                    if (screenPipeline.render == nil && !screenPipelineFailed) {
-                        screenPipelineFailed =
-                            !InitScreenPipeline(screenPipeline, cp_layer_renderer_get_device(renderer), drawable);
-                    }
+    if (gState.Drawable == nullptr) {
+        gState.Frame = nullptr;
+        return false;
+    }
 
-                    ClearDrawable(drawable, commandBuffer, layout);
-                    if (screenPipeline.render != nil) {
-                        DrawScreen(drawable, commandBuffer, screenPipeline, layout, originFromDevice, originFromScreen);
-                    }
-                } else {
-                    ClearDrawable(drawable, commandBuffer, layout);
-                }
-                cp_drawable_encode_present(drawable, commandBuffer);
-                [commandBuffer commit];
-                cp_frame_end_submission(frame);
-            }
+    cp_frame_start_submission(gState.Frame);
+    cp_frame_timing_t drawableTiming = cp_drawable_get_frame_timing(gState.Drawable);
+    CFTimeInterval presentationTime =
+        cp_time_to_cf_time_interval(cp_frame_timing_get_presentation_time(drawableTiming));
+
+    gState.DeviceAnchorValid = ar_world_tracking_provider_query_device_anchor_at_timestamp(
+                                   gState.TrackingProvider, presentationTime, gState.DeviceAnchor) ==
+                               ar_device_anchor_query_status_success;
+    if (gState.DeviceAnchorValid) {
+        cp_drawable_set_device_anchor(gState.Drawable, gState.DeviceAnchor);
+        gState.OriginFromDevice = ar_device_anchor_get_origin_from_anchor_transform(gState.DeviceAnchor);
+        if (!gState.ScreenPositioned) {
+            simd_float4x4 deviceFromScreen = matrix_identity_float4x4;
+            deviceFromScreen.columns[3].z = -1.3f;
+            gState.OriginFromScreen = simd_mul(gState.OriginFromDevice, deviceFromScreen);
+            gState.ScreenPositioned = true;
+        }
+        cp_drawable_set_depth_range(gState.Drawable, simd_make_float2(100.0f, 0.1f));
+        if (gState.Screen.render == nil && !gState.ScreenFailed) {
+            gState.ScreenFailed = !InitScreenPipeline(gState.Screen,
+                                                      cp_layer_renderer_get_device(gState.Renderer), gState.Drawable);
         }
     }
+    return true;
+    }
+}
+
+void CompositorCloseFrame() {
+    if (gState.Drawable == nullptr) {
+        return;
+    }
+    @autoreleasepool {
+
+    // Made after Fast3D commits, so the queue runs the game frame first and the screen samples it.
+    id<MTLCommandBuffer> commandBuffer = [gState.Queue commandBuffer];
+    if (commandBuffer != nil) {
+        ClearDrawable(gState.Drawable, commandBuffer, gState.Layout);
+        if (gState.DeviceAnchorValid && gState.Screen.render != nil) {
+            DrawScreen(gState.Drawable, commandBuffer, gState.Screen, gState.Layout, gState.OriginFromDevice,
+                       gState.OriginFromScreen);
+        }
+        cp_drawable_encode_present(gState.Drawable, commandBuffer);
+        [commandBuffer commit];
+    }
+    cp_frame_end_submission(gState.Frame);
+
+    gState.Drawable = nullptr;
+    gState.Frame = nullptr;
+    }
+}
+
+} // namespace
+
+void LighthouseVisionRun(cp_layer_renderer_t renderer) {
+    id<MTLDevice> device = cp_layer_renderer_get_device(renderer);
+    id<MTLCommandQueue> queue = [device newCommandQueue];
+    if (queue == nil || !ar_world_tracking_provider_is_supported()) {
+        NSLog(@"Lighthouse: the visionOS compositor has no queue or no world tracking");
+        return;
+    }
+
+    ar_session_t session = ar_session_create();
+    ar_world_tracking_configuration_t trackingConfiguration = ar_world_tracking_configuration_create();
+    ar_world_tracking_provider_t trackingProvider = ar_world_tracking_provider_create(trackingConfiguration);
+    ar_data_providers_t providers = ar_data_providers_create();
+    ar_data_providers_add_data_provider(providers, trackingProvider);
+    ar_session_run(session, providers);
+
+    gState.Renderer = renderer;
+    gState.Queue = queue;
+    gState.TrackingProvider = trackingProvider;
+    gState.DeviceAnchor = ar_device_anchor_create();
+    gState.Layout = cp_layer_renderer_configuration_get_layout(cp_layer_renderer_get_configuration(renderer));
+
+    Fast::SetVisionOSCompositor((__bridge void*)device, (__bridge void*)queue, kGameTextureWidth, kGameTextureHeight);
+    Fast::SetVisionOSFrameHooks({ CompositorOpenFrame, CompositorCloseFrame, CompositorIsRunning });
+
+    // SDL_UIKitRunApp usually does this. Without it SDL_Init refuses every subsystem, and the
+    // control deck gets no game controllers.
+    SDL_SetMainReady();
+
+    char program[] = "Lighthouse";
+    char* argv[] = { program, nullptr };
+    SDL_main(1, argv);
+
+    ar_session_stop(session);
 }
