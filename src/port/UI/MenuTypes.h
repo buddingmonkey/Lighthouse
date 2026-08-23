@@ -277,6 +277,7 @@ static const std::unordered_map<Fast::WindowBackend, const char*> windowBackends
     { Fast::WindowBackend::FAST3D_SDL_OPENGL, "OpenGL" },
     { Fast::WindowBackend::FAST3D_SDL_METAL, "Metal" },
     { Fast::WindowBackend::FAST3D_OPENXR_OPENGL, "OpenXR" },
+    { Fast::WindowBackend::FAST3D_VISIONOS_METAL, "Metal" },
 };
 
 struct MenuInit {
