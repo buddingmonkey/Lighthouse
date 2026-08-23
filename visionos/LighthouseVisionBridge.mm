@@ -82,6 +82,7 @@ static const float kScreenHalfHeight = 0.3375f;
 
 struct ScreenPipeline {
     id<MTLRenderPipelineState> render = nil;
+    id<MTLRenderPipelineState> tracking = nil;
     id<MTLDepthStencilState> depth = nil;
     id<MTLTexture> game = nil;
 };
@@ -106,6 +107,14 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
             out.uv = uvs[vertexID];
             return out;
         }
+        vertex float4 trackingVertex(uint vertexID [[vertex_id]], ushort ampID [[amplification_id]],
+                                     constant float4x4* mvp [[buffer(0)]], constant float4& rect [[buffer(1)]]) {
+            const float2 corners[] = { {rect.x, rect.y}, {rect.z, rect.y}, {rect.x, rect.w}, {rect.z, rect.w} };
+            return mvp[ampID] * float4(corners[vertexID], 0, 1);
+        }
+        fragment uint trackingFragment(constant uint& value [[buffer(0)]]) {
+            return value;
+        }
         fragment half4 screenFragment(VertexOut in [[stage_in]], texture2d<float> game [[texture(0)]]) {
             constexpr sampler gameSampler(filter::linear, address::clamp_to_edge);
             float3 encoded = game.sample(gameSampler, in.uv).rgb;
@@ -129,6 +138,19 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
     pipeline.render = [device newRenderPipelineStateWithDescriptor:descriptor error:&error];
     if (pipeline.render == nil) {
         NSLog(@"Lighthouse: the visionOS screen pipeline failed: %@", error);
+    }
+
+    if (cp_drawable_get_tracking_areas_texture_count(drawable) > 0) {
+        id<MTLTexture> tracking = cp_drawable_get_tracking_areas_texture(drawable, 0);
+        MTLRenderPipelineDescriptor* trackingDescriptor = [MTLRenderPipelineDescriptor new];
+        trackingDescriptor.vertexFunction = [library newFunctionWithName:@"trackingVertex"];
+        trackingDescriptor.fragmentFunction = [library newFunctionWithName:@"trackingFragment"];
+        trackingDescriptor.colorAttachments[0].pixelFormat = tracking.pixelFormat;
+        trackingDescriptor.maxVertexAmplificationCount = cp_drawable_get_view_count(drawable);
+        pipeline.tracking = [device newRenderPipelineStateWithDescriptor:trackingDescriptor error:&error];
+        if (pipeline.tracking == nil) {
+            NSLog(@"Lighthouse: the visionOS tracking pipeline failed: %@", error);
+        }
     }
 
     pipeline.game = (__bridge id<MTLTexture>)Fast::GetVisionOSGameTexture();
@@ -233,6 +255,91 @@ static void DrawScreen(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffe
     }
 }
 
+static void DrawTrackingAreas(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffer, ScreenPipeline& pipeline,
+                              cp_layer_renderer_layout layout, simd_float4x4 originFromDevice,
+                              simd_float4x4 originFromScreen, cp_layer_renderer_t renderer) {
+    const NSUInteger viewCount = cp_drawable_get_view_count(drawable);
+    if (pipeline.tracking == nil || viewCount == 0 || viewCount > 2 ||
+        cp_drawable_get_tracking_areas_texture_count(drawable) == 0) {
+        return;
+    }
+
+    const cp_tracking_area_render_value maxValue =
+        cp_layer_renderer_properties_get_tracking_areas_max_value(cp_layer_renderer_get_properties(renderer));
+    const size_t rectCount = MIN(Fast::GetVisionOSTrackingRectCount(), static_cast<size_t>(maxValue));
+
+    const bool layered = layout == cp_layer_renderer_layout_layered;
+    const NSUInteger passCount = layered ? 1 : viewCount;
+    for (NSUInteger pass = 0; pass < passCount; ++pass) {
+        cp_view_texture_map_t map = cp_view_get_view_texture_map(cp_drawable_get_view(drawable, pass));
+        const size_t textureIndex = cp_view_texture_map_get_texture_index(map);
+        if (textureIndex >= cp_drawable_get_tracking_areas_texture_count(drawable)) {
+            continue;
+        }
+        id<MTLTexture> tracking = cp_drawable_get_tracking_areas_texture(drawable, textureIndex);
+
+        MTLRenderPassDescriptor* descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
+        descriptor.colorAttachments[0].texture = tracking;
+        descriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
+        descriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+        descriptor.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
+        if (layered) {
+            descriptor.renderTargetArrayLength = viewCount;
+        } else {
+            descriptor.colorAttachments[0].slice = cp_view_texture_map_get_slice_index(map);
+        }
+        if (textureIndex < cp_drawable_get_rasterization_rate_map_count(drawable)) {
+            descriptor.rasterizationRateMap = cp_drawable_get_rasterization_rate_map(drawable, textureIndex);
+        }
+
+        id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:descriptor];
+        if (encoder == nil) {
+            continue;
+        }
+        [encoder setRenderPipelineState:pipeline.tracking];
+
+        simd_float4x4 mvp[2];
+        if (layered) {
+            MTLViewport viewports[2];
+            MTLVertexAmplificationViewMapping mappings[2];
+            for (NSUInteger i = 0; i < viewCount; ++i) {
+                cp_view_texture_map_t viewMap = cp_view_get_view_texture_map(cp_drawable_get_view(drawable, i));
+                mvp[i] = ScreenMVP(drawable, i, originFromDevice, originFromScreen);
+                viewports[i] = cp_view_texture_map_get_viewport(viewMap);
+                mappings[i] = { static_cast<uint32_t>(i), static_cast<uint32_t>(i) };
+            }
+            [encoder setViewports:viewports count:viewCount];
+            [encoder setVertexAmplificationCount:viewCount viewMappings:mappings];
+        } else {
+            mvp[0] = ScreenMVP(drawable, pass, originFromDevice, originFromScreen);
+            [encoder setViewport:cp_view_texture_map_get_viewport(map)];
+        }
+        [encoder setVertexBytes:mvp length:sizeof(simd_float4x4) * (layered ? viewCount : 1) atIndex:0];
+
+        for (size_t i = 0; i < rectCount; ++i) {
+            const Fast::VisionOSTrackingRect rect = Fast::GetVisionOSTrackingRect(i);
+            cp_tracking_area_t area = cp_drawable_add_tracking_area(drawable, rect.Identifier);
+            if (area == nullptr) {
+                continue;
+            }
+            cp_tracking_area_add_automatic_hover_effect(area);
+            const uint32_t value = cp_tracking_area_get_render_value(area);
+
+            // The item is in game texture pixels. The screen quad spans the whole texture.
+            const float left = (rect.MinX / kGameTextureWidth * 2.0f - 1.0f) * kScreenHalfWidth;
+            const float right = (rect.MaxX / kGameTextureWidth * 2.0f - 1.0f) * kScreenHalfWidth;
+            const float top = (1.0f - rect.MinY / kGameTextureHeight * 2.0f) * kScreenHalfHeight;
+            const float bottom = (1.0f - rect.MaxY / kGameTextureHeight * 2.0f) * kScreenHalfHeight;
+            const simd_float4 corners = simd_make_float4(left, bottom, right, top);
+
+            [encoder setVertexBytes:&corners length:sizeof(corners) atIndex:1];
+            [encoder setFragmentBytes:&value length:sizeof(value) atIndex:0];
+            [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        }
+        [encoder endEncoding];
+    }
+}
+
 extern "C" int SDL_main(int argc, char* argv[]);
 extern "C" void SDL_SetMainReady(void);
 
@@ -251,9 +358,11 @@ struct CompositorState {
     bool Running = true;
 
     cp_frame_t Frame = nullptr;
-    cp_drawable_t Drawable = nullptr;
+    cp_drawable_array_t Drawables = nullptr;
+    size_t DrawableCount = 0;
     simd_float4x4 OriginFromDevice = matrix_identity_float4x4;
     bool DeviceAnchorValid = false;
+    bool TrackingReported = false;
 };
 
 CompositorState gState;
@@ -320,17 +429,24 @@ bool CompositorOpenFrame() {
     cp_frame_end_update(gState.Frame);
     cp_time_wait_until(cp_frame_timing_get_optimal_input_time(timing));
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    gState.Drawable = cp_frame_query_drawable(gState.Frame);
-#pragma clang diagnostic pop
-    if (gState.Drawable == nullptr) {
+    gState.Drawables = cp_frame_query_drawables(gState.Frame);
+    gState.DrawableCount = gState.Drawables != nullptr ? cp_drawable_array_get_count(gState.Drawables) : 0;
+    if (gState.DrawableCount == 0) {
         gState.Frame = nullptr;
         return false;
     }
+    cp_drawable_t drawable = cp_drawable_array_get_drawable(gState.Drawables, 0);
 
     cp_frame_start_submission(gState.Frame);
-    cp_frame_timing_t drawableTiming = cp_drawable_get_frame_timing(gState.Drawable);
+    if (!gState.TrackingReported) {
+        gState.TrackingReported = true;
+        const size_t count = cp_drawable_get_tracking_areas_texture_count(drawable);
+        id<MTLTexture> tracking = count > 0 ? cp_drawable_get_tracking_areas_texture(drawable, 0) : nil;
+        NSLog(@"Lighthouse: %zu drawables, %zu tracking textures, format %lu, size %lux%lu", gState.DrawableCount,
+              count, (unsigned long)tracking.pixelFormat, (unsigned long)tracking.width,
+              (unsigned long)tracking.height);
+    }
+    cp_frame_timing_t drawableTiming = cp_drawable_get_frame_timing(drawable);
     CFTimeInterval presentationTime =
         cp_time_to_cf_time_interval(cp_frame_timing_get_presentation_time(drawableTiming));
 
@@ -338,7 +454,6 @@ bool CompositorOpenFrame() {
                                    gState.TrackingProvider, presentationTime, gState.DeviceAnchor) ==
                                ar_device_anchor_query_status_success;
     if (gState.DeviceAnchorValid) {
-        cp_drawable_set_device_anchor(gState.Drawable, gState.DeviceAnchor);
         gState.OriginFromDevice = ar_device_anchor_get_origin_from_anchor_transform(gState.DeviceAnchor);
         if (!gState.ScreenPositioned) {
             simd_float4x4 deviceFromScreen = matrix_identity_float4x4;
@@ -346,10 +461,14 @@ bool CompositorOpenFrame() {
             gState.OriginFromScreen = simd_mul(gState.OriginFromDevice, deviceFromScreen);
             gState.ScreenPositioned = true;
         }
-        cp_drawable_set_depth_range(gState.Drawable, simd_make_float2(100.0f, 0.1f));
+        for (size_t i = 0; i < gState.DrawableCount; ++i) {
+            cp_drawable_t each = cp_drawable_array_get_drawable(gState.Drawables, i);
+            cp_drawable_set_device_anchor(each, gState.DeviceAnchor);
+            cp_drawable_set_depth_range(each, simd_make_float2(100.0f, 0.1f));
+        }
         if (gState.Screen.render == nil && !gState.ScreenFailed) {
-            gState.ScreenFailed = !InitScreenPipeline(gState.Screen,
-                                                      cp_layer_renderer_get_device(gState.Renderer), gState.Drawable);
+            gState.ScreenFailed =
+                !InitScreenPipeline(gState.Screen, cp_layer_renderer_get_device(gState.Renderer), drawable);
         }
     }
     return true;
@@ -357,7 +476,7 @@ bool CompositorOpenFrame() {
 }
 
 void CompositorCloseFrame() {
-    if (gState.Drawable == nullptr) {
+    if (gState.DrawableCount == 0) {
         return;
     }
     @autoreleasepool {
@@ -365,17 +484,23 @@ void CompositorCloseFrame() {
     // Made after Fast3D commits, so the queue runs the game frame first and the screen samples it.
     id<MTLCommandBuffer> commandBuffer = [gState.Queue commandBuffer];
     if (commandBuffer != nil) {
-        ClearDrawable(gState.Drawable, commandBuffer, gState.Layout);
-        if (gState.DeviceAnchorValid && gState.Screen.render != nil) {
-            DrawScreen(gState.Drawable, commandBuffer, gState.Screen, gState.Layout, gState.OriginFromDevice,
-                       gState.OriginFromScreen);
+        for (size_t i = 0; i < gState.DrawableCount; ++i) {
+            cp_drawable_t each = cp_drawable_array_get_drawable(gState.Drawables, i);
+            ClearDrawable(each, commandBuffer, gState.Layout);
+            if (gState.DeviceAnchorValid && gState.Screen.render != nil) {
+                DrawScreen(each, commandBuffer, gState.Screen, gState.Layout, gState.OriginFromDevice,
+                           gState.OriginFromScreen);
+                DrawTrackingAreas(each, commandBuffer, gState.Screen, gState.Layout, gState.OriginFromDevice,
+                                  gState.OriginFromScreen, gState.Renderer);
+            }
+            cp_drawable_encode_present(each, commandBuffer);
         }
-        cp_drawable_encode_present(gState.Drawable, commandBuffer);
         [commandBuffer commit];
     }
     cp_frame_end_submission(gState.Frame);
 
-    gState.Drawable = nullptr;
+    gState.Drawables = nullptr;
+    gState.DrawableCount = 0;
     gState.Frame = nullptr;
     }
 }
