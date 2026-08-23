@@ -412,6 +412,7 @@ bool CompositorOpenFrame() {
             continue;
         }
         if (state != cp_layer_renderer_state_running) {
+            NSLog(@"Lighthouse: the visionOS layer stopped, state %d", (int)state);
             gState.Running = false;
             return false;
         }
