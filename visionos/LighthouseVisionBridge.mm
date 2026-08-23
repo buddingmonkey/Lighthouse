@@ -77,6 +77,8 @@ static bool ClearDrawable(cp_drawable_t drawable, id<MTLCommandBuffer> commandBu
 
 static const uint32_t kGameTextureWidth = 1280;
 static const uint32_t kGameTextureHeight = 720;
+static const float kScreenHalfWidth = 0.6f;
+static const float kScreenHalfHeight = 0.3375f;
 
 struct ScreenPipeline {
     id<MTLRenderPipelineState> render = nil;
@@ -259,6 +261,38 @@ CompositorState gState;
 bool CompositorIsRunning() {
     return gState.Running;
 }
+
+} // namespace
+
+void LighthouseVisionSpatialEvent(int phase, float originX, float originY, float originZ, float directionX,
+                                  float directionY, float directionZ) {
+    if (!gState.ScreenPositioned) {
+        return;
+    }
+
+    // The ray is in world coordinates. The screen is a quad at the origin of originFromScreen,
+    // 1.2 by 0.675 meters, facing -z, so take the ray into that frame and cross the z plane.
+    const simd_float4x4 screenFromOrigin = simd_inverse(gState.OriginFromScreen);
+    const simd_float3 origin = simd_mul(screenFromOrigin, simd_make_float4(originX, originY, originZ, 1.0f)).xyz;
+    const simd_float3 direction = simd_mul(screenFromOrigin, simd_make_float4(directionX, directionY, directionZ, 0.0f)).xyz;
+
+    Fast::VisionOSPointer pointer{};
+    if (direction.z != 0.0f) {
+        const float t = -origin.z / direction.z;
+        if (t > 0.0f) {
+            const simd_float3 hit = origin + t * direction;
+            if (fabsf(hit.x) <= kScreenHalfWidth && fabsf(hit.y) <= kScreenHalfHeight) {
+                pointer.X = (hit.x + kScreenHalfWidth) / (2.0f * kScreenHalfWidth) * kGameTextureWidth;
+                pointer.Y = (kScreenHalfHeight - hit.y) / (2.0f * kScreenHalfHeight) * kGameTextureHeight;
+                pointer.Valid = true;
+            }
+        }
+    }
+    pointer.Pressed = pointer.Valid && phase == 0;
+    Fast::SetVisionOSPointer(pointer);
+}
+
+namespace {
 
 bool CompositorOpenFrame() {
     @autoreleasepool {
