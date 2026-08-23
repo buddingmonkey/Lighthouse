@@ -104,9 +104,11 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
             out.uv = uvs[vertexID];
             return out;
         }
-        fragment half4 screenFragment(VertexOut in [[stage_in]], texture2d<half> game [[texture(0)]]) {
+        fragment half4 screenFragment(VertexOut in [[stage_in]], texture2d<float> game [[texture(0)]]) {
             constexpr sampler gameSampler(filter::linear, address::clamp_to_edge);
-            return half4(game.sample(gameSampler, in.uv).rgb, 1.0);
+            float3 encoded = game.sample(gameSampler, in.uv).rgb;
+            float3 linearColor = select(encoded / 12.92, pow((encoded + 0.055) / 1.055, 2.4), encoded > 0.04045);
+            return half4(half3(linearColor), 1.0);
         }
     )";
     NSError* error = nil;
