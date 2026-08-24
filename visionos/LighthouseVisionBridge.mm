@@ -5,6 +5,8 @@
 
 #include <fast/backends/gfx_visionos.h>
 
+#include <vector>
+
 static bool ClearPass(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffer, size_t textureIndex,
                       NSUInteger slice, NSUInteger arrayLength, MTLViewport viewport) {
     if (textureIndex >= cp_drawable_get_texture_count(drawable)) {
@@ -266,7 +268,13 @@ static void DrawTrackingAreas(cp_drawable_t drawable, id<MTLCommandBuffer> comma
 
     const cp_tracking_area_render_value maxValue =
         cp_layer_renderer_properties_get_tracking_areas_max_value(cp_layer_renderer_get_properties(renderer));
-    const size_t rectCount = MIN(Fast::GetVisionOSTrackingRectCount(), static_cast<size_t>(maxValue));
+    const size_t wantCount = Fast::GetVisionOSTrackingRectCount();
+    const size_t rectCount = MIN(wantCount, static_cast<size_t>(maxValue));
+    static bool sTruncationReported = false;
+    if (rectCount < wantCount && !sTruncationReported) {
+        sTruncationReported = true;
+        NSLog(@"Lighthouse: %zu tracking areas wanted, %u allowed", wantCount, (unsigned)maxValue);
+    }
 
     const bool layered = layout == cp_layer_renderer_layout_layered;
     const NSUInteger passCount = layered ? 1 : viewCount;
@@ -420,7 +428,67 @@ void LighthouseVisionSpatialEvent(int phase, int hasRay, uint64_t trackingArea, 
 
 namespace {
 
+// Debugging only. Gaze cannot be scripted, so LIGHTHOUSE_VISION_TAPS="x,y@seconds;x,y@seconds"
+// presses the screen without it. Remove with the other visionOS input logs.
+void RunScriptedTaps() {
+    struct ScriptedTap {
+        float X;
+        float Y;
+        double At;
+    };
+    static std::vector<ScriptedTap> sTaps;
+    static size_t sNext = 0;
+    static double sStart = 0.0;
+    static bool sLoaded = false;
+
+    if (!sLoaded) {
+        sLoaded = true;
+        sStart = CACurrentMediaTime();
+        for (const char* p = getenv("LIGHTHOUSE_VISION_TAPS"); p != nullptr && *p != '\0';) {
+            ScriptedTap tap{};
+            int used = 0;
+            if (sscanf(p, "%f,%f@%lf%n", &tap.X, &tap.Y, &tap.At, &used) != 3) {
+                break;
+            }
+            sTaps.push_back(tap);
+            p += used;
+            if (*p != ';') {
+                break;
+            }
+            ++p;
+        }
+        if (!sTaps.empty()) {
+            NSLog(@"Lighthouse: %zu scripted taps", sTaps.size());
+        }
+    }
+
+    if (sNext >= sTaps.size() || CACurrentMediaTime() - sStart < sTaps[sNext].At) {
+        return;
+    }
+
+    Fast::VisionOSPointer down{};
+    down.X = sTaps[sNext].X;
+    down.Y = sTaps[sNext].Y;
+    down.Valid = true;
+    down.Pressed = true;
+    // The mask keeps the last value written for a pixel, so the last rectangle that holds the point
+    // is the tracking area the system would report.
+    for (size_t i = 0; i < Fast::GetVisionOSTrackingRectCount(); ++i) {
+        const Fast::VisionOSTrackingRect rect = Fast::GetVisionOSTrackingRect(i);
+        if (down.X >= rect.MinX && down.X <= rect.MaxX && down.Y >= rect.MinY && down.Y <= rect.MaxY) {
+            down.Identifier = rect.Identifier;
+        }
+    }
+    Fast::PushVisionOSPointer(down);
+    Fast::VisionOSPointer up = down;
+    up.Pressed = false;
+    Fast::PushVisionOSPointer(up);
+    NSLog(@"Lighthouse: scripted tap %zu at %.0f,%.0f", sNext, down.X, down.Y);
+    ++sNext;
+}
+
 bool CompositorOpenFrame() {
+    RunScriptedTaps();
     @autoreleasepool {
     for (;;) {
         cp_layer_renderer_state state = cp_layer_renderer_get_state(gState.Renderer);
