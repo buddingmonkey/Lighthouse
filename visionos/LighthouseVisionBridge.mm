@@ -380,7 +380,6 @@ struct CompositorState {
     size_t DrawableCount = 0;
     simd_float4x4 OriginFromDevice = matrix_identity_float4x4;
     bool DeviceAnchorValid = false;
-    bool TrackingReported = false;
 };
 
 CompositorState gState;
@@ -420,20 +419,6 @@ void LighthouseVisionSpatialEvent(int phase, int hasRay, uint64_t trackingArea, 
     // Hold the last place the ray met the screen, so the button comes up over the same item.
     sPointer.Pressed = (phase == 0) && (sPointer.Valid || trackingArea != 0);
     Fast::PushVisionOSPointer(sPointer);
-
-    if (phase == 0 && hasRay != 0) {
-        const simd_float4x4 screenFromOrigin = simd_inverse(gState.OriginFromScreen);
-        const simd_float3 o = simd_mul(screenFromOrigin, simd_make_float4(originX, originY, originZ, 1.0f)).xyz;
-        const simd_float3 d =
-            simd_mul(screenFromOrigin, simd_make_float4(directionX, directionY, directionZ, 0.0f)).xyz;
-        const simd_float4 screenAt = gState.OriginFromScreen.columns[3];
-        const simd_float4 deviceAt = gState.OriginFromDevice.columns[3];
-        NSLog(@"Lighthouse: ray world o %.3f,%.3f,%.3f d %.3f,%.3f,%.3f | screen o %.3f,%.3f,%.3f d "
-              @"%.3f,%.3f,%.3f | screenAt %.3f,%.3f,%.3f deviceAt %.3f,%.3f,%.3f | px %.1f,%.1f valid %d",
-              originX, originY, originZ, directionX, directionY, directionZ, o.x, o.y, o.z, d.x, d.y, d.z,
-              screenAt.x, screenAt.y, screenAt.z, deviceAt.x, deviceAt.y, deviceAt.z, sPointer.X, sPointer.Y,
-              (int)sPointer.Valid);
-    }
 }
 
 namespace {
@@ -534,14 +519,6 @@ bool CompositorOpenFrame() {
     cp_drawable_t drawable = cp_drawable_array_get_drawable(gState.Drawables, 0);
 
     cp_frame_start_submission(gState.Frame);
-    if (!gState.TrackingReported) {
-        gState.TrackingReported = true;
-        const size_t count = cp_drawable_get_tracking_areas_texture_count(drawable);
-        id<MTLTexture> tracking = count > 0 ? cp_drawable_get_tracking_areas_texture(drawable, 0) : nil;
-        NSLog(@"Lighthouse: %zu drawables, %zu tracking textures, format %lu, size %lux%lu", gState.DrawableCount,
-              count, (unsigned long)tracking.pixelFormat, (unsigned long)tracking.width,
-              (unsigned long)tracking.height);
-    }
     cp_frame_timing_t drawableTiming = cp_drawable_get_frame_timing(drawable);
     CFTimeInterval presentationTime =
         cp_time_to_cf_time_interval(cp_frame_timing_get_presentation_time(drawableTiming));
