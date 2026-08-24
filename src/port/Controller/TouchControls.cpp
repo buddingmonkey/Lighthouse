@@ -1050,6 +1050,26 @@ void TouchControls_Draw() {
             dl->AddRectFilled(ImVec2(center.x - barHalfW, y - barHalfH), ImVec2(center.x + barHalfW, y + barHalfH),
                               barShade, barHalfH);
         }
+
+#ifdef PLATFORM_VISIONOS
+        // A foreground draw list adds no ImGui item, so the visionOS tracking mask has nothing here
+        // for the gaze to land on and no pinch can reach the button. One invisible button over the
+        // same rectangle gives it a tracking area, and the press then arrives like any other.
+        const ImVec2 menuSize(menuMax.x - menuMin.x, menuMax.y - menuMin.y);
+        ImGui::SetNextWindowPos(menuMin);
+        ImGui::SetNextWindowSize(menuSize);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        if (ImGui::Begin("##TouchMenuButtonArea", nullptr,
+                         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground |
+                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+                             ImGuiWindowFlags_NoFocusOnAppearing)) {
+            if (ImGui::InvisibleButton("##TouchMenuButton", menuSize)) {
+                OpenMenu();
+            }
+        }
+        ImGui::End();
+        ImGui::PopStyleVar();
+#endif
     }
 
     if (!PadActive()) {
