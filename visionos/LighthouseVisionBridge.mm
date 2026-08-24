@@ -268,13 +268,7 @@ static void DrawTrackingAreas(cp_drawable_t drawable, id<MTLCommandBuffer> comma
 
     const cp_tracking_area_render_value maxValue =
         cp_layer_renderer_properties_get_tracking_areas_max_value(cp_layer_renderer_get_properties(renderer));
-    const size_t wantCount = Fast::GetVisionOSTrackingRectCount();
-    const size_t rectCount = MIN(wantCount, static_cast<size_t>(maxValue));
-    static bool sTruncationReported = false;
-    if (rectCount < wantCount && !sTruncationReported) {
-        sTruncationReported = true;
-        NSLog(@"Lighthouse: %zu tracking areas wanted, %u allowed", wantCount, (unsigned)maxValue);
-    }
+    const size_t rectCount = Fast::GetVisionOSTrackingRectCount();
 
     const bool layered = layout == cp_layer_renderer_layout_layered;
     const NSUInteger passCount = layered ? 1 : viewCount;
@@ -324,14 +318,30 @@ static void DrawTrackingAreas(cp_drawable_t drawable, id<MTLCommandBuffer> comma
         }
         [encoder setVertexBytes:mvp length:sizeof(simd_float4x4) * (layered ? viewCount : 1) atIndex:0];
 
+        uint32_t added = 0;
         for (size_t i = 0; i < rectCount; ++i) {
             const Fast::VisionOSTrackingRect rect = Fast::GetVisionOSTrackingRect(i);
-            cp_tracking_area_t area = cp_drawable_add_tracking_area(drawable, rect.Identifier);
-            if (area == nullptr) {
-                continue;
+
+            // A zero identifier is a window. It takes no tracking area and only hides what is
+            // behind it, which is what the clear value already means.
+            uint32_t value = 0;
+            if (rect.Identifier != 0) {
+                if (added >= maxValue) {
+                    static bool sReported = false;
+                    if (!sReported) {
+                        sReported = true;
+                        NSLog(@"Lighthouse: more tracking areas than the %u the layer allows", (unsigned)maxValue);
+                    }
+                    continue;
+                }
+                cp_tracking_area_t area = cp_drawable_add_tracking_area(drawable, rect.Identifier);
+                if (area == nullptr) {
+                    continue;
+                }
+                cp_tracking_area_add_automatic_hover_effect(area);
+                value = cp_tracking_area_get_render_value(area);
+                ++added;
             }
-            cp_tracking_area_add_automatic_hover_effect(area);
-            const uint32_t value = cp_tracking_area_get_render_value(area);
 
             // The item is in game texture pixels. The screen quad spans the whole texture.
             const float left = (rect.MinX / kGameTextureWidth * 2.0f - 1.0f) * kScreenHalfWidth;
