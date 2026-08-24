@@ -87,9 +87,17 @@ extern int gPartGroups;
 extern int gPartParticles;
 }
 
+// The window is a rectangle in the room rather than a screen. Both headset backends are one.
+// Not the same question as TouchControls' HeadsetActive, which asks whether there is a touchscreen
+// and whether the headset carries its own way into the menu; visionOS answers those the other way.
 bool IsHeadsetWindow() {
     auto window = Ship::Context::GetRawInstance()->GetWindow();
-    return window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+    if (window == nullptr) {
+        return false;
+    }
+    const auto backend = window->GetWindowBackend();
+    return backend == static_cast<int32_t>(Fast::WindowBackend::FAST3D_OPENXR_OPENGL) ||
+           backend == static_cast<int32_t>(Fast::WindowBackend::FAST3D_VISIONOS_METAL);
 }
 
 uint32_t DefaultImGuiScaleIndex() {
