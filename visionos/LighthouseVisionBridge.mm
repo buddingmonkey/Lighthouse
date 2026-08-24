@@ -523,23 +523,29 @@ void CompositorPollState() {
 // Compositor Services never says what the panel runs at, and nothing can ask it for a rate: the
 // only lever is cp_layer_renderer_set_minimum_frame_repeat_count, which renders less often, not
 // more. So the cadence is measured from the presentation times. A dropped frame only ever makes
-// the gap longer, so the shortest gap is the cadence; it decays back out slowly, in case the
-// compositor really does change rate.
+// the gap longer, so the shortest gap in a window is the cadence, and a whole window has to pass
+// before the answer changes. Following the shortest gap frame by frame instead would let rounding
+// walk the answer up and down forever.
 void NoteFrameCadence(CFTimeInterval presentationTime) {
+    static const int kWindow = 120;
     static CFTimeInterval sLast = 0.0;
-    static double sInterval = 0.0;
+    static double sShortest = 0.0;
+    static int sCount = 0;
 
     if (sLast > 0.0) {
         const double delta = presentationTime - sLast;
         if (delta > 0.002 && delta < 0.2) {
-            sInterval = (sInterval <= 0.0 || delta < sInterval) ? delta : sInterval * 1.0002;
+            if (sShortest <= 0.0 || delta < sShortest) {
+                sShortest = delta;
+            }
+            if (++sCount >= kWindow) {
+                Fast::SetVisionOSRefreshRate((uint32_t)llround(1.0 / sShortest));
+                sShortest = 0.0;
+                sCount = 0;
+            }
         }
     }
     sLast = presentationTime;
-
-    if (sInterval > 0.0) {
-        Fast::SetVisionOSRefreshRate((uint32_t)llround(1.0 / sInterval));
-    }
 }
 
 bool CompositorOpenFrame() {
