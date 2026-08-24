@@ -82,6 +82,7 @@ static const uint32_t kGameTextureWidth = 1280;
 static const uint32_t kGameTextureHeight = 720;
 static const float kScreenHalfWidth = 0.6f;
 static const float kScreenHalfHeight = 0.3375f;
+static const float kScreenRange = 1.3f;
 
 struct ScreenPipeline {
     id<MTLRenderPipelineState> render = nil;
@@ -544,7 +545,7 @@ bool CompositorOpenFrame() {
         gState.OriginFromDevice = ar_device_anchor_get_origin_from_anchor_transform(gState.DeviceAnchor);
         if (!gState.ScreenPositioned) {
             simd_float4x4 deviceFromScreen = matrix_identity_float4x4;
-            deviceFromScreen.columns[3].z = -1.3f;
+            deviceFromScreen.columns[3].z = -kScreenRange;
             gState.OriginFromScreen = simd_mul(gState.OriginFromDevice, deviceFromScreen);
             gState.ScreenPositioned = true;
         }
@@ -556,6 +557,17 @@ bool CompositorOpenFrame() {
         if (gState.Screen.render == nil && !gState.ScreenFailed) {
             gState.ScreenFailed =
                 !InitScreenPipeline(gState.Screen, cp_layer_renderer_get_device(gState.Renderer), drawable);
+        }
+
+        // The window camera model wants each eye in the screen's own axes. The shell is what knows
+        // where the screen stands, so it does that part and reports meters.
+        const simd_float4x4 screenFromOrigin = simd_inverse(gState.OriginFromScreen);
+        const size_t viewCount = cp_drawable_get_view_count(drawable);
+        for (size_t i = 0; i < viewCount && i < 2; ++i) {
+            const simd_float4x4 originFromView =
+                simd_mul(gState.OriginFromDevice, cp_view_get_transform(cp_drawable_get_view(drawable, i)));
+            const simd_float3 eye = simd_mul(screenFromOrigin, originFromView.columns[3]).xyz;
+            Fast::SetVisionOSEye((int)i, eye.x, eye.y, eye.z);
         }
     }
     return true;
@@ -644,6 +656,7 @@ void LighthouseVisionRun(cp_layer_renderer_t renderer) {
     gState.Layout = cp_layer_renderer_configuration_get_layout(cp_layer_renderer_get_configuration(renderer));
 
     Fast::SetVisionOSCompositor((__bridge void*)device, (__bridge void*)queue, kGameTextureWidth, kGameTextureHeight);
+    Fast::SetVisionOSScreen(kScreenHalfWidth, kScreenRange);
     Fast::SetVisionOSFrameHooks(
         { CompositorOpenFrame, CompositorCloseFrame, CompositorIsRunning, CompositorPollState });
 
