@@ -1,5 +1,6 @@
 #import "LighthouseVisionBridge.h"
 #import <ARKit/ARKit.h>
+#import <GameController/GameController.h>
 #import <Metal/Metal.h>
 #import <simd/simd.h>
 
@@ -593,6 +594,29 @@ void CompositorCloseFrame() {
 
 } // namespace
 
+// SDL keeps its keyboard inside the UIKit video driver, which visionos.cmake turns off, so SDL
+// never sees a paired keyboard. Read it from the Game Controller framework instead. SDL takes the
+// key code as a scancode itself, because both are the HID usage.
+static void AttachKeyboard(GCKeyboard* keyboard) {
+    if (keyboard == nil) {
+        return;
+    }
+    keyboard.keyboardInput.keyChangedHandler =
+        ^(GCKeyboardInput* input, GCControllerButtonInput* button, GCKeyCode keyCode, BOOL pressed) {
+            Fast::PushVisionOSKey((int)keyCode, pressed != NO);
+        };
+}
+
+static void StartKeyboard() {
+    AttachKeyboard(GCKeyboard.coalescedKeyboard);
+    [[NSNotificationCenter defaultCenter] addObserverForName:GCKeyboardDidConnectNotification
+                                                      object:nil
+                                                       queue:nil
+                                                  usingBlock:^(NSNotification* note) {
+                                                      AttachKeyboard(note.object);
+                                                  }];
+}
+
 void LighthouseVisionRun(cp_layer_renderer_t renderer) {
     id<MTLDevice> device = cp_layer_renderer_get_device(renderer);
     id<MTLCommandQueue> queue = [device newCommandQueue];
@@ -621,6 +645,8 @@ void LighthouseVisionRun(cp_layer_renderer_t renderer) {
     // SDL_UIKitRunApp usually does this. Without it SDL_Init refuses every subsystem, and the
     // control deck gets no game controllers.
     SDL_SetMainReady();
+
+    StartKeyboard();
 
     char program[] = "Lighthouse";
     char* argv[] = { program, nullptr };
