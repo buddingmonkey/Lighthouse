@@ -360,6 +360,7 @@ static void DrawTrackingAreas(cp_drawable_t drawable, id<MTLCommandBuffer> comma
 
 extern "C" int SDL_main(int argc, char* argv[]);
 extern "C" void SDL_SetMainReady(void);
+extern "C" void port_setAppOnScreen(int onScreen);
 
 namespace {
 
@@ -482,21 +483,33 @@ void RunScriptedTaps() {
     ++sNext;
 }
 
+// SDL's UIKit app delegate posts the lifecycle events on iOS, and it is not in this build. The
+// layer state says the same thing: paused is off screen and invalidated is the end of the run.
+// Read it from the event pump, not from the frame, because a paused app opens no frame.
+void CompositorPollState() {
+    static bool sOnScreen = true;
+
+    const cp_layer_renderer_state state = cp_layer_renderer_get_state(gState.Renderer);
+    if (state != cp_layer_renderer_state_running && state != cp_layer_renderer_state_paused) {
+        if (gState.Running) {
+            NSLog(@"Lighthouse: the visionOS layer stopped, state %d", (int)state);
+        }
+        gState.Running = false;
+        return;
+    }
+
+    const bool onScreen = state == cp_layer_renderer_state_running;
+    if (onScreen != sOnScreen) {
+        sOnScreen = onScreen;
+        port_setAppOnScreen(onScreen ? 1 : 0);
+    }
+}
+
 bool CompositorOpenFrame() {
     RunScriptedTaps();
     @autoreleasepool {
-    for (;;) {
-        cp_layer_renderer_state state = cp_layer_renderer_get_state(gState.Renderer);
-        if (state == cp_layer_renderer_state_paused) {
-            cp_layer_renderer_wait_until_running(gState.Renderer);
-            continue;
-        }
-        if (state != cp_layer_renderer_state_running) {
-            NSLog(@"Lighthouse: the visionOS layer stopped, state %d", (int)state);
-            gState.Running = false;
-            return false;
-        }
-        break;
+    if (cp_layer_renderer_get_state(gState.Renderer) != cp_layer_renderer_state_running) {
+        return false;
     }
 
     gState.Frame = cp_layer_renderer_query_next_frame(gState.Renderer);
@@ -602,7 +615,8 @@ void LighthouseVisionRun(cp_layer_renderer_t renderer) {
     gState.Layout = cp_layer_renderer_configuration_get_layout(cp_layer_renderer_get_configuration(renderer));
 
     Fast::SetVisionOSCompositor((__bridge void*)device, (__bridge void*)queue, kGameTextureWidth, kGameTextureHeight);
-    Fast::SetVisionOSFrameHooks({ CompositorOpenFrame, CompositorCloseFrame, CompositorIsRunning });
+    Fast::SetVisionOSFrameHooks(
+        { CompositorOpenFrame, CompositorCloseFrame, CompositorIsRunning, CompositorPollState });
 
     // SDL_UIKitRunApp usually does this. Without it SDL_Init refuses every subsystem, and the
     // control deck gets no game controllers.
@@ -613,4 +627,8 @@ void LighthouseVisionRun(cp_layer_renderer_t renderer) {
     SDL_main(1, argv);
 
     ar_session_stop(session);
+
+    // The scene is a compositor layer and nothing else. Once the layer is gone there is no way to
+    // draw, so the app leaves rather than hold an empty process.
+    exit(0);
 }
