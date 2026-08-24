@@ -520,6 +520,28 @@ void CompositorPollState() {
     }
 }
 
+// Compositor Services never says what the panel runs at, and nothing can ask it for a rate: the
+// only lever is cp_layer_renderer_set_minimum_frame_repeat_count, which renders less often, not
+// more. So the cadence is measured from the presentation times. A dropped frame only ever makes
+// the gap longer, so the shortest gap is the cadence; it decays back out slowly, in case the
+// compositor really does change rate.
+void NoteFrameCadence(CFTimeInterval presentationTime) {
+    static CFTimeInterval sLast = 0.0;
+    static double sInterval = 0.0;
+
+    if (sLast > 0.0) {
+        const double delta = presentationTime - sLast;
+        if (delta > 0.002 && delta < 0.2) {
+            sInterval = (sInterval <= 0.0 || delta < sInterval) ? delta : sInterval * 1.0002;
+        }
+    }
+    sLast = presentationTime;
+
+    if (sInterval > 0.0) {
+        Fast::SetVisionOSRefreshRate((uint32_t)llround(1.0 / sInterval));
+    }
+}
+
 bool CompositorOpenFrame() {
     RunScriptedTaps();
     @autoreleasepool {
@@ -550,6 +572,7 @@ bool CompositorOpenFrame() {
     cp_frame_timing_t drawableTiming = cp_drawable_get_frame_timing(drawable);
     CFTimeInterval presentationTime =
         cp_time_to_cf_time_interval(cp_frame_timing_get_presentation_time(drawableTiming));
+    NoteFrameCadence(presentationTime);
 
     gState.DeviceAnchorValid = ar_world_tracking_provider_query_device_anchor_at_timestamp(
                                    gState.TrackingProvider, presentationTime, gState.DeviceAnchor) ==
