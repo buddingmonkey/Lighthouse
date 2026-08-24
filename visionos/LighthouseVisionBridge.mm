@@ -88,7 +88,7 @@ struct ScreenPipeline {
     id<MTLRenderPipelineState> render = nil;
     id<MTLRenderPipelineState> tracking = nil;
     id<MTLDepthStencilState> depth = nil;
-    id<MTLTexture> game = nil;
+    id<MTLTexture> game[2] = { nil, nil };
 };
 
 static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, cp_drawable_t drawable) {
@@ -101,14 +101,17 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
     NSString* source = @R"(
         #include <metal_stdlib>
         using namespace metal;
-        struct VertexOut { float4 position [[position]]; float2 uv; };
+        struct VertexOut { float4 position [[position]]; float2 uv; ushort eye [[flat]]; };
         vertex VertexOut screenVertex(uint vertexID [[vertex_id]], ushort ampID [[amplification_id]],
-                                      constant float4x4* mvp [[buffer(0)]]) {
+                                      constant float4x4* mvp [[buffer(0)]], constant ushort& eyeBase [[buffer(2)]]) {
             const float2 positions[] = { {-0.6, -0.3375}, {0.6, -0.3375}, {-0.6, 0.3375}, {0.6, 0.3375} };
             const float2 uvs[] = { {0, 1}, {1, 1}, {0, 0}, {1, 0} };
             VertexOut out;
             out.position = mvp[ampID] * float4(positions[vertexID], 0, 1);
             out.uv = uvs[vertexID];
+            // Amplified, the two eyes come out of one pass and ampID names them. Dedicated, each
+            // eye is its own pass and the base says which.
+            out.eye = eyeBase + ampID;
             return out;
         }
         vertex float4 trackingVertex(uint vertexID [[vertex_id]], ushort ampID [[amplification_id]],
@@ -119,9 +122,11 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
         fragment uint trackingFragment(constant uint& value [[buffer(0)]]) {
             return value;
         }
-        fragment half4 screenFragment(VertexOut in [[stage_in]], texture2d<float> game [[texture(0)]]) {
+        fragment half4 screenFragment(VertexOut in [[stage_in]], texture2d<float> gameLeft [[texture(0)]],
+                                      texture2d<float> gameRight [[texture(1)]]) {
             constexpr sampler gameSampler(filter::linear, address::clamp_to_edge);
-            float3 encoded = game.sample(gameSampler, in.uv).rgb;
+            float3 encoded = in.eye == 0 ? gameLeft.sample(gameSampler, in.uv).rgb
+                                         : gameRight.sample(gameSampler, in.uv).rgb;
             float3 linearColor = select(encoded / 12.92, pow((encoded + 0.055) / 1.055, 2.4), encoded > 0.04045);
             return half4(half3(linearColor), 1.0);
         }
@@ -157,16 +162,18 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
         }
     }
 
-    pipeline.game = (__bridge id<MTLTexture>)Fast::GetVisionOSGameTexture();
-    if (pipeline.game == nil) {
-        NSLog(@"Lighthouse: the visionOS game texture was not published");
+    for (int eye = 0; eye < 2; ++eye) {
+        pipeline.game[eye] = (__bridge id<MTLTexture>)Fast::GetVisionOSGameTexture(eye);
+        if (pipeline.game[eye] == nil) {
+            NSLog(@"Lighthouse: the visionOS game texture for eye %d was not published", eye);
+        }
     }
 
     MTLDepthStencilDescriptor* depthDescriptor = [MTLDepthStencilDescriptor new];
     depthDescriptor.depthCompareFunction = MTLCompareFunctionGreaterEqual;
     depthDescriptor.depthWriteEnabled = YES;
     pipeline.depth = [device newDepthStencilStateWithDescriptor:depthDescriptor];
-    return pipeline.render != nil && pipeline.game != nil && pipeline.depth != nil;
+    return pipeline.render != nil && pipeline.game[0] != nil && pipeline.game[1] != nil && pipeline.depth != nil;
 }
 
 static simd_float4x4 ScreenMVP(cp_drawable_t drawable, size_t viewIndex, simd_float4x4 originFromDevice,
@@ -219,7 +226,10 @@ static void DrawScreen(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffe
         [encoder setViewports:viewports count:viewCount];
         [encoder setVertexAmplificationCount:viewCount viewMappings:mappings];
         [encoder setVertexBytes:mvp length:sizeof(simd_float4x4) * viewCount atIndex:0];
-        [encoder setFragmentTexture:pipeline.game atIndex:0];
+        const uint16_t eyeBase = 0;
+        [encoder setVertexBytes:&eyeBase length:sizeof(eyeBase) atIndex:2];
+        [encoder setFragmentTexture:pipeline.game[0] atIndex:0];
+        [encoder setFragmentTexture:pipeline.game[1] atIndex:1];
         [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
         [encoder endEncoding];
         return;
@@ -253,7 +263,10 @@ static void DrawScreen(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffe
         [encoder setDepthStencilState:pipeline.depth];
         [encoder setViewport:cp_view_texture_map_get_viewport(map)];
         [encoder setVertexBytes:&mvp length:sizeof(mvp) atIndex:0];
-        [encoder setFragmentTexture:pipeline.game atIndex:0];
+        const uint16_t eyeBase = (uint16_t)i;
+        [encoder setVertexBytes:&eyeBase length:sizeof(eyeBase) atIndex:2];
+        [encoder setFragmentTexture:pipeline.game[0] atIndex:0];
+        [encoder setFragmentTexture:pipeline.game[1] atIndex:1];
         [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
         [encoder endEncoding];
     }
@@ -563,6 +576,7 @@ bool CompositorOpenFrame() {
         // where the screen stands, so it does that part and reports meters.
         const simd_float4x4 screenFromOrigin = simd_inverse(gState.OriginFromScreen);
         const size_t viewCount = cp_drawable_get_view_count(drawable);
+        Fast::SetVisionOSViewCount((uint32_t)viewCount);
         for (size_t i = 0; i < viewCount && i < 2; ++i) {
             const simd_float4x4 originFromView =
                 simd_mul(gState.OriginFromDevice, cp_view_get_transform(cp_drawable_get_view(drawable, i)));
