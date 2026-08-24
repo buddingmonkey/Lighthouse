@@ -373,32 +373,49 @@ bool CompositorIsRunning() {
 
 } // namespace
 
-void LighthouseVisionSpatialEvent(int phase, float originX, float originY, float originZ, float directionX,
-                                  float directionY, float directionZ) {
-    if (!gState.ScreenPositioned) {
-        return;
-    }
+void LighthouseVisionSpatialEvent(int phase, int hasRay, uint64_t trackingArea, float originX, float originY,
+                                  float originZ, float directionX, float directionY, float directionZ) {
+    static Fast::VisionOSPointer sPointer{};
 
-    // The ray is in world coordinates. The screen is a quad at the origin of originFromScreen,
-    // 1.2 by 0.675 meters, facing -z, so take the ray into that frame and cross the z plane.
-    const simd_float4x4 screenFromOrigin = simd_inverse(gState.OriginFromScreen);
-    const simd_float3 origin = simd_mul(screenFromOrigin, simd_make_float4(originX, originY, originZ, 1.0f)).xyz;
-    const simd_float3 direction = simd_mul(screenFromOrigin, simd_make_float4(directionX, directionY, directionZ, 0.0f)).xyz;
+    if (hasRay != 0 && gState.ScreenPositioned) {
+        // The ray is in world coordinates. The screen is a quad at the origin of originFromScreen,
+        // 1.2 by 0.675 meters, facing -z, so take the ray into that frame and cross the z plane.
+        const simd_float4x4 screenFromOrigin = simd_inverse(gState.OriginFromScreen);
+        const simd_float3 origin = simd_mul(screenFromOrigin, simd_make_float4(originX, originY, originZ, 1.0f)).xyz;
+        const simd_float3 direction =
+            simd_mul(screenFromOrigin, simd_make_float4(directionX, directionY, directionZ, 0.0f)).xyz;
 
-    Fast::VisionOSPointer pointer{};
-    if (direction.z != 0.0f) {
-        const float t = -origin.z / direction.z;
-        if (t > 0.0f) {
-            const simd_float3 hit = origin + t * direction;
-            if (fabsf(hit.x) <= kScreenHalfWidth && fabsf(hit.y) <= kScreenHalfHeight) {
-                pointer.X = (hit.x + kScreenHalfWidth) / (2.0f * kScreenHalfWidth) * kGameTextureWidth;
-                pointer.Y = (kScreenHalfHeight - hit.y) / (2.0f * kScreenHalfHeight) * kGameTextureHeight;
-                pointer.Valid = true;
+        if (direction.z != 0.0f) {
+            const float t = -origin.z / direction.z;
+            if (t > 0.0f) {
+                const simd_float3 hit = origin + t * direction;
+                if (fabsf(hit.x) <= kScreenHalfWidth && fabsf(hit.y) <= kScreenHalfHeight) {
+                    sPointer.X = (hit.x + kScreenHalfWidth) / (2.0f * kScreenHalfWidth) * kGameTextureWidth;
+                    sPointer.Y = (kScreenHalfHeight - hit.y) / (2.0f * kScreenHalfHeight) * kGameTextureHeight;
+                    sPointer.Valid = true;
+                }
             }
         }
     }
-    pointer.Pressed = pointer.Valid && phase == 0;
-    Fast::SetVisionOSPointer(pointer);
+
+    sPointer.Identifier = trackingArea;
+    // Hold the last place the ray met the screen, so the button comes up over the same item.
+    sPointer.Pressed = (phase == 0) && (sPointer.Valid || trackingArea != 0);
+    Fast::PushVisionOSPointer(sPointer);
+
+    if (phase == 0 && hasRay != 0) {
+        const simd_float4x4 screenFromOrigin = simd_inverse(gState.OriginFromScreen);
+        const simd_float3 o = simd_mul(screenFromOrigin, simd_make_float4(originX, originY, originZ, 1.0f)).xyz;
+        const simd_float3 d =
+            simd_mul(screenFromOrigin, simd_make_float4(directionX, directionY, directionZ, 0.0f)).xyz;
+        const simd_float4 screenAt = gState.OriginFromScreen.columns[3];
+        const simd_float4 deviceAt = gState.OriginFromDevice.columns[3];
+        NSLog(@"Lighthouse: ray world o %.3f,%.3f,%.3f d %.3f,%.3f,%.3f | screen o %.3f,%.3f,%.3f d "
+              @"%.3f,%.3f,%.3f | screenAt %.3f,%.3f,%.3f deviceAt %.3f,%.3f,%.3f | px %.1f,%.1f valid %d",
+              originX, originY, originZ, directionX, directionY, directionZ, o.x, o.y, o.z, d.x, d.y, d.z,
+              screenAt.x, screenAt.y, screenAt.z, deviceAt.x, deviceAt.y, deviceAt.z, sPointer.X, sPointer.Y,
+              (int)sPointer.Valid);
+    }
 }
 
 namespace {
