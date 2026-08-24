@@ -598,11 +598,16 @@ void CompositorCloseFrame() {
 // never sees a paired keyboard. Read it from the Game Controller framework instead. SDL takes the
 // key code as a scancode itself, because both are the HID usage.
 static void AttachKeyboard(GCKeyboard* keyboard) {
-    if (keyboard == nil) {
+    if (keyboard == nil || keyboard.keyboardInput == nil) {
         return;
     }
+    // The default handler queue is the main queue. Give the keyboard one of its own, the way SDL
+    // does, so a busy main thread cannot hold the keys up.
+    dispatch_queue_t queue = dispatch_queue_create("com.andreweiche.lighthouse.keyboard", DISPATCH_QUEUE_SERIAL);
+    dispatch_set_target_queue(queue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
+    keyboard.handlerQueue = queue;
     keyboard.keyboardInput.keyChangedHandler =
-        ^(GCKeyboardInput* input, GCControllerButtonInput* button, GCKeyCode keyCode, BOOL pressed) {
+        ^(GCKeyboardInput* input, GCDeviceButtonInput* key, GCKeyCode keyCode, BOOL pressed) {
             Fast::PushVisionOSKey((int)keyCode, pressed != NO);
         };
 }
