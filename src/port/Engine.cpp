@@ -66,7 +66,24 @@
 #define gVIsPerFrame 2 // 30 Hz
 
 const float imguiScaleOptionToValue[4] = { 0.75f, 1.0f, 1.5f, 2.0f };
-const uint32_t defaultImGuiScale = 1;
+std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
+
+uint32_t DefaultImGuiScaleIndex() {
+#ifdef LIGHTHOUSE_MOBILE
+    // A tablet takes the larger menu; a phone has too little screen to navigate it, so split at a 600 short side.
+    static const uint32_t index = []() {
+        auto window = Ship::Context::GetRawInstance()->GetWindow();
+        if (window == nullptr) {
+            return 0u;
+        }
+        float shortSide = static_cast<float>(std::min(window->GetWidth(), window->GetHeight()));
+        return shortSide >= 600.0f ? 2u : 0u;
+    }();
+    return index;
+#else
+    return 1;
+#endif
+}
 
 // Engine globals
 
@@ -86,12 +103,11 @@ long long sLastSubFrameNs = 0;
 long long sPassBudgetNs = 0;
 } // namespace
 
-std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
 bool portArchiveVersionMatch = false;
 std::string assets_path;
 
 int32_t previousImGuiScaleIndex = -1;
-float previousImGuiScale = defaultImGuiScale;
+float previousImGuiScale = 1.0f;
 
 namespace fs = std::filesystem;
 
@@ -118,6 +134,18 @@ GameEngine* GameEngine::Instance;
 // Construction
 
 GameEngine::GameEngine() {
+#ifdef LIGHTHOUSE_MOBILE
+    // Otherwise the accelerometer appears as a phantom joystick in the device list.
+    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+#endif
+#ifdef __IOS__
+    // Play through the ring/silent switch like other games do.
+    SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "playback");
+    // Hides the home indicator and defers the edge swipes that would otherwise reach the
+    // touch controls sitting along the bottom of the screen.
+    SDL_SetHint(SDL_HINT_IOS_HIDE_HOME_INDICATOR, "2");
+#endif
+
     this->context = Ship::Context::CreateUninitializedInstance("Lighthouse", "bk", "lighthouse.cfg.json");
 
 #ifdef __SWITCH__
@@ -155,6 +183,7 @@ GameEngine::GameEngine() {
 
     lhFast3dWindow = std::make_shared<Fast::Fast3dWindow>(std::vector<std::shared_ptr<Ship::GuiWindow>>({}));
     this->context->InitWindow(lhFast3dWindow);
+    port_installLifecycleWatch();
     this->context->InitAudio({ .SampleRate = 22000, .SampleLength = 736, .DesiredBuffered = 2208 });
 
     LighthouseGui::SetupMenu();
@@ -170,7 +199,7 @@ GameEngine::GameEngine() {
     }
 
     previousImGuiScaleIndex = -1;
-    previousImGuiScale = defaultImGuiScale;
+    previousImGuiScale = 1.0f;
     ScaleImGui();
 }
 
@@ -358,7 +387,7 @@ ImFont* GameEngine::CreateFontWithSize(float size, std::string fontPath) {
 }
 
 void GameEngine::ScaleImGui() {
-    int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", defaultImGuiScale);
+    int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", DefaultImGuiScaleIndex());
     if (imGuiScaleIndex == previousImGuiScaleIndex) {
         return;
     }
@@ -488,6 +517,10 @@ void GameEngine::RelaunchIfRequested(int argc, char* argv[]) {
             SPDLOG_ERROR("Relaunch failed: CreateProcess error {}", GetLastError());
         }
     }
+#elif defined(LIGHTHOUSE_MOBILE)
+    // exec is unavailable to sandboxed apps; the user relaunches the app themselves.
+    (void)argc;
+    (void)argv;
 #elif defined(__linux__) || defined(__APPLE__)
     execv(argv[0], argv);
     SPDLOG_ERROR("Relaunch failed: execv error {}", strerror(errno));
@@ -568,6 +601,7 @@ using Clock = std::chrono::steady_clock;
 inline long long NsSince(Clock::time_point t0) {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count();
 }
+
 } // namespace
 
 void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map<Mtx*, MtxF>>& mtx_replacements,
@@ -585,6 +619,8 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
         if (frameIdx >= 1 && frameIdx - 1 < sMapBuildFutures.size()) {
             sMapBuildFutures[frameIdx - 1].wait();
         }
+        // Stop once another sub-frame no longer fits in what the tick's worth
+        // of wall time has left.
         if (frameIdx > 0 && sLastSubFrameNs > 0 && (sPassBudgetNs - NsSince(passT0)) < sLastSubFrameNs) {
             break;
         }
@@ -596,6 +632,7 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
         Nametag::SetSubframeBlend(subframeBlend);
         bool isFinalFrame = (frameIdx == frameCount - 1);
         if (frameCount > 1 || wndBase->IsFrameReady()) {
+            // Sample the full CPU cost of producing this sub-frame.
             auto runT0 = Clock::now();
             auto gui = wndBase->GetGui();
             wndBase->GetMouseStateManager()->StartFrame();
@@ -634,6 +671,9 @@ struct SubframePacing {
     int viPerTick;
 };
 
+
+// Game-logic VI per tick: gVIsPerFrame (=2 -> 30 Hz) normally; demo
+// replay and cutscene stutter raise it for slow N64 frames.
 int CurrentViPerTick() {
     int viPerTick = port_getDemoViCount();
     if (viPerTick <= 0) {
@@ -668,6 +708,10 @@ SubframePacing ComputeSubframePacing() {
         subframesPerTick = 1;
     }
 
+    // paceFps drives DXGI's per-present wait so that subframes * 1/paceFps =
+    // viPerTick/60 wall (= game time per tick). Derived from viPerTick rather than
+    // effective_logic_fps: the latter is truncated (VI=7 -> 8, not 8.57), which would
+    // stretch wall time on the odd VI counts demo playback hands us every tick.
     int fps = subframesPerTick * 60 / viPerTick;
     if (fps < 1) {
         fps = 1;

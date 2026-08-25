@@ -37,6 +37,25 @@ std::map<std::string, std::filesystem::path> filePaths;
 static int dragSourceIndex = -1;
 static int dragTargetIndex = -1;
 
+// Mods only bind at process start. Desktop re-execs itself; mobile apps can't, so the user reopens the app.
+#ifdef LIGHTHOUSE_MOBILE
+static constexpr const char* kApplyRestartLabel = "Apply & Quit";
+static constexpr const char* kRestartButtonLabel = "Quit";
+static constexpr const char* kApplyRestartBody = "Applying mods requires a restart. Save the mod list and close "
+                                                 "Lighthouse now?\nReopen it to finish.";
+static constexpr const char* kModInstalledBody = "The romhack mod was extracted into your mods folder.\n"
+                                                 "Lighthouse needs to restart to load it.\n\n"
+                                                 "Close now, then reopen?";
+#else
+static constexpr const char* kApplyRestartLabel = "Apply & Restart";
+static constexpr const char* kRestartButtonLabel = "Restart";
+static constexpr const char* kApplyRestartBody =
+    "Applying mods requires a restart. Save the mod list and relaunch Lighthouse now?";
+static constexpr const char* kModInstalledBody = "The romhack mod was extracted into your mods folder.\n"
+                                                 "Lighthouse needs to restart to load it.\n\n"
+                                                 "Restart now?";
+#endif
+
 enum class ModCategory {
     Base,
     Romhack,
@@ -590,16 +609,14 @@ static void DrawModManager(const char* tableId, const ModFilter& shown, bool alp
                                          });
         }
         ImGui::SameLine();
-        if (UIWidgets::Button("Apply & Restart",
+        if (UIWidgets::Button(kApplyRestartLabel,
                               UIWidgets::ButtonOptions().Size(UIWidgets::Sizes::Inline).Color(THEME_COLOR))) {
-            LighthouseGui::RegisterPopup(
-                "Apply & Restart", "Applying mods requires a restart. Save the mod list and relaunch Lighthouse now?",
-                "Restart", "Cancel", []() {
-                    SetEnabledModsCVarValue();
-                    Ship::Context::GetRawInstance()->GetConsoleVariables()->Save();
-                    GameEngine::RequestRelaunch();
-                    Ship::Context::GetRawInstance()->GetWindow()->Close();
-                });
+            LighthouseGui::RegisterPopup(kApplyRestartLabel, kApplyRestartBody, kRestartButtonLabel, "Cancel", []() {
+                SetEnabledModsCVarValue();
+                Ship::Context::GetRawInstance()->GetConsoleVariables()->Save();
+                GameEngine::RequestRelaunch();
+                Ship::Context::GetRawInstance()->GetWindow()->Close();
+            });
         }
     }
     ImGui::BeginDisabled(!editing);
@@ -992,11 +1009,7 @@ void DrawInlineModExtraction() {
                                          "OK", "", nullptr, nullptr);
         } else {
             LighthouseGui::RegisterPopup(
-                "Mod Installed",
-                "The romhack mod was extracted into your mods folder.\n"
-                "Lighthouse needs to restart to load it.\n\n"
-                "Restart now?",
-                "Restart", "Later",
+                "Mod Installed", kModInstalledBody, kRestartButtonLabel, "Later",
                 []() {
                     GameEngine::RequestRelaunch();
                     Ship::Context::GetRawInstance()->GetWindow()->Close();

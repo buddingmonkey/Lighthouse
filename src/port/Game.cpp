@@ -18,6 +18,7 @@
 #endif
 #include <SDL2/SDL.h>
 
+#include "Controller/TouchControls.h"
 #include "DevTools/ThreadWatchdog.h"
 #include "GameStatus.h"
 #include "Interpolation/FrameInterpolation.h"
@@ -49,6 +50,61 @@ namespace {
 std::atomic<bool> sGameThreadDone{ false };
 std::thread sGameThread;
 thread_local bool tIsGameThread = false;
+
+#ifdef LIGHTHOUSE_MOBILE
+// Whether the app is on screen. A frame rendered once it isn't never presents,
+// so on iOS the drawables it takes are never handed back to the layer; three of
+// those empty the pool and every later nextDrawable spends its full one second
+// timeout before returning nothing. That state does not heal on its own -- with
+// no drawable there is nothing to present, and with nothing presented no
+// drawable is ever released -- and it leaves the game running at 1fps for the
+// rest of the session. So the loop stops rendering while off screen.
+//
+// The pair is willResignActive/didBecomeActive rather than the DID/WILL
+// background events: it is the earliest stop and the latest start, and it still
+// balances when iOS resigns activity without backgrounding at all, which is
+// what a notification banner or Control Centre does.
+std::atomic<bool> sAppOnScreen{ true };
+std::atomic<bool> sLowMemory{ false };
+
+int SDLCALL LifecycleWatch(void* userdata, SDL_Event* event) {
+    (void)userdata;
+    switch (event->type) {
+        case SDL_APP_WILLENTERBACKGROUND:
+            sAppOnScreen.store(false, std::memory_order_release);
+            break;
+        case SDL_APP_DIDENTERFOREGROUND:
+            sAppOnScreen.store(true, std::memory_order_release);
+            break;
+        case SDL_APP_LOWMEMORY:
+            sLowMemory.store(true, std::memory_order_release);
+            break;
+        case SDL_APP_TERMINATING:
+            // The only state change the loop cannot be left to pick up: the process is gone
+            // once this returns. A marker separates an OS termination from a crash in the log.
+            SPDLOG_WARN("[mobile] The system is terminating the app");
+            if (const auto& logger = Ship::Context::GetRawInstance()->GetLogger()) {
+                logger->flush();
+            }
+            break;
+        default:
+            break;
+    }
+    return 1;
+}
+
+void SetAudioSuspended(bool suspended) {
+    const auto& audio = Ship::Context::GetRawInstance()->GetAudio();
+    if (audio == nullptr) {
+        return;
+    }
+    if (suspended) {
+        audio->SuspendPlayback();
+    } else {
+        audio->ResumePlayback();
+    }
+}
+#endif
 
 // The interpolation pair a submitted list was built from, carried to whoever
 // renders it. At most a couple are live at once.
@@ -93,6 +149,27 @@ bool OnGameThread() {
     return tIsGameThread;
 }
 } // namespace
+
+// Only mobile takes the window away underneath a running render loop; everywhere else this is always true.
+extern "C" int port_appIsOnScreen(void) {
+#ifdef LIGHTHOUSE_MOBILE
+    return sAppOnScreen.load(std::memory_order_acquire) ? 1 : 0;
+#else
+    return 1;
+#endif
+}
+
+// Called once the window exists, which is both the earliest SDL will accept a watch and
+// early enough to cover RunExtract's loop.
+extern "C" void port_installLifecycleWatch(void) {
+#ifdef LIGHTHOUSE_MOBILE
+    static bool sInstalled = false;
+    if (!sInstalled) {
+        sInstalled = true;
+        SDL_AddEventWatch(LifecycleWatch, nullptr);
+    }
+#endif
+}
 
 // A list is submitted while its tick is still recording, so the pair is
 // captured here and travels with the task.
@@ -272,8 +349,8 @@ void push_frame() {
     }
 }
 
-/* Rename SDL_main to main for SDL compatibility */
-#ifdef __GNUC__
+// Rename SDL_main to main for SDL compatibility. Not on mobile: there the platform entry point calls SDL_main.
+#if defined(__GNUC__) && !defined(LIGHTHOUSE_MOBILE)
 #define SDL_main main
 #endif
 
@@ -285,6 +362,10 @@ int SDL_main(int argc, char* argv[]) {
     // Anchor relative paths to the executable instead of cwd
     // when SHIP_HOME is not in use
     std::error_code ec;
+#ifdef LIGHTHOUSE_MOBILE
+    // The app package is read-only; anchor to the app directory, which is where saves, bk.o2r and mods live.
+    std::filesystem::current_path(Ship::Context::GetAppDirectoryPath("bk"), ec);
+#else
     const char* shipHome = std::getenv("SHIP_HOME");
     const char* appImage = std::getenv("APPIMAGE");
     if (shipHome != nullptr && shipHome[0] != '\0') {
@@ -299,6 +380,7 @@ int SDL_main(int argc, char* argv[]) {
             std::filesystem::current_path(base, ec);
         }
     }
+#endif
 
     GameEngine::Create(argc, argv);
     // Both threads are created during core1_init, so allowlist them first.
@@ -315,13 +397,40 @@ int SDL_main(int argc, char* argv[]) {
         }
         sGameThreadDone.store(true);
     });
+#ifdef LIGHTHOUSE_MOBILE
+    // Held for as long as the app is off screen, since the tick thread parks on
+    // its queues while nothing services the RCP.
+    bool pausedOffScreen = false;
+#endif
     while (WindowIsRunning() || !sGameThreadDone.load()) {
         ThreadWatchdog_Beat(WATCHDOG_MAIN_LOOP);
         port_noteMainLoopAlive();
         // Pump events every iteration: a task-starved pass must not starve
         // input and window messages.
         Ship::Context::GetRawInstance()->GetWindow()->HandleEvents();
+        TouchControls_Poll();
         OS_SiService();
+#ifdef LIGHTHOUSE_MOBILE
+        if (sLowMemory.exchange(false, std::memory_order_acq_rel)) {
+            SPDLOG_WARN("[mobile] Memory warning; dropping the texture cache");
+            gfx_texture_cache_clear();
+        }
+        const bool onScreen = sAppOnScreen.load(std::memory_order_acquire);
+        if (onScreen == pausedOffScreen) {
+            pausedOffScreen = !onScreen;
+            if (pausedOffScreen) {
+                ThreadWatchdog_BeginExpectedStall("app off screen");
+                SetAudioSuspended(true);
+            } else {
+                SetAudioSuspended(false);
+                ThreadWatchdog_EndExpectedStall();
+            }
+        }
+        if (pausedOffScreen) {
+            SDL_Delay(16);
+            continue;
+        }
+#endif
         if (IsInlineModExtractionBusy()) {
             GameEngine::Instance->RenderGuiFrame();
             SDL_Delay(16);

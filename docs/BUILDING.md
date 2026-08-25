@@ -215,6 +215,73 @@ cpack
 cmake --build build-cmake --target clean
 ```
 
+## iOS (iPhone / iPad)
+Requires a Mac with Xcode 15 or newer && `cmake, ninja` (can be installed via homebrew, macports, etc). SDL2, metal-cpp and libzip are fetched while configuring. The renderer is Metal.
+
+_Note: the build cross-compiles, so `lighthouse.o2r` has to come from a macOS build tree and `bk.o2r` is extracted on the device._
+
+_Note: `IOS_DEVELOPMENT_TEAM` is your 10-character Apple Developer Team ID, from <https://developer.apple.com/account>, and `PROJECT_ID` a bundle identifier your team owns. A free Apple ID works, added under Xcode > Settings > Accounts, but its profiles expire after 7 days. Leave the team unset to compile without an Apple account._
+
+```bash
+# Clone the repo
+git clone https://github.com/HarbourMasters/lighthouse.git
+cd lighthouse
+# Clone the submodule libultraship
+git submodule update --init
+
+# Generate lighthouse.o2r (port-specific assets) on the host
+cmake -H. -Bbuild-cmake -GNinja
+cmake --build build-cmake --target GeneratePortO2R
+
+# Generate the Xcode project, which the app bundle, asset catalog and signing all need
+# CMAKE_IGNORE_PREFIX_PATH keeps the homebrew/macports SDL2 and libzip out, wrong arch
+cmake -S . -B build-ios -G Xcode \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/ios.toolchain.cmake \
+  -DPLATFORM=OS64 \
+  -DDEPLOYMENT_TARGET=16.0 \
+  -DCMAKE_IGNORE_PREFIX_PATH="/opt/homebrew;/usr/local;/opt/local" \
+  -DPROJECT_ID=com.yourname.lighthouse \
+  -DIOS_DEVELOPMENT_TEAM=YOURTEAMID
+
+# Compile the project, or open build-ios/Lighthouse.xcodeproj and hit Run
+# Build the Lighthouse target rather than ALL_BUILD to skip the SDL2 dylib and the host Torch
+# Drop -allowProvisioningUpdates if you set no team
+cmake --build build-ios --config Release --target Lighthouse -- -allowProvisioningUpdates
+```
+
+_Note: if the build reports that no profiles were found, open `build-ios/Lighthouse.xcodeproj` once and pick your team under the Lighthouse target's *Signing & Capabilities*._
+
+### Getting the game onto a device
+1. Install and launch the app once. It creates a `Lighthouse` folder under *On My iPhone* / *On My iPad* in the Files app.
+2. Copy a supported Banjo-Kazooie ROM (`.z64`) into that folder.
+3. Relaunch and let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
+
+Saves, `lighthouse.cfg.json` and the `mods` folder live in the same folder.
+
+### Generating a distributable
+Installing from Xcode needs Developer Mode turned on. A build signed for distribution (TestFlight or Ad Hoc, paid membership only) installs without it, but can't be debugged.
+
+```bash
+# Archive
+xcodebuild -project build-ios/Lighthouse.xcodeproj -scheme Lighthouse \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath build-ios/Lighthouse.xcarchive archive -allowProvisioningUpdates
+
+# Should list Lighthouse.app, an empty Applications folder means the archive can't be exported
+ls build-ios/Lighthouse.xcarchive/Products/Applications
+
+# Export, with `teamID` and `method` (app-store-connect or release-testing) set in the plist
+xcodebuild -exportArchive -archivePath build-ios/Lighthouse.xcarchive \
+  -exportOptionsPlist <plist> -exportPath build-ios/export -allowProvisioningUpdates
+```
+
+### iOS notes
+* Landscape only, full screen, at the display's native pixel resolution.
+* Any MFi / Bluetooth controller SDL2 recognises works. Pair it in iOS Settings first; the on-screen pad hides itself while one is connected.
+* The on-screen controls are configured in *Settings > Controls*, under **On-Screen Controls**: size, reach, opacity, edge margin, a left-handed layout, the phone/tablet layout and an optional D-pad. The **MENU** button at the top of the screen opens the port menu, which is otherwise bound to Escape.
+* Mods work as on desktop — drop `.o2r`/`.otr` files into `Lighthouse/mods` via the Files app. Applying a mod list needs the app to be closed and reopened, since iOS apps can't relaunch themselves.
+* Networking (Anchor multiplayer) is off, SDL2_net isn't part of the iOS dependency set.
+
 # Compatible Roms
 Any retail version. See [the readme](https://github.com/HarbourMasters/Lighthouse/blob/develop/README.md#1-verify-your-rom-dump)
 

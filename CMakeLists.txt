@@ -66,8 +66,11 @@ endif()
 
 set(CMAKE_PROJECT_GIT_COMMIT_TAG "${GIT_COMMIT_TAG}" CACHE STRING "Git commit tag" FORCE)
 
-# Set the minimum version of CMake and the deployment target for macOS
-set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum OS X deployment version")
+# Set the minimum version of CMake and the deployment target for macOS.
+# Skipped for iOS, where this is the iOS version and 10.15 is not a valid value.
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum OS X deployment version")
+endif()
 
 # Set the C++ standard and enable the MSVC parallel build option
 set(CMAKE_CXX_STANDARD 20 CACHE STRING "The C++ standard to use")
@@ -118,14 +121,23 @@ else()
     set(CPP "${CMAKE_C_COMPILER}" "-E" "-P" "-Wno-trigraphs" "-x" "c")
 endif()
 
-if(IOS)
-    set(PLATFORM "OS64")
-    include(cmake/ios.toolchain.cmake)
-    add_compile_definitions(
-        PLATFORM_IOS=1
-    )
-    set(CMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "YOUR_TEAM_ID")
-    set(PROJECT_ID "dev.net64.game")
+# iOS: the toolchain file (cmake/ios.toolchain.cmake) is supplied on the command line,
+# so CMAKE_SYSTEM_NAME is already "iOS" by the time we get here. See docs/BUILDING.md.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(PROJECT_ID "com.harbormasters.lighthouse" CACHE STRING "iOS bundle identifier")
+    set(IOS_DEVELOPMENT_TEAM "" CACHE STRING "Apple Developer Team ID used to sign the iOS app")
+    set(BUNDLE_ID "${PROJECT_ID}" CACHE STRING "Bundle ID libultraship signs its targets with")
+    # The minimum version comes from the toolchain's DEPLOYMENT_TARGET; mirror it into the plist.
+    set(IOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    if(IOS_DEPLOYMENT_TARGET VERSION_LESS 14.0)
+        # The plist uses UILaunchScreen (iOS 14+) and libultraship pulls in iOS 16 metal-cpp headers.
+        message(WARNING "iOS deployment target is ${IOS_DEPLOYMENT_TARGET}; pass -DDEPLOYMENT_TARGET=16.0 "
+                        "to the toolchain for a supported configuration.")
+    endif()
+    set(CMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${IOS_DEVELOPMENT_TEAM}")
+    set(CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2") # iPhone and iPad
+    # Keeps the static libraries out of an archive; the app target opts back in below.
+    set(CMAKE_XCODE_ATTRIBUTE_SKIP_INSTALL "YES")
 endif()
 
 ################################################################################
@@ -159,7 +171,13 @@ endif()
 
 # Set game compilation version
 set(VERSION us)
-option(USE_NETWORKING "Enable networking features" ON)
+# SDL2_net isn't part of the iOS dependency set, and Anchor multiplayer is desktop-only.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(USE_NETWORKING_DEFAULT OFF)
+else()
+    set(USE_NETWORKING_DEFAULT ON)
+endif()
+option(USE_NETWORKING "Enable networking features" ${USE_NETWORKING_DEFAULT})
 set(SKIP_XCODE_VERSION_CHECK ON)
 
 # Add compile definitions for the target
@@ -224,7 +242,9 @@ file(GLOB_RECURSE ALL_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
 
 list(FILTER ALL_FILES EXCLUDE REGEX "src/unused/")
 
-list(APPEND ALL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resource.rc)
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    list(APPEND ALL_FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resource.rc)
+endif()
 
 
 # Create source groups that match the real file directory paths
@@ -235,23 +255,50 @@ foreach(source IN LISTS ALL_FILES)
 endforeach()
 
 if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    set(IOS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libultraship/ios)
-
-    set(STORYBOARD_FILE ${IOS_DIR}/Launch.storyboard)
-    set(IMAGE_FILES ${IOS_DIR}/PoweredBy.png)
-    set(ICON_FILES ${IOS_DIR}/Icon.png)
-
-    list(APPEND ALL_FILES ${STORYBOARD_FILE} ${IMAGE_FILES} ${ICON_FILES})
+    set(IOS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ios)
 
     add_executable(${PROJECT_NAME} ${ALL_FILES})
-    set_xcode_property(${PROJECT_NAME} PRODUCT_BUNDLE_IDENTIFIER ${PROJECT_ID} All)
+    configure_file(${IOS_DIR}/Info.plist.in ${CMAKE_BINARY_DIR}/ios/Info.plist @ONLY)
     set_target_properties(
         ${PROJECT_NAME}
         PROPERTIES
         MACOSX_BUNDLE TRUE
-        MACOSX_BUNDLE_INFO_PLIST ${IOS_DIR}/plist.in
-        RESOURCE "${IMAGE_FILES};${STORYBOARD_FILE};${ICON_FILES}"
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_BINARY_DIR}/ios/Info.plist
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${PROJECT_ID}"
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+        # CMake only fills INSTALL_PATH for shared libraries, and `xcodebuild archive` with an
+        # empty one leaves the archive without an Applications/ directory to export from.
+        XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+        XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
     )
+    if(IOS_DEVELOPMENT_TEAM STREQUAL "")
+        # Lets the project configure and compile without an Apple developer account;
+        # set IOS_DEVELOPMENT_TEAM to produce an installable build.
+        set_target_properties(${PROJECT_NAME} PROPERTIES
+            XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
+            XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
+            XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO"
+        )
+    endif()
+
+    # Without a shared scheme Xcode invents its own the first time the project is opened, and
+    # that one always runs Debug. Debug means -O0 for everything including the statically
+    # linked asset extractor, which is roughly 60x slower: extracting bk.o2r from a 16MB ROM
+    # takes ~45 minutes at -O0 against ~40 seconds optimised, and the game itself runs
+    # unoptimised too. Generate the scheme from here so the configuration is a deliberate
+    # choice rather than whatever Xcode defaulted to.
+    # -O0 also costs launch time: a cold start faults in and signature-checks every page of
+    # the 70MB Debug binary, against 14MB in Release, before main() runs.
+    set(IOS_SCHEME_CONFIGURATION "Release" CACHE STRING
+        "Build configuration the generated Xcode scheme runs (Debug or Release)")
+    set_property(CACHE IOS_SCHEME_CONFIGURATION PROPERTY STRINGS Debug Release)
+
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        XCODE_GENERATE_SCHEME TRUE
+        XCODE_SCHEME_LAUNCH_CONFIGURATION "${IOS_SCHEME_CONFIGURATION}"
+    )
+    message(STATUS "Xcode scheme '${PROJECT_NAME}' runs the ${IOS_SCHEME_CONFIGURATION} "
+                   "configuration (set IOS_SCHEME_CONFIGURATION to change)")
 else()
     add_executable(${PROJECT_NAME} ${ALL_FILES})
 endif()
@@ -438,6 +485,11 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU|Clang|AppleClang")
 	)
 endif()
 
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # libultraship defines __IOS__ only for its own target; the game needs it too.
+    target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_IOS=1 __IOS__)
+endif()
+
 if(USE_NETWORKING)
     if(MSVC)
         vcpkg_install_packages(sdl2-net)
@@ -479,6 +531,16 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "CafeOS")
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${DEVKITPRO}/portlibs/wiiu/include/
     )
+elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # Ogg/Vorbis are linked but unreferenced by any source, so iOS skips them.
+    # GameController/CoreHaptics back SDL2's MFi gamepad and rumble support. Metal,
+    # QuartzCore, AVFoundation, AudioToolbox and Foundation already arrive through
+    # libultraship's own find_library calls.
+    set(ADDITIONAL_LIBRARY_DEPENDENCIES "")
+    foreach(framework UIKit GameController CoreHaptics CoreMotion CoreGraphics)
+        find_library(IOS_FW_${framework} ${framework} REQUIRED)
+        list(APPEND ADDITIONAL_LIBRARY_DEPENDENCIES ${IOS_FW_${framework}})
+    endforeach()
 else()
     find_package(Ogg REQUIRED)
     find_package(Vorbis REQUIRED)
@@ -740,14 +802,43 @@ endif()
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
 include(ExternalProject)
+# TorchExternal is the asset packer, so it must run on the build machine. ExternalProject
+# doesn't inherit CMAKE_TOOLCHAIN_FILE, but it does inherit CMAKE_GENERATOR -- which for an
+# iOS build means Xcode, and running xcodebuild inside an xcodebuild script phase does not
+# work. Pin a single-config generator, and name the macOS SDK because xcodebuild exports
+# SDKROOT=iPhoneOS into the script phase environment.
+set(TORCH_MULTI_CONFIG ${CMAKE_CONFIGURATION_TYPES})
+# ExternalProject does not inherit CMAKE_BUILD_TYPE, and an empty build type on a
+# single-config generator means no optimisation flags at all -- the packer was being built
+# -O0 even from a Release tree, which is most of why asset extraction takes tens of
+# minutes. It is a build-time tool, so build it Release regardless of the host project's
+# configuration. Multi-config generators ignore this and follow the parent configuration
+# instead.
+set(TORCH_HOST_ARGS -DCMAKE_BUILD_TYPE=Release)
+set(TORCH_HOST_GENERATOR "")
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # The empty toolchain file is insurance: this CMake doesn't forward it, but the
+    # explicit -D takes precedence in versions that do.
+    list(APPEND TORCH_HOST_ARGS -DCMAKE_TOOLCHAIN_FILE= -DCMAKE_OSX_SYSROOT=macosx)
+    # The sysroot alone is not enough. CMAKE_OSX_DEPLOYMENT_TARGET is empty by default, which
+    # emits no -mmacosx-version-min, and clang then takes its platform from the
+    # IPHONEOS_DEPLOYMENT_TARGET that xcodebuild also exports -- so the packer compiles for iOS
+    # against the macOS SDK and fails to link the host libraries. Name the host's own version.
+    execute_process(COMMAND sw_vers -productVersion
+        OUTPUT_VARIABLE TORCH_HOST_MACOS_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
+    list(APPEND TORCH_HOST_ARGS -DCMAKE_OSX_DEPLOYMENT_TARGET=${TORCH_HOST_MACOS_VERSION})
+    set(TORCH_HOST_GENERATOR CMAKE_GENERATOR "Unix Makefiles")
+    set(TORCH_MULTI_CONFIG FALSE)
+endif()
 ExternalProject_Add(TorchExternal
 	PREFIX TorchExternal
     SOURCE_DIR ${CMAKE_SOURCE_DIR}/Torch
-    CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/Torch -DENABLE_ASAN=${ENABLE_ASAN} -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+    ${TORCH_HOST_GENERATOR}
+    CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/Torch -DENABLE_ASAN=${ENABLE_ASAN} ${TORCH_HOST_ARGS}
 )
 #set_target_properties(TorchExternal PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD TRUE)
 ExternalProject_Get_Property(TorchExternal install_dir)
-if (CMAKE_CONFIGURATION_TYPES)
+if (TORCH_MULTI_CONFIG)
   set(TORCH_EXECUTABLE ${install_dir}/src/TorchExternal-build/$<CONFIGURATION>/torch)
 else()
   set(TORCH_EXECUTABLE ${install_dir}/src/TorchExternal-build/torch)
@@ -811,6 +902,29 @@ add_custom_target(CreateOSXIcons
         include(BundleUtilities)
         fixup_bundle(\"\${CMAKE_INSTALL_PREFIX}/../MacOS/Lighthouse\" \"\" \"${dirs}\")
     ")
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    file(DOWNLOAD
+        https://raw.githubusercontent.com/mdqinc/SDL_GameControllerDB/master/gamecontrollerdb.txt
+        ${CMAKE_BINARY_DIR}/gamecontrollerdb.txt)
+
+    # App icons come from an asset catalog, which Xcode compiles with actool. The 1024px
+    # icon is committed rather than derived from logo.png: iOS rejects icons with an alpha
+    # channel, and logo.png is a 256px RGBA source.
+    target_sources(${PROJECT_NAME} PRIVATE ${IOS_DIR}/Assets.xcassets)
+    set_source_files_properties(${IOS_DIR}/Assets.xcassets PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+
+    # Shipped read-only data. Context::GetAppBundlePath() resolves to the bundle on iOS, so
+    # LocateFileAcrossAppDirs finds these here while user data stays in Documents.
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+                -DBUNDLE=$<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>
+                -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+                -DBINARY_DIR=${CMAKE_BINARY_DIR}
+                -P ${CMAKE_SOURCE_DIR}/cmake/ios-bundle-resources.cmake
+        COMMENT "Copying Lighthouse assets into the app bundle"
+    )
 endif()
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY APPIMAGE_DESKTOP_FILE_TERMINAL YES)

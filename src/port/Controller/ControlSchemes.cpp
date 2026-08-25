@@ -117,9 +117,10 @@ bool RightStickIsMapped(const std::shared_ptr<Controller>& controller) {
     return stick != nullptr && stick->HasMappingsForPhysicalDeviceType(Ship::SDLGamepad);
 }
 
-// Splits a C-button's mappings into the two kinds the shaping pass cares about.
+// Splits a C-button's mappings into the two kinds the shaping pass cares about, and reports
+// which of each kind is held right now.
 void CollectCButtonSources(const std::shared_ptr<Controller>& controller, CONTROLLERBUTTONS_T bitmask,
-                           uint16_t& axisMask, uint16_t& otherHeld) {
+                           uint16_t& axisMask, uint16_t& axisHeld, uint16_t& otherHeld) {
     auto button = controller->GetButton(bitmask);
     if (button == nullptr) {
         return;
@@ -128,6 +129,7 @@ void CollectCButtonSources(const std::shared_ptr<Controller>& controller, CONTRO
         auto axis = dynamic_cast<SDLAxisDirectionToButtonMapping*>(mapping.get());
         if (axis != nullptr && axis->AxisIsStick()) {
             axisMask |= bitmask;
+            mapping->UpdatePad(axisHeld);
         } else {
             mapping->UpdatePad(otherHeld);
         }
@@ -300,9 +302,10 @@ extern "C" void port_shapeControllerInput(void* contPad) {
         const bool picturePuzzle = (mode == GAME_MODE_8_BOTTLES_BONUS || mode == GAME_MODE_A_SNS_PICTURE);
         if (!picturePuzzle && stickCamera) {
             uint16_t axisMask = 0;
+            uint16_t axisHeld = 0;
             uint16_t otherHeld = 0;
-            CollectCButtonSources(controller, BTN_CLEFT, axisMask, otherHeld);
-            CollectCButtonSources(controller, BTN_CRIGHT, axisMask, otherHeld);
+            CollectCButtonSources(controller, BTN_CLEFT, axisMask, axisHeld, otherHeld);
+            CollectCButtonSources(controller, BTN_CRIGHT, axisMask, axisHeld, otherHeld);
 
             const uint16_t stickC = pad->button & (BTN_CLEFT | BTN_CRIGHT);
             uint16_t allow = otherHeld & (BTN_CLEFT | BTN_CRIGHT);
@@ -319,14 +322,15 @@ extern "C" void port_shapeControllerInput(void* contPad) {
         }
     } else {
         uint16_t axisMask = 0;
+        uint16_t axisHeld = 0;
         uint16_t otherHeld = 0;
         static const CONTROLLERBUTTONS_T kCButtons[] = { BTN_CRIGHT, BTN_CLEFT, BTN_CDOWN, BTN_CUP };
         for (CONTROLLERBUTTONS_T cButton : kCButtons) {
-            CollectCButtonSources(controller, cButton, axisMask, otherHeld);
+            CollectCButtonSources(controller, cButton, axisMask, axisHeld, otherHeld);
         }
-        // Directions the stick owns outright; anything a second binding is
-        // holding stays put instead of being cleared and regenerated.
-        const uint16_t clearMask = axisMask & ~otherHeld;
+        // Only what the stick is pressing right now: the pass regenerates that, and erasing
+        // the whole of axisMask would also take C presses no stick made, such as the pad's.
+        const uint16_t clearMask = axisHeld & ~otherHeld;
 
         static uint16_t sLatchDir = 0;
         static int32_t sLatchTTL = 0;

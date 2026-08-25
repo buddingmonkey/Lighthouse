@@ -760,7 +760,12 @@ void Menu::DrawElement() {
         ImGui::PopStyleColor();
     }
     ImGui::EndChild();
-    ImGui::SameLine(menuSize.x - (buttonSize.x * 4.25f) - (style.ItemSpacing.x * 2));
+#ifdef __IOS__
+    const float headerButtonSpan = 3.25f;
+#else
+    const float headerButtonSpan = 4.25f;
+#endif
+    ImGui::SameLine(menuSize.x - (buttonSize.x * headerButtonSpan) - (style.ItemSpacing.x * 2));
     UIWidgets::ButtonOptions options4 = {};
     std::string option4Tooltip =
         fmt::format("About Lighthouse \n"
@@ -772,6 +777,9 @@ void Menu::DrawElement() {
     options4.size = UIWidgets::Sizes::Inline;
     options4.tooltip = option4Tooltip.c_str();
     if (UIWidgets::Button(ICON_FA_QUESTION_CIRCLE, options4)) {}
+    // No quit control on iOS: the platform reserves that decision for the user, and taking
+    // it ourselves ends the process in a way the system reports as a crash.
+#ifndef __IOS__
     ImGui::SameLine();
     UIWidgets::ButtonOptions options3 = {};
     options3.color = UIWidgets::Colors::Red;
@@ -790,6 +798,7 @@ void Menu::DrawElement() {
             },
             nullptr);
     }
+#endif
     ImGui::PopStyleVar();
     ImGui::SameLine();
     UIWidgets::ButtonOptions options2 = {};

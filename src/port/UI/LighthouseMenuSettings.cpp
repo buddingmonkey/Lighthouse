@@ -61,6 +61,14 @@ static const std::unordered_map<int32_t, const char*> controlSchemeLabels = {
     { CONTROL_SCHEME_POCKET, "Pocket" },
 };
 
+#ifdef LIGHTHOUSE_TOUCH_CONTROLS
+static const std::unordered_map<int32_t, const char*> touchLayoutLabels = {
+    { 0, "Automatic" },
+    { 1, "Phone" },
+    { 2, "Tablet" },
+};
+#endif
+
 static const std::unordered_map<int32_t, const char*> bootSequenceLabels = {
     { BOOTSEQUENCE_DEFAULT, "Default" },
     { BOOTSEQUENCE_AUTHENTIC, "Authentic" },
@@ -171,13 +179,28 @@ void LighthouseMenu::AddMenuSettings() {
         .RaceDisable(false)
         .Options(CheckboxOptions().Tooltip(
             "Search input box gets autofocus when visible. Does not affect using other widgets."));
+    // ButtonOptions doesn't override Disabled()/DisabledTooltip(), so those return WidgetOptions&
+    // and can't be chained into Options(); set them on a named local instead.
+    ButtonOptions filesFolderOptions =
+        ButtonOptions().Tooltip("Opens the folder that contains the save and mods folders, etc.");
+#ifdef __IOS__
+    // iOS has no file:// URL handler, so the button can't do anything there.
+    filesFolderOptions.Disabled(true).DisabledTooltip(
+        "Not available on iOS. Open the Files app and look under On My iPhone / On My iPad > Lighthouse "
+        "to reach the same folder.");
+#elif defined(__ANDROID__)
+    // Android rejects a raw file:// Intent with FileUriExposedException, so the button can't do anything there.
+    filesFolderOptions.Disabled(true).DisabledTooltip(
+        "Not available on Android. Reach the same folder with a file manager, or over USB under "
+        "Android/data > Lighthouse.");
+#endif
     AddWidget(path, "Open App Files Folder", WIDGET_BUTTON)
         .RaceDisable(false)
         .Callback([](WidgetInfo& info) {
             std::string filesPath = Ship::Context::GetRawInstance()->GetAppDirectoryPath();
             SDL_OpenURL(std::string("file:///" + std::filesystem::absolute(filesPath).string()).c_str());
         })
-        .Options(ButtonOptions().Tooltip("Opens the folder that contains the save and mods folders, etc."));
+        .Options(filesFolderOptions);
 
     AddWidget(path, "Boot", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Boot Sequence", WIDGET_CVAR_COMBOBOX)
@@ -318,7 +341,7 @@ void LighthouseMenu::AddMenuSettings() {
         .Options(ComboboxOptions()
                      .ComboMap(imguiScaleOptions)
                      .Tooltip("Changes the scaling of the ImGui menu elements.")
-                     .DefaultIndex(1)
+                     .DefaultIndex(DefaultImGuiScaleIndex())
                      .ComponentAlignment(ComponentAlignments::Right)
                      .LabelPosition(LabelPositions::Far));
     //.Callback([](WidgetInfo& info) { GameEngine::Instance->ScaleImGui(); });
@@ -546,6 +569,65 @@ void LighthouseMenu::AddMenuSettings() {
         .Options(CheckboxOptions().Tooltip("Pocket scheme only. The R2 button slows movement to a tip-toe walk.\n"
                                            "Off: tap R2 to toggle tip-toe on/off.\nOn: tip-toe only "
                                            "while R2 is held."));
+
+#ifdef LIGHTHOUSE_TOUCH_CONTROLS
+    AddWidget(path, "On-Screen Controls", WIDGET_SEPARATOR_TEXT);
+    AddWidget(path, "Show On-Screen Controls", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_SETTING("TouchControls.Enabled"))
+        .RaceDisable(false)
+        .Options(CheckboxOptions().DefaultValue(true).Tooltip("Draws a virtual N64 controller over the game."));
+    AddWidget(path, "Hide With Gamepad", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_SETTING("TouchControls.HideWithGamepad"))
+        .RaceDisable(false)
+        .Options(CheckboxOptions().DefaultValue(true).Tooltip(
+            "Hides the on-screen controls while a physical controller is connected."));
+    AddWidget(path, "Show D-Pad", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_SETTING("TouchControls.ShowDPad"))
+        .RaceDisable(false)
+        .Options(CheckboxOptions().DefaultValue(false));
+    AddWidget(path, "Left-Handed Layout", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_SETTING("TouchControls.Mirror"))
+        .RaceDisable(false)
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+            "Swaps the two halves of the pad, putting the stick under your right thumb."));
+    AddWidget(path, "Layout", WIDGET_CVAR_COMBOBOX)
+        .CVar(CVAR_SETTING("TouchControls.Layout"))
+        .RaceDisable(false)
+        .Options(ComboboxOptions()
+                     .Tooltip("Phone puts the shoulder buttons along the top edge, under the index fingers.\n"
+                              "Tablet moves them down the left and right edges, where a hand holding a "
+                              "larger screen can still reach them.\n\n"
+                              "Automatic picks from the screen size.")
+                     .ComboMap(touchLayoutLabels)
+                     .DefaultIndex(0));
+    AddWidget(path, "Control Size", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("TouchControls.Scale"))
+        .RaceDisable(false)
+        .Options(FloatSliderOptions().Min(0.7f).Max(1.4f).DefaultValue(1.0f).Format("%.2f").Tooltip(
+            "Controls are sized in real-world units, so they stay the same size on your thumb "
+            "whatever screen you play on.\n\nOn a short screen this stops going up before the slider "
+            "does, because the buttons have run out of room."));
+    AddWidget(path, "Control Reach", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("TouchControls.Reach"))
+        .RaceDisable(false)
+        .Options(FloatSliderOptions().Min(0.8f).Max(1.25f).DefaultValue(1.0f).Format("%.2f").Tooltip(
+            "How far from the corners you grip the controls sit. Turn it down for smaller hands; "
+            "the buttons keep their size and spacing either way."));
+    AddWidget(path, "Control Opacity", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("TouchControls.Opacity"))
+        .RaceDisable(false)
+        .Options(FloatSliderOptions().Min(0.05f).Max(1.0f).DefaultValue(0.4f).Format("%.2f"));
+    AddWidget(path, "Edge Margin", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("TouchControls.EdgeMargin"))
+        .RaceDisable(false)
+        .Options(FloatSliderOptions().Min(0.0f).Max(10.0f).DefaultValue(3.0f).Format("%.1f mm").Tooltip(
+            "Clearance between the controls and the screen edge, for the cutout and the "
+            "gesture bar."));
+    AddWidget(path, "Touch Stick Deadzone", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("TouchControls.Deadzone"))
+        .RaceDisable(false)
+        .Options(FloatSliderOptions().Min(0.0f).Max(0.5f).DefaultValue(0.12f).Format("%.2f"));
+#endif
 
     // Input Viewer
     path.sidebarName = "Input Viewer";

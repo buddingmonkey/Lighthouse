@@ -133,6 +133,12 @@ void port_noteMainLoopAlive(void);
 int port_audioStallHold(void);
 int32_t port_audioPumpShouldWait(void);
 
+// False while the app is off screen, when nothing may be rendered
+int port_appIsOnScreen(void);
+
+// Starts watching for the app-state events port_appIsOnScreen reports
+void port_installLifecycleWatch(void);
+
 // One-shot cues when a teammate's file-progress flag arrives
 void port_progressFlag_remoteCue(int32_t progressFlag);
 void port_notedoor_remoteOpen(int32_t progressFlag);

@@ -21,6 +21,7 @@
 #include "port/Extractor/ExtractFlow.h"
 #include "port/Extractor/GameExtractor.h"
 #include "port/LaunchArgs.h"
+#include "port/Patches/Patches.h"
 #include "port/UI/cvar_prefixes.h"
 #include "port/UI/LighthouseGui.hpp"
 #include "port/UI/LighthouseModMenuWindow.h"
@@ -143,19 +144,6 @@ bool AnyRomArchiveExists() {
     return false;
 }
 
-// Teardown shared by every bail-out in RunExtract(). The thread pool is a RunExtract() local and
-// does not exist yet at the earliest bail-out, hence the pointer; `context` is the GameEngine
-// member. Both are passed in so this stays a plain function over exactly what it releases.
-[[noreturn]] void ShutdownAndExit(int code, std::shared_ptr<BS::thread_pool>* threadPool, Ship::Context*& context) {
-    if (threadPool != nullptr) {
-        *threadPool = nullptr;
-    }
-    lhFast3dWindow = nullptr;
-    Ship::Context::DestroyInstance();
-    context = nullptr;
-    exit(code);
-}
-
 // An archive that exists but cannot be read is worse than one that is missing: a truncated
 // file fails to open with nothing but a log line, and an empty one opens as a valid empty
 // archive, so either boots the game with no assets and no explanation. Both shapes arrive the
@@ -194,6 +182,19 @@ void MoveAsideUnusableRomArchives() {
                         invalid.string());
         }
     }
+}
+
+// Teardown shared by every bail-out in RunExtract(). The thread pool is a RunExtract() local and
+// does not exist yet at the earliest bail-out, hence the pointer; `context` is the GameEngine
+// member. Both are passed in so this stays a plain function over exactly what it releases.
+[[noreturn]] void ShutdownAndExit(int code, std::shared_ptr<BS::thread_pool>* threadPool, Ship::Context*& context) {
+    if (threadPool != nullptr) {
+        *threadPool = nullptr;
+    }
+    lhFast3dWindow = nullptr;
+    Ship::Context::DestroyInstance();
+    context = nullptr;
+    exit(code);
 }
 
 } // namespace
@@ -608,6 +609,12 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
             ShutdownAndExit(0, &threadPool, context);
         }
         wnd->HandleEvents();
+        // Extraction runs on the thread pool, so this loop can stop drawing
+        // while the app is off screen for the same reason the main loop does.
+        if (!port_appIsOnScreen()) {
+            SDL_Delay(16);
+            continue;
+        }
         UIWidgets::Colors themeColor =
             static_cast<UIWidgets::Colors>(CVarGetInteger(CVAR_SETTING("Menu.Theme"), UIWidgets::Colors::LightBlue));
         ImGui::PushStyleColor(ImGuiCol_TitleBgActive, UIWidgets::ColorValues.at(themeColor));
