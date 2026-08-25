@@ -2033,6 +2033,14 @@ std::map<RandoCheckId, std::tuple<int32_t, int32_t, int32_t>> multiSpawnCheckMap
 };
 // clang-format on
 
+std::unordered_map<std::string, RandoCheckId> locationNameToEnum = [] {
+    std::unordered_map<std::string, RandoCheckId> locations;
+    for (const auto& [id, check] : Checks) {
+        locations.emplace(check.name, id);
+    }
+    return locations;
+}();
+
 RandoCheckId GetCheckByPosition(int32_t posX, int32_t posY, int32_t posZ) {
     for (auto& [randoCheckId, randoStaticCheck] : Checks) {
         if (randoStaticCheck.posX == posX && randoStaticCheck.posY == posY && randoStaticCheck.posZ == posZ) {
