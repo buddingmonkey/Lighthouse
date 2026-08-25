@@ -7,7 +7,11 @@
 #include "port/UI/cvar_prefixes.h"
 
 std::vector<std::string> Rando::Spoiler::spoilerLogs;
-const std::filesystem::path randomizerFolderPath(Ship::Context::GetPathRelativeToAppDirectory("randomizer", "bk64"));
+// Resolved on first use, not at static-init time; see the note in Rando.cpp.
+static const std::filesystem::path& RandomizerFolderPath() {
+    static const std::filesystem::path path(Ship::Context::GetPathRelativeToAppDirectory("randomizer", "bk64"));
+    return path;
+}
 
 void Rando::Spoiler::RefreshSpoilerLogs() {
     Rando::Spoiler::spoilerLogs.clear();
@@ -15,11 +19,11 @@ void Rando::Spoiler::RefreshSpoilerLogs() {
     Rando::Spoiler::spoilerLogs.push_back("Generate New Seed");
     s32 spoilerFileIndex = -1;
 
-    if (!std::filesystem::exists(randomizerFolderPath)) {
-        std::filesystem::create_directory(randomizerFolderPath);
+    if (!std::filesystem::exists(RandomizerFolderPath())) {
+        std::filesystem::create_directory(RandomizerFolderPath());
     }
 
-    for (const auto& entry : std::filesystem::directory_iterator(randomizerFolderPath)) {
+    for (const auto& entry : std::filesystem::directory_iterator(RandomizerFolderPath())) {
         if (entry.is_regular_file()) {
             std::string fileName = entry.path().filename().string();
 
