@@ -398,6 +398,23 @@ int SDL_main(int argc, char* argv[]) {
         }
         sGameThreadDone.store(true);
     });
+    // Ask first, then release: a thread woken before the request is set would just
+    // park again.
+    bool gameThreadReleased = false;
+    auto releaseGameThread = [&gameThreadReleased] {
+        if (gameThreadReleased) {
+            return;
+        }
+        gameThreadReleased = true;
+        OS_RequestThreadExit();
+        {
+            std::lock_guard<std::mutex> lock(sSvcMutex);
+            sShutdownRequested.store(true, std::memory_order_release);
+            sSvcFn = nullptr;
+        }
+        sSvcCv.notify_all();
+        OS_BeginShutdown();
+    };
 #ifdef LIGHTHOUSE_MOBILE
     // Held for as long as the app is off screen, since the tick thread parks on
     // its queues while nothing services the RCP.
@@ -412,6 +429,11 @@ int SDL_main(int argc, char* argv[]) {
         Lighthouse::PumpFilePicker();
         TouchControls_Poll();
         OS_SiService();
+        // The off screen park below stops servicing the RCP, so a quit that arrives
+        // there must release the tick thread from here or it never finishes a frame.
+        if (!WindowIsRunning()) {
+            releaseGameThread();
+        }
 #ifdef LIGHTHOUSE_MOBILE
         if (sLowMemory.exchange(false, std::memory_order_acq_rel)) {
             SPDLOG_WARN("[mobile] Memory warning; dropping the texture cache");
@@ -451,16 +473,7 @@ int SDL_main(int argc, char* argv[]) {
             SDL_Delay(1);
         }
     }
-    // Ask first, then release: a thread woken before the request is set would just
-    // park again.
-    OS_RequestThreadExit();
-    {
-        std::lock_guard<std::mutex> lock(sSvcMutex);
-        sShutdownRequested.store(true, std::memory_order_release);
-        sSvcFn = nullptr;
-    }
-    sSvcCv.notify_all();
-    OS_BeginShutdown();
+    releaseGameThread();
 
     if (sGameThread.joinable()) {
         sGameThread.join();

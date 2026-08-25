@@ -225,6 +225,15 @@ void port_warnPropNotInCube(int32_t index, int32_t propCnt);
 // Rate-limited: a cube's node-prop split index passed 31, where the old :5 field wrapped.
 void port_warnNodePropSplit(int32_t splitIndex, int32_t nodeCnt);
 
+// Headset window (XrPatches.cpp)
+
+void port_xr_beginFlat(Gfx** gfx);
+void port_xr_endFlat(Gfx** gfx);
+
+// Keeps a pass out of the window's depth measurement without moving where it draws.
+void port_xr_beginNoSceneDepth(Gfx** gfx);
+void port_xr_endNoSceneDepth(Gfx** gfx);
+
 #ifdef __cplusplus
 }
 #endif

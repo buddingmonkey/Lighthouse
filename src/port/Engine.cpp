@@ -4,6 +4,9 @@
 #include <fstream>
 #include <chrono>
 #include <future>
+#ifdef ENABLE_DEBUG_TOOLS
+#include <android/log.h>
+#endif
 #if defined(__linux__) || defined(__APPLE__)
 #include <unistd.h>
 #include <cerrno>
@@ -13,6 +16,7 @@
 #include <libultraship/libultraship.h>
 
 #include <fast/Fast3dWindow.h>
+#include <fast/backends/gfx_xr_view.h>
 #include <fast/interpreter.h>
 #include "fast/resource/ResourceType.h"
 #include <fast/resource/factory/DisplayListFactory.h>
@@ -67,7 +71,18 @@
 #define gVIsPerFrame 2 // 30 Hz
 
 const float imguiScaleOptionToValue[4] = { 0.75f, 1.0f, 1.5f, 2.0f };
+
+// Radians of the window one unit of ImGui scale covers, for a menu drawn on a window in the room,
+// and the smallest angle the menu is laid out for. The floor holds about 830 units of menu width,
+// which is what the widest row needs.
+static constexpr float MENU_ANGLE_PER_UNIT = 0.0009f;
+static constexpr float MENU_ANGLE_MIN = 0.75f;
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
+
+bool IsHeadsetWindow() {
+    auto window = Ship::Context::GetRawInstance()->GetWindow();
+    return window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+}
 
 uint32_t DefaultImGuiScaleIndex() {
 #ifdef LIGHTHOUSE_MOBILE
@@ -76,6 +91,11 @@ uint32_t DefaultImGuiScaleIndex() {
         auto window = Ship::Context::GetRawInstance()->GetWindow();
         if (window == nullptr) {
             return 0u;
+        }
+        // A headset window is measured in an angle, not in a screen size, so it takes the unit the
+        // angle is set in rather than the phone or tablet step.
+        if (IsHeadsetWindow()) {
+            return 1u;
         }
         float shortSide = static_cast<float>(std::min(window->GetWidth(), window->GetHeight()));
 #ifdef __ANDROID__
@@ -107,6 +127,28 @@ float ImGuiDensityScale() {
         }
         return 1.0f;
     }();
+
+    // A headset reads the menu on a window in the room, and the only thing that decides whether a
+    // letter can be read is the angle it covers in the eye. That angle is the angle the window
+    // spans over the width of the picture drawn on it, so the scale is the width over the angle and
+    // the display DPI does not come into it. DPI stood in for the width before, which held on a
+    // headset whose panel is the picture and failed on one that draws the game across a whole
+    // binocular panel: Quest hands the game 4128 pixels where Galaxy XR hands it 1536, and the same
+    // DPI gave letters a third of the angle.
+    //
+    // A window put far away and left small covers too small an angle to hold a menu at that rate.
+    // The angle has a floor, so the letters give up their angle rather than the menu its width.
+    if (IsHeadsetWindow()) {
+#ifdef ENABLE_OPENXR
+        auto window = Ship::Context::GetRawInstance()->GetWindow();
+        const float angularWidth = Fast::GetXrWindowAngularWidth();
+        if (angularWidth > 0.0f && window != nullptr && window->GetWidth() > 0) {
+            return MENU_ANGLE_PER_UNIT * static_cast<float>(window->GetWidth()) /
+                   std::max(angularWidth, MENU_ANGLE_MIN);
+        }
+#endif
+        return density * 0.66f;
+    }
     return density;
 #else
     return 1.0f;
@@ -134,7 +176,7 @@ long long sPassBudgetNs = 0;
 bool portArchiveVersionMatch = false;
 std::string assets_path;
 
-int32_t previousImGuiScaleIndex = -1;
+// Tracks the scale already baked into the ImGui style, which always starts unscaled.
 float previousImGuiScale = 1.0f;
 
 namespace fs = std::filesystem;
@@ -228,7 +270,6 @@ GameEngine::GameEngine() {
         ImGui::GetIO().FontDefault = fontStandardLarger;
     }
 
-    previousImGuiScaleIndex = -1;
     previousImGuiScale = 1.0f;
     ScaleImGui();
 }
@@ -418,16 +459,17 @@ ImFont* GameEngine::CreateFontWithSize(float size, std::string fontPath) {
 
 void GameEngine::ScaleImGui() {
     int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", DefaultImGuiScaleIndex());
-    if (imGuiScaleIndex == previousImGuiScaleIndex) {
+    float scale = imguiScaleOptionToValue[imGuiScaleIndex] * ImGuiDensityScale();
+    // On a headset the scale follows the window as well as the setting, and the window resizes when
+    // the game first says what field of view it needs and whenever a hand pulls a corner.
+    if (fabsf(scale - previousImGuiScale) < 0.001f) {
         return;
     }
 
-    float scale = imguiScaleOptionToValue[imGuiScaleIndex] * ImGuiDensityScale();
     float newScale = scale / previousImGuiScale;
     ImGui::GetStyle().ScaleAllSizes(newScale);
     ImGui::GetIO().FontGlobalScale = scale;
     previousImGuiScale = scale;
-    previousImGuiScaleIndex = imGuiScaleIndex;
 }
 
 // Lifecycle
@@ -492,6 +534,8 @@ void GameEngine::Destroy() {
 }
 
 void GameEngine::StartFrame() const {
+    ScaleImGui();
+
     using Ship::KbScancode;
     const int32_t dwScancode = this->context->GetWindow()->GetLastScancode();
     this->context->GetWindow()->SetLastScancode(-1);
@@ -662,22 +706,31 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
         Nametag::SetSubframeBlend(subframeBlend);
         bool isFinalFrame = (frameIdx == frameCount - 1);
         if (frameCount > 1 || wndBase->IsFrameReady()) {
-            // Sample the full CPU cost of producing this sub-frame.
-            auto runT0 = Clock::now();
             auto gui = wndBase->GetGui();
             wndBase->GetMouseStateManager()->StartFrame();
-            gui->StartDraw();
-            interpreter->StartFrame();
-            interpreter->Run(Commands, m);
-            if (OS_ViBlackActive()) {
-                interpreter->mGfxFrameBuffer = 0;
-                auto rapi = interpreter->GetCurrentRenderingAPI();
-                rapi->StartDrawToFramebuffer(0, 1.0f);
-                rapi->ClearFramebuffer(true, false);
+            // A headset draws the sub-frame once per eye, each with its own off-axis projection.
+            const uint32_t views = wnd->BeginRenderFrame();
+            long long drawNs = 0;
+            for (uint32_t view = 0; view < views; view++) {
+                wnd->BeginRenderView(view);
+                // Sample the CPU cost of producing this sub-frame, both eyes and neither present.
+                // A present waits for the display, and the budget below must weigh the work, not
+                // the wait, or a sub-frame that exactly fills its slot looks like one that misses.
+                auto runT0 = Clock::now();
+                gui->StartDraw();
+                interpreter->StartFrame();
+                interpreter->Run(Commands, m);
+                if (OS_ViBlackActive()) {
+                    interpreter->mGfxFrameBuffer = 0;
+                    auto rapi = interpreter->GetCurrentRenderingAPI();
+                    rapi->StartDrawToFramebuffer(0, 1.0f);
+                    rapi->ClearFramebuffer(true, false);
+                }
+                gui->EndDraw();
+                drawNs += NsSince(runT0);
+                interpreter->EndFrame();
             }
-            gui->EndDraw();
-            sLastSubFrameNs = NsSince(runT0);
-            interpreter->EndFrame();
+            sLastSubFrameNs = drawNs;
             CALL_EVENT(FrameDrawEnd);
         }
         interpreter->mInterpolationIndex++;
@@ -700,6 +753,111 @@ struct SubframePacing {
     int fps;
     int viPerTick;
 };
+
+// A headset only looks right when its refresh rate is a whole multiple of the game's logic rate:
+// the sub-frame count below is an integer, so anything else beats against the panel. Banjo-Kazooie
+// runs its logic at 30 Hz, and a 72 Hz panel therefore presents 60. Ask for the fastest rate that
+// divides, once, and let ComputeSubframePacing read it back through GetCurrentRefreshRate.
+// Ticks to let a rate settle before the next one down is taken. The window re-asks a refused rate
+// a few times, each on an event from the runtime, so the wait has to outlast that.
+constexpr int RATE_SETTLE_TICKS = 90;
+
+void SelectDisplayRefreshRate(Fast::Fast3dWindow* wnd) {
+    if (!IsHeadsetWindow()) {
+        return;
+    }
+    // Quest offers 120 as well as 90, and both divide. The setting is how a user who would rather
+    // have the battery, or who finds the tick rate falling short, holds it down.
+    const int cap = CVarGetInteger(CVAR_SETTING("XrMaxRate"), 120);
+
+    // The rates come with the session, which is up after the first frames draw. Asking once and
+    // counting the ask as spent left the panel wherever the runtime put it, because the list was
+    // still empty at the only tick that looked at it.
+    const float logicRate = 60.0f / gVIsPerFrame;
+    std::vector<float> rates;
+    for (float rate : wnd->GetSupportedRefreshRates()) {
+        const float multiple = rate / logicRate;
+        if (fabsf(multiple - roundf(multiple)) < 0.01f && rate <= (float)cap) {
+            rates.push_back(rate);
+        }
+    }
+    if (rates.empty()) {
+        return;
+    }
+    std::sort(rates.begin(), rates.end(), std::greater<float>());
+
+    static int askedCap = -1;
+    static float asked = 0.0f;
+    static int waited = 0;
+    if (askedCap != cap) {
+        askedCap = cap;
+        asked = 0.0f;
+        waited = 0;
+    }
+
+    if (asked <= 0.0f) {
+        asked = rates.front();
+        wnd->SetRefreshRate(asked);
+        waited = 0;
+        return;
+    }
+
+    // A runtime is free to refuse the rate and say nothing more about it. Wait out the window's own
+    // retries, then take the next rate down, because a panel the logic rate does not divide beats
+    // against the game for the whole run.
+    if (fabsf((float)wnd->GetCurrentRefreshRate() - asked) < 0.5f) {
+        waited = 0;
+        return;
+    }
+    if (++waited < RATE_SETTLE_TICKS) {
+        return;
+    }
+    waited = 0;
+    for (size_t i = 0; i + 1 < rates.size(); i++) {
+        if (fabsf(rates[i] - asked) < 0.5f) {
+            asked = rates[i + 1];
+            wnd->SetRefreshRate(asked);
+            return;
+        }
+    }
+}
+
+// A display the game cannot keep up with does not drop frames, it runs the game slowly: the VI
+// retrace gates a tick on the render finishing. So the speed of the game is the measurement that
+// decides whether a refresh rate can be used, and the present rate on its own says nothing.
+void ReportTickRate(int subframes) {
+#ifdef ENABLE_DEBUG_TOOLS
+    static auto since = std::chrono::steady_clock::now();
+    static int ticks = 0;
+    static long long subframeTotal = 0;
+
+    ticks++;
+    subframeTotal += subframes;
+
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds = std::chrono::duration<double>(now - since).count();
+    if (seconds < 5.0) {
+        return;
+    }
+
+    uint32_t rate = 0;
+    auto window = Ship::Context::GetRawInstance()->GetWindow();
+    if (window != nullptr) {
+        rate = window->GetCurrentRefreshRate();
+    }
+    SPDLOG_INFO("game ticks {:.2f} of {} a second at {:.2f} sub-frames a tick, display {} Hz", ticks / seconds,
+                60 / gVIsPerFrame, (double)subframeTotal / ticks, rate);
+    __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
+                        "game ticks %.2f of %d a second at %.2f sub-frames a tick, display %u Hz", ticks / seconds,
+                        60 / gVIsPerFrame, (double)subframeTotal / ticks, rate);
+
+    since = now;
+    ticks = 0;
+    subframeTotal = 0;
+#else
+    (void)subframes;
+#endif
+}
 
 
 // Game-logic VI per tick: gVIsPerFrame (=2 -> 30 Hz) normally; demo
@@ -749,6 +907,27 @@ SubframePacing ComputeSubframePacing() {
 
     return { subframesPerTick, fps, viPerTick };
 }
+
+#ifdef ENABLE_OPENXR
+// The menu and the window's own handles write the same number. Push it when the menu moved it since
+// the last frame, and read the window back when the menu did not, so the one that moved last wins
+// and a slider always shows where the hand left the window. Both numbers are themselves, so the
+// same conversion serves both ways.
+void SyncXrSetting(const char* cVar, float low, float high, float defaultValue, float& pushed, float held,
+                   void (*apply)(float), float (*convert)(float)) {
+    const float shown = std::clamp(CVarGetFloat(cVar, defaultValue), low, high);
+    if (shown != pushed) {
+        apply(convert(shown));
+        pushed = shown;
+        return;
+    }
+    const float left = std::clamp(convert(held), low, high);
+    if (fabsf(left - shown) > 0.001f) {
+        CVarSetFloat(cVar, left);
+        pushed = left;
+    }
+}
+#endif
 } // namespace
 
 bool GameEngine::IsInterpolationEnabled() {
@@ -762,6 +941,31 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
         return;
     }
 
+    SelectDisplayRefreshRate(wnd.get());
+
+#ifdef ENABLE_OPENXR
+    // The range is meters from the user to the glass, and the size is meters of glass. They are
+    // apart: a range that goes out leaves the window the width it had, so it goes small in the eye
+    // and takes the diorama into the room with it. The move bar and the corner handles write the
+    // same two numbers from inside the headset.
+    static float pushedRange = 0.0f;
+    static float pushedScale = 0.0f;
+    SyncXrSetting(CVAR_SETTING("XrWindowRange"), 0.5f, 4.0f, 1.3f, pushedRange, Fast::GetXrWindowDistance(),
+                  Fast::SetXrWindowDistance, [](float value) { return value; });
+    SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 8.0f, 2.6f, pushedScale, Fast::GetXrWindowScale(),
+                  Fast::SetXrWindowScale, [](float value) { return value; });
+    Fast::SetXrDioramaDepth(CVarGetFloat(CVAR_SETTING("XrDioramaDepth"), 2.0f));
+
+    // The window covers part of the view, and everything the game draws past what that window can
+    // show is thrown away. Internal Resolution multiplies that fit rather than the panel, so 1 is
+    // one game pixel to an eye pixel and 2 is a picture the blit resolves down.
+    wnd->SetResolutionMultiplier(CVarGetFloat(CVAR_INTERNAL_RESOLUTION, 1.0f) * Fast::GetXrRenderScale());
+
+    Fast::SetXrStereo(CVarGetInteger(CVAR_SETTING("XrStereo"), 1) != 0);
+    Fast::SetXrEdgeSoftness(CVarGetFloat(CVAR_SETTING("XrEdgeSoftness"), 0.36f));
+    Fast::SetXrEdgeFloat(CVarGetFloat(CVAR_SETTING("XrEdgeFloat"), 0.15f));
+#endif
+
     // if(gEnableGammaBoost) {
     //     wnd->EnableSRGBMode();
     // }
@@ -772,6 +976,7 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     const SubframePacing pacing = ComputeSubframePacing();
     const int subframesPerTick = pacing.subframes;
     const int fps = pacing.fps;
+    ReportTickRate(pacing.subframes);
 
     if ((int)mtx_replacements.size() < subframesPerTick) {
         mtx_replacements.resize(subframesPerTick);
@@ -820,7 +1025,10 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
 }
 
 uint32_t GameEngine::GetInterpolationFPS() {
-    if (CVarGetInteger(CVAR_SETTING("MatchRefreshRate"), 0)) {
+    // A headset is not a screen a player chooses a frame rate for. Anything below the panel rate
+    // beats against it, and the parallax the off-axis frustum bakes into each eye only updates as
+    // often as the game presents. The setting stays reachable, it just starts on.
+    if (CVarGetInteger(CVAR_SETTING("MatchRefreshRate"), IsHeadsetWindow() ? 1 : 0)) {
         return Ship::Context::GetRawInstance()->GetWindow()->GetCurrentRefreshRate();
 
     } else if (CVarGetInteger(CVAR_VSYNC_ENABLED, 1) ||

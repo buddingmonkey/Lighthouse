@@ -35,6 +35,7 @@ bool TouchControls_Active() {
 
 #include <SDL2/SDL.h>
 #include <imgui.h>
+#include <fast/Fast3dWindow.h>
 #include <libultraship/bridge/consolevariablebridge.h>
 #include <libultraship/libultra/controller.h>
 #include <ship/Context.h>
@@ -228,10 +229,19 @@ bool MenuVisible() {
     return ctx->GetWindow()->GetGui()->GetMenuOrMenubarVisible();
 }
 
+// A headset has no touchscreen, so the pad is unreachable there.
+bool HeadsetActive() {
+    auto ctx = Ship::Context::GetRawInstance();
+    if (ctx == nullptr || ctx->GetWindow() == nullptr) {
+        return false;
+    }
+    return ctx->GetWindow()->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+}
+
 // True when the pad itself should be drawn and polled. The menu button outlives it so
 // there is always a way back into the settings.
 bool PadActive() {
-    if (!Lighthouse::TouchControls_Active() || MenuVisible()) {
+    if (!Lighthouse::TouchControls_Active() || MenuVisible() || HeadsetActive()) {
         return false;
     }
     if (CVarGetInteger(CVAR_TOUCH("HideWithGamepad"), 1) && sGamepadPresent) {
@@ -812,7 +822,8 @@ extern "C" void TouchControls_Poll(void) {
     const bool padActive = PadActive();
     // While the menu is open its own close button takes over: leaving ours on top would
     // also click whatever menu widget sits underneath, since SDL mirrors touches as mouse.
-    const bool menuButtonActive = !MenuVisible();
+    // A headset has its own button outside the window, so this one is not drawn there.
+    const bool menuButtonActive = !MenuVisible() && !HeadsetActive();
 
     // Collect the fingers SDL currently reports. Positions are normalized to the window,
     // which sidesteps the point/pixel difference between ImGui and the drawable.
@@ -1017,7 +1028,7 @@ void TouchControls_Draw() {
 
     // Drawn even when the pad is hidden, so the settings stay reachable -- but not over
     // the menu itself, which has its own close button.
-    if (!MenuVisible()) {
+    if (!MenuVisible() && !HeadsetActive()) {
         const ImVec2 menuMin =
             px({ sLayout.menuCenter.x - sLayout.menuHalfExtent.x, sLayout.menuCenter.y - sLayout.menuHalfExtent.y });
         const ImVec2 menuMax =

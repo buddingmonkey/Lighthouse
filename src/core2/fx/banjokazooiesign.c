@@ -3,6 +3,7 @@
 #include "core1/core1.h"
 #include "functions.h"
 #include "variables.h"
+#include "port/Patches/Patches.h"
 
 extern void actor_postdrawMethod(ActorMarker *);
 
@@ -34,6 +35,7 @@ Actor *func_802DC7E0(ActorMarker *marker, Gfx **gfx, Mtx **mtx, Vtx **vtx){
     modelRender_setPreDrawCallback( (model_render_pre_draw_callback_f)actor_predrawMethod, (void *)this);
     modelRender_setPostDrawCallback((model_render_post_draw_callback_f)actor_postdrawMethod, (void *)marker);
     viewport_backupState();
+    port_xr_beginFlat(gfx);
     sp58[0] = 0.0f;
     sp58[1] = 0.0f;
     sp58[2] = 860.0f;
@@ -52,6 +54,7 @@ Actor *func_802DC7E0(ActorMarker *marker, Gfx **gfx, Mtx **mtx, Vtx **vtx){
     sp34[2] = 0.0f;
     modelRender_draw(gfx, mtx, sp40, NULL, 1.0f, sp34, marker_loadModelBin(marker));
     viewport_restoreState();
+    port_xr_endFlat(gfx);
     viewport_setRenderViewportAndPerspectiveMatrix(gfx, mtx);
     return this;
 }

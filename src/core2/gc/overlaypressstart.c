@@ -3,6 +3,7 @@
 #include "core1/core1.h"
 #include "functions.h"
 #include "variables.h"
+#include "port/Patches/Patches.h"
 
 
 
@@ -52,6 +53,7 @@ Actor *chOverlayPressStart_draw(ActorMarker *marker, Gfx **gdl, Mtx **mptr, Vtx 
     modelRender_setPreDrawCallback((model_render_pre_draw_callback_f)actor_predrawMethod, (void *)actor);
     modelRender_setPostDrawCallback((model_render_post_draw_callback_f)actor_postdrawMethod, (void *)marker);
     viewport_backupState();
+    port_xr_beginFlat(gdl);
     {sp58[0] = 0.0f; sp58[1] = 0.0f; sp58[2] = 1312.5f;};
     {sp4C[0] = 0.0f; sp4C[1] = 0.0f; sp4C[2] = 0.0f;};
     viewport_setPosition_vec3f(sp58);
@@ -62,6 +64,7 @@ Actor *chOverlayPressStart_draw(ActorMarker *marker, Gfx **gdl, Mtx **mptr, Vtx 
     {sp34[0] = 0.0f; sp34[1] = 400.0f; sp34[2] = 0.0f;};
     modelRender_draw(gdl, mptr, sp40, 0, 1.0f, sp34, marker_loadModelBin(marker));
     viewport_restoreState();
+    port_xr_endFlat(gdl);
     viewport_setRenderViewportAndPerspectiveMatrix(gdl, mptr);
     return actor;
 }  

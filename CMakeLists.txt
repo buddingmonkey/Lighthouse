@@ -221,7 +221,7 @@ include_directories(
 
 # Collect source files to build the executable
 message(${CMAKE_CURRENT_SOURCE_DIR})
-file(GLOB_RECURSE ALL_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+file(GLOB_RECURSE ALL_FILES CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     # "src/assets/*.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/port/*.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/port/*.h"
