@@ -527,7 +527,7 @@ void DrawRandoCheckEditor() {
                     ImGui::TextWrapped("%s", checkName);
                     ImGui::TableNextColumn();
 
-                    ImGui::TextWrapped(Rando::StaticData::Items[check.randoItemId].name);
+                    ImGui::TextWrapped("%s", Rando::StaticData::Items[check.randoItemId].name);
                     ImGui::TableNextColumn();
 
                     Rando::StaticData::RandoStaticItem randoItem = Rando::StaticData::Items[check.randoItemId];

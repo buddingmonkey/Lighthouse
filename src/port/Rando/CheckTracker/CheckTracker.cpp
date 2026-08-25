@@ -251,7 +251,7 @@ void DrawCheckTrackerList() {
                     }
 
                     ImGui::BeginGroup();
-                    ImGui::TextColored(checkTextColor, checkString.c_str());
+                    ImGui::TextColored(checkTextColor, "%s", checkString.c_str());
                     if (randoSaveCheck.eligible) {
                         ImGui::SameLine();
                         const std::string& randoItemName = Rando::StaticData::Items[randoSaveCheck.randoItemId].name;
@@ -466,7 +466,7 @@ void SettingsWindow::DrawElement() {
                     Ship::Context::GetRawInstance()->GetWindow()->GetGui()->SaveConsoleVariablesNextFrame();
                 }
                 ImGui::SameLine();
-                ImGui::Text(colorText.c_str());
+                ImGui::TextUnformatted(colorText.c_str());
                 ImGui::PopID();
                 checkColorIndex++;
             }
