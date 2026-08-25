@@ -617,6 +617,10 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
             SDL_Delay(16);
             continue;
         }
+        // This loop draws its own frames, so it asks for the scale the way StartFrame does. A
+        // headset window has no angular width until the session is up, which is after the
+        // constructor scaled the menu once.
+        GameEngine::ScaleImGui();
         UIWidgets::Colors themeColor =
             static_cast<UIWidgets::Colors>(CVarGetInteger(CVAR_SETTING("Menu.Theme"), UIWidgets::Colors::LightBlue));
         ImGui::PushStyleColor(ImGuiCol_TitleBgActive, UIWidgets::ColorValues.at(themeColor));
