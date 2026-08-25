@@ -82,7 +82,8 @@ void ItemQueue::Process() {
         ItemQueue::GiveItem(randoSaveCheck.randoItemId);
         ItemQueue::SendNotification(randoSaveCheck.randoItemId);
         Rando::StaticData::ModifyRandoInfFlagState(randoCheckId);
-        // RANDO_SAVE_CHECKS[randoCheckId].received = true;
+        RANDO_SAVE_CHECKS[randoCheckId].received = true;
+        RANDO_SAVE_CHECKS[randoCheckId].obtained = true;
     }
 
     itemQueue.pop();
@@ -332,7 +333,14 @@ void ItemQueue::Clear() {
 }
 
 void ItemQueue::AddCheck(RandoCheckId randoCheckId) {
-    RANDO_SAVE_CHECKS[randoCheckId].eligible = true;
+    if (randoCheckId <= RC_UNKNOWN || randoCheckId >= RC_MAX) {
+        return;
+    }
+    auto& check = RANDO_SAVE_CHECKS[randoCheckId];
+    if (check.eligible || check.received || check.obtained) {
+        return;
+    }
+    check.eligible = true;
     itemQueue.push(randoCheckId);
     CheckTracker_AddToCheckCount((uint32_t)randoCheckId);
 }

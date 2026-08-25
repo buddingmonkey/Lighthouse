@@ -68,14 +68,14 @@ static Gfx* CustomCollectible_GetDL(CustomItemModel model) {
 Actor* CustomCollectible_DrawCustomModel(ActorMarker* marker, Gfx** gfx, Mtx** mtx, Vtx** vtx) {
     Actor* actor = marker_getActor(marker);
     ActorLocal_CustomCollectible* customLocal = (ActorLocal_CustomCollectible*)&actor->local;
-    CustomItemModel model;
+    CustomItemModel model = ARCHIPELAGO_MODEL_NONE;
 
     switch (customLocal->randoItemId) {
         case RI_AP_ITEM_PROGRESSION:
             model = ARCHIPELAGO_MODEL_PROGRESSIVE;
             break;
         default:
-            break;
+            return actor;
     }
 
     Gfx* dl = CustomCollectible_GetDL(model);

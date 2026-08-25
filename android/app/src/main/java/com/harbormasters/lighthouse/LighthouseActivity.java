@@ -248,7 +248,7 @@ public class LighthouseActivity extends SDLActivity {
 
         String fingerprint = shippedFingerprint();
         File stamp = new File(target, STAMP);
-        if (stamp.isFile() && fingerprint.equals(readText(stamp))) {
+        if (stamp.isFile() && fingerprint.equals(readText(stamp)) && shippedAssetsExist(target)) {
             return;
         }
         // Removed first, so a copy that stops part way is done again rather than called complete.
@@ -260,6 +260,16 @@ public class LighthouseActivity extends SDLActivity {
         }
         writeText(stamp, fingerprint);
         Log.i(TAG, "Unpacked shipped assets " + fingerprint);
+    }
+
+    private boolean shippedAssetsExist(File target) {
+        for (String path : SHIPPED) {
+            File file = new File(target, path);
+            if (!file.exists() || (file.isDirectory() && file.list() == null)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

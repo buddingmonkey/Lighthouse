@@ -4,7 +4,8 @@
 #include "port/UI/Notification.h"
 
 extern void RandoSaveCheck_to_json(nlohmann::json& j, const RandoSaveCheck& randoSaveCheck);
-extern RandoSaveCheck RandoSaveCheck_from_json(const nlohmann::json& j, RandoSaveCheck& randoSaveCheck);
+extern RandoSaveCheck RandoSaveCheck_from_json(const nlohmann::json& j, RandoSaveCheck& randoSaveCheck, int schemaVersion,
+                                               const std::string& checkName);
 
 namespace Rando {
 
@@ -13,6 +14,7 @@ nlohmann::ordered_json GenerateFromPoolGeneration() {
     nlohmann::ordered_json orderedSpoiler = nlohmann::ordered_json::object();
 
     orderedSpoiler["type"] = "LIGHTHOUSE_RANDO_SPOILER";
+    orderedSpoiler["randoSaveCheckSchema"] = 2;
     orderedSpoiler["seed"] = randoFinalSeed; // TODO: Add once Manual Seed Input is finished.
 
     orderedSpoiler["options"] = nlohmann::json::object();
@@ -66,8 +68,18 @@ void GenerateFromSpoiler(nlohmann::json spoiler) {
 
     if (spoiler.contains("checks") && !spoiler["checks"].empty()) {
         for (auto& data : spoiler["checks"].items()) {
-            RandoSaveCheck checkEntry = RandoSaveCheck_from_json(data.value(), checkEntry);
-            checkEntry.name = Rando::StaticData::Checks[checkEntry.randoCheckId].name;
+            RandoSaveCheck checkEntry{};
+            int schemaVersion = spoiler.value("randoSaveCheckSchema", 1);
+            try {
+                RandoSaveCheck_from_json(data.value(), checkEntry, schemaVersion, data.key());
+            } catch (const std::exception& e) {
+                Notification::Emit({ .message = "Error: Malformed Spoiler Log entry.", .messageColor = ImVec4(0.85f, 0.3f, 0, 1) });
+                continue;
+            }
+            if (checkEntry.randoCheckId <= RC_UNKNOWN || checkEntry.randoCheckId >= RC_MAX) {
+                continue;
+            }
+            checkEntry.name = Rando::StaticData::Checks.at(checkEntry.randoCheckId).name;
             RANDO_SAVE_CHECKS[checkEntry.randoCheckId] = checkEntry;
 
             Rando::Logic::shuffledPool.push_back(checkEntry);
