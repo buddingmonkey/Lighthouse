@@ -28,6 +28,11 @@ bool TouchControls_Active() {
 #include <cstdint>
 #include <vector>
 
+#ifdef __ANDROID__
+#include <atomic>
+#include <jni.h>
+#endif
+
 #include <SDL2/SDL.h>
 #include <imgui.h>
 #include <libultraship/bridge/consolevariablebridge.h>
@@ -57,6 +62,23 @@ namespace {
 struct Vec2 {
     float x = 0.0f;
     float y = 0.0f;
+};
+
+// The display cutout and any system bar still on screen, in height units.
+struct Insets {
+    float left = 0.0f;
+    float right = 0.0f;
+    float top = 0.0f;
+    float bottom = 0.0f;
+
+    bool operator==(const Insets&) const = default;
+};
+
+// The usable screen edges, once the margin and the insets are taken off.
+struct Bounds {
+    float left = 0.0f;
+    float right = 0.0f;
+    float bottom = 0.0f;
 };
 
 // A phone is held with the index fingers curled over the top edge and both thumbs in the bottom
@@ -242,13 +264,44 @@ void AddPill(Layout& l, PadControl id, Vec2 center, Vec2 half, uint16_t mask, co
     b.enabled = true;
 }
 
-// The layout works in whatever unit the platform sizes its windows in, so all it needs is how
-// many of those cover a millimetre; nothing past this point deals in inches.
+#ifdef __ANDROID__
+enum InsetEdge {
+    INSET_LEFT,
+    INSET_TOP,
+    INSET_RIGHT,
+    INSET_BOTTOM,
+    INSET_COUNT,
+};
+
+// In pixels, which is the unit SDL uses for an Android window. The UI thread writes, the window thread reads.
+std::atomic<int> sInsetPx[INSET_COUNT] = {};
+#endif
+
+// The screen, less whatever the OS reserves along its edges.
+Insets SafeArea(float pointHeight) {
+#ifdef __ANDROID__
+    if (pointHeight <= 0.0f) {
+        return {};
+    }
+    const auto edge = [pointHeight](InsetEdge which) {
+        return sInsetPx[which].load(std::memory_order_relaxed) / pointHeight;
+    };
+    const Insets in = { edge(INSET_LEFT), edge(INSET_RIGHT), edge(INSET_TOP), edge(INSET_BOTTOM) };
+    // Half the screen is a bad reading, not a real cutout.
+    if (in.left + in.right >= 0.5f || in.top + in.bottom >= 0.5f) {
+        return {};
+    }
+    return in;
+#else
+    (void)pointHeight;
+    return {};
+#endif
+}
+
 constexpr float kMmPerInch = 25.4f;
 
 #ifdef __ANDROID__
-// Android sizes its windows in pixels, so the plausible band is a screen density rather than
-// Apple's fixed point size, and a tablet is told apart by physical width instead of a unit count.
+// Android sizes its windows in pixels, so the plausible band is a density and not a point size.
 constexpr float kMinPlausiblePpi = 200.0f;
 constexpr float kMaxPlausiblePpi = 900.0f;
 constexpr float kNominalPhonePpi = 400.0f;
@@ -337,7 +390,7 @@ Vec2 Arc(const Vec2& pivot, float inboard, float radius, float degrees) {
 
 // Slides a run of controls as a unit until its bounding box clears the screen edges and whatever
 // sits above it. Clusters move whole, so this can't deform a diamond into a trapezium.
-void FitRange(Layout& l, int first, int last, float margin, float ceiling, bool withRightStick = false) {
+void FitRange(Layout& l, int first, int last, const Bounds& edge, float ceiling, bool withRightStick = false) {
     Vec2 min = { FLT_MAX, FLT_MAX };
     Vec2 max = { -FLT_MAX, -FLT_MAX };
     for (int i = first; i <= last; i++) {
@@ -362,15 +415,15 @@ void FitRange(Layout& l, int first, int last, float margin, float ceiling, bool 
     }
 
     Vec2 shift;
-    if (min.x < margin) {
-        shift.x = margin - min.x;
-    } else if (max.x > l.aspect - margin) {
-        shift.x = l.aspect - margin - max.x;
+    if (min.x < edge.left) {
+        shift.x = edge.left - min.x;
+    } else if (max.x > edge.right) {
+        shift.x = edge.right - max.x;
     }
     if (min.y < ceiling) {
         shift.y = ceiling - min.y;
-    } else if (max.y > 1.0f - margin) {
-        shift.y = 1.0f - margin - max.y;
+    } else if (max.y > edge.bottom) {
+        shift.y = edge.bottom - max.y;
     }
     for (int i = first; i <= last; i++) {
         l.buttons[i].center.x += shift.x;
@@ -423,6 +476,7 @@ struct LayoutKey {
     float size = 0.0f;
     float reach = 0.0f;
     float margin = 0.0f;
+    Insets insets;
     int device = 0;
     int dpad = 0;
     int mirror = 0;
@@ -449,7 +503,7 @@ void BuildLayout(const LayoutKey& key) {
     // the controls grow into one another.
     const bool modern = key.scheme == CONTROL_SCHEME_MODERN;
     const float railMm = device == DEVICE_PHONE ? kRailMm : 0.0f;
-    const float budget = 1.0f / unit - 2.0f * key.margin;
+    const float budget = (1.0f - key.insets.top - key.insets.bottom) / unit - 2.0f * key.margin;
     const float size = std::max(std::min(key.size, budget / ((modern ? kModernFaceMm : kFaceMm) + railMm)), 0.4f);
 
     const auto mm = [unit](float millimetres) { return millimetres * unit; };
@@ -459,10 +513,13 @@ void BuildLayout(const LayoutKey& key) {
     const auto arc = [unit, size, &key](float millimetres) { return millimetres * unit * size * key.reach; };
 
     const float margin = mm(key.margin);
-    const float left = margin;
-    const float right = key.aspect - margin;
-    const float top = margin;
-    const float bottom = 1.0f - margin;
+    // MirrorLayout reflects the pad but not the menu button, so a cutout on one side is taken off both.
+    const float side = margin + std::max(key.insets.left, key.insets.right);
+    const float left = side;
+    const float right = key.aspect - side;
+    const float top = margin + key.insets.top;
+    const float bottom = 1.0f - margin - key.insets.bottom;
+    const Bounds edge = { left, right, bottom };
 
     const Vec2 shoulder = { sz(7.0f), sz(4.2f) };
     // Z is held down for most of a fight, so it takes the corner and a wider pill than the rest.
@@ -582,10 +639,10 @@ void BuildLayout(const LayoutKey& key) {
     // shear the face buttons apart.
     const float clusterCeiling = railBottom + sz(kRailGapMm);
     for (int i = CTRL_Z; i <= CTRL_START; i++) {
-        FitRange(l, i, i, margin, top);
+        FitRange(l, i, i, edge, top);
     }
-    FitRange(l, CTRL_A, CTRL_CRIGHT, margin, clusterCeiling, true);
-    FitRange(l, CTRL_DUP, CTRL_DRIGHT, margin, clusterCeiling);
+    FitRange(l, CTRL_A, CTRL_CRIGHT, edge, clusterCeiling, true);
+    FitRange(l, CTRL_DUP, CTRL_DRIGHT, edge, clusterCeiling);
 
     // Anything inside the zone that isn't a button grabs the stick. Bound it by what a thumb can
     // sweep without the hand leaving the corner; the fractional cap only bites on a phone, where
@@ -619,6 +676,7 @@ void EnsureLayout(float aspect, float pointHeight) {
     key.size = std::clamp(CVarGetFloat(CVAR_TOUCH("Scale"), 1.0f), 0.7f, 1.4f);
     key.reach = std::clamp(CVarGetFloat(CVAR_TOUCH("Reach"), 1.0f), 0.8f, 1.25f);
     key.margin = std::clamp(CVarGetFloat(CVAR_TOUCH("EdgeMargin"), 3.0f), 0.0f, 10.0f);
+    key.insets = SafeArea(pointHeight);
     key.device = CVarGetInteger(CVAR_TOUCH("Layout"), 0);
     key.dpad = CVarGetInteger(CVAR_TOUCH("ShowDPad"), 0);
     key.mirror = CVarGetInteger(CVAR_TOUCH("Mirror"), 0);
@@ -711,6 +769,16 @@ void OpenMenu() {
 }
 
 } // namespace
+
+#ifdef __ANDROID__
+extern "C" JNIEXPORT void JNICALL Java_com_harbormasters_lighthouse_LighthouseActivity_nativeSafeAreaInsets(
+    JNIEnv*, jclass, jint left, jint top, jint right, jint bottom) {
+    const jint values[INSET_COUNT] = { left, top, right, bottom };
+    for (int i = 0; i < INSET_COUNT; i++) {
+        sInsetPx[i].store(std::max<int>(values[i], 0), std::memory_order_relaxed);
+    }
+}
+#endif
 
 extern "C" void TouchControls_Poll(void) {
     if (!Lighthouse::TouchControls_Active()) {

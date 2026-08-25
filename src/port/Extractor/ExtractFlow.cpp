@@ -20,6 +20,7 @@
 #include "port/build.h"
 #include "port/Extractor/ExtractFlow.h"
 #include "port/Extractor/GameExtractor.h"
+#include "port/FilePicker.h"
 #include "port/LaunchArgs.h"
 #include "port/Patches/Patches.h"
 #include "port/UI/cvar_prefixes.h"
@@ -283,6 +284,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
 
     std::shared_ptr<BS::thread_pool> threadPool = std::make_shared<BS::thread_pool>(1);
     while (!extractDone) {
+        Lighthouse::PumpFilePicker();
         if (GameExtractor::sCustomCodePromptRequested.load()) {
             GameExtractor::sCustomCodePromptRequested = false;
             LighthouseGui::RegisterPopup(

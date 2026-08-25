@@ -282,6 +282,48 @@ xcodebuild -exportArchive -archivePath build-ios/Lighthouse.xcarchive \
 * Mods work as on desktop — drop `.o2r`/`.otr` files into `Lighthouse/mods` via the Files app. Applying a mod list needs the app to be closed and reopened, since iOS apps can't relaunch themselves.
 * Networking (Anchor multiplayer) is off, SDL2_net isn't part of the iOS dependency set.
 
+## Android
+Requires the Android SDK (platform 35, build-tools), NDK r29 and a JDK 17. Gradle drives CMake, and the renderer is OpenGL ES 3.0. Set `ANDROID_HOME` and `ANDROID_NDK_HOME`, or write them into `android/local.properties`.
+
+_Note: the build cross-compiles, so `lighthouse.o2r` has to come from a host build tree and `bk.o2r` is extracted on the device._
+
+_Note: Gradle clones SDL2 into `build-android/sdl2-src` on the first configure. The Java shim and the native library have to be the same version, so that one checkout supplies both. Keep `sdl2Tag` in `android/gradle.properties` equal to the SDL2 `GIT_TAG` in `libultraship/cmake/dependencies/android.cmake`._
+
+```bash
+# Clone the repo
+git clone https://github.com/HarbourMasters/lighthouse.git
+cd lighthouse
+# Clone the submodule libultraship
+git submodule update --init
+
+# Generate lighthouse.o2r (port-specific assets) on the host
+cmake -H. -Bbuild-cmake -GNinja
+cmake --build build-cmake --target GeneratePortO2R
+
+# Build the APK. Use -PapplicationId=com.yourname.lighthouse for your own identifier
+cd android
+./gradlew assembleRelease
+
+# Install it
+adb install -r ../build-android/lighthouse-release.apk
+```
+
+_Note: with no keystore given the release APK is signed with the debug key, which installs on your own device but is not fit to hand out. To sign it properly, pass `-PkeystoreFile`, `-PkeystorePassword`, `-PkeyAlias` and `-PkeyPassword`. Do not build `assembleDebug` to play: it compiles the game at `-O0`, and asset extraction then takes tens of minutes._
+
+### Getting the game onto a device
+1. Copy a supported Banjo-Kazooie ROM (`.z64`) onto the device, anywhere you like — Downloads is fine.
+2. Install and launch the app. It asks for a ROM and opens the system file picker; choose the ROM.
+3. Let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
+
+_Note: the app keeps its data in `Android/data/<applicationId>/files`, which Android 11 closed to the Files app, to USB, and to the file picker alike. That is why the ROM is imported through the picker rather than copied in by hand, and it is also why saves and mods are not reachable from the device itself; use `adb` for those._
+
+### Android notes
+* arm64-v8a only, landscape, full screen. A device without OpenGL ES 3.0 is not supported.
+* Any controller SDL2 recognises works. Pair it in Android Settings first; the on-screen pad hides itself while one is connected.
+* The on-screen controls are configured in *Settings > Controls*, under **On-Screen Controls**, and are sized from the reported screen density rather than a fixed point size.
+* Mods go in the `mods` folder, which is only reachable over `adb` for the reason above. Applying a mod list needs the app to be closed and reopened, since Android apps can't relaunch themselves.
+* Networking (Anchor multiplayer) is off, SDL2_net isn't part of the Android dependency set.
+
 # Compatible Roms
 Any retail version. See [the readme](https://github.com/HarbourMasters/Lighthouse/blob/develop/README.md#1-verify-your-rom-dump)
 

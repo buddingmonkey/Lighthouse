@@ -15,6 +15,10 @@ build/*
 build/
 build-cmake
 build-ios
+build-android
+
+#android sdk location, machine specific
+android/local.properties
 
 #binaries ripped from the ROMs
 assets/bko2r*
