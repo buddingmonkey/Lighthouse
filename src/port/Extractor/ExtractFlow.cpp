@@ -20,6 +20,7 @@
 #include "port/build.h"
 #include "port/Extractor/ExtractFlow.h"
 #include "port/Extractor/GameExtractor.h"
+#include "port/FilePicker.h"
 #include "port/LaunchArgs.h"
 #include "port/Patches/Patches.h"
 #include "port/UI/cvar_prefixes.h"
@@ -283,6 +284,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
 
     std::shared_ptr<BS::thread_pool> threadPool = std::make_shared<BS::thread_pool>(1);
     while (!extractDone) {
+        Lighthouse::PumpFilePicker();
         if (GameExtractor::sCustomCodePromptRequested.load()) {
             GameExtractor::sCustomCodePromptRequested = false;
             LighthouseGui::RegisterPopup(
@@ -615,6 +617,10 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
             SDL_Delay(16);
             continue;
         }
+        // This loop draws its own frames, so it asks for the scale the way StartFrame does. A
+        // headset window has no angular width until the session is up, which is after the
+        // constructor scaled the menu once.
+        GameEngine::ScaleImGui();
         UIWidgets::Colors themeColor =
             static_cast<UIWidgets::Colors>(CVarGetInteger(CVAR_SETTING("Menu.Theme"), UIWidgets::Colors::LightBlue));
         ImGui::PushStyleColor(ImGuiCol_TitleBgActive, UIWidgets::ColorValues.at(themeColor));

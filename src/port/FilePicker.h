@@ -27,9 +27,17 @@ namespace Lighthouse {
 //     on the calling thread before PickFile returns.
 //   - ImGui builds (consoles / arm-linux): libultraship's FileBrowserWindow. onResult fires later on
 //     the render thread; PickFile returns immediately and is safe to call from any thread.
+//   - Android: the system document picker, because the app directory is the only place the ImGui
+//     browser can read and nothing can be put there from outside. onResult fires later, in
+//     PumpFilePicker. A save request keeps the ImGui browser: the picked document is read-only and
+//     a save goes into the app directory anyway.
 //
 // Callers written for the async form (kick off, then poll a flag the callback sets) work with both
 // backends unchanged: the native path just sets that flag before returning.
 void PickFile(Ship::FileBrowserRequest request, std::function<void(std::optional<std::filesystem::path>)> onResult);
+
+// Deliver the result of a pick that finished off the caller's thread. Call once per frame from the
+// thread that draws. Does nothing where the picker is not asynchronous.
+void PumpFilePicker();
 
 } // namespace Lighthouse

@@ -15,6 +15,7 @@
 
 #include "ship/Context.h"
 #include "port/FilePicker.h"
+#include "port/UI/LighthouseGui.hpp"
 #include "spdlog/spdlog.h"
 #include <port/Engine.h>
 
@@ -396,6 +397,17 @@ bool GameExtractor::GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<siz
     delete Companion::Instance;
     Companion::Instance = nullptr;
 
+    // Torch stops with no exception and an empty output path when it has no configuration for the ROM.
+    if (produced.empty() || !fs::exists(produced, stagingEc)) {
+        const std::string hash = Companion::CalculateHash(this->mGameData);
+        SPDLOG_ERROR("The extractor made no archive for ROM {} ({})", this->mGamePath.string(), hash);
+        sLastError = "The extractor made no archive. Lighthouse does not know this ROM (" + hash + ").";
+        fs::remove_all(stagingDir, stagingEc);
+        sStatusText.clear();
+        sPhase = 0;
+        return false;
+    }
+
     // Replaces the previous archive in one step -- no remove first, which would reopen the
     // window this is here to close.
     const fs::path finalPath = fs::path(game_path) / produced.filename();
@@ -448,17 +460,40 @@ void GameExtractor::WritePortVersion() {
 }
 #endif
 
-// No #ifdef needed: Lighthouse::PickFile picks the backend (native dialog on desktop, ImGui browser
-// on consoles/arm). The N64-ROM title/filters live here so libultraship stays game-agnostic.
+// The header answers before the hash does: an unknown hash reads as "wrong game", not "wrong byte order".
+static bool IsN64Rom(const std::vector<uint8_t>& rom) {
+    static const uint8_t z64[] = { 0x80, 0x37, 0x12, 0x40 };
+    return rom.size() >= 4 && std::equal(std::begin(z64), std::end(z64), rom.begin());
+}
+
+static bool IsByteSwapped(const std::vector<uint8_t>& rom) {
+    static const uint8_t v64[] = { 0x37, 0x80, 0x40, 0x12 };
+    static const uint8_t n64[] = { 0x40, 0x12, 0x37, 0x80 };
+    return rom.size() >= 4 && (std::equal(std::begin(v64), std::end(v64), rom.begin()) ||
+                               std::equal(std::begin(n64), std::end(n64), rom.begin()));
+}
+
+// No #ifdef needed: Lighthouse::PickFile picks the backend (native dialog on desktop, system picker
+// on Android, ImGui browser on consoles/arm). The N64-ROM title/filters live here so libultraship
+// stays game-agnostic.
 void GameExtractor::SelectGameFromUI(std::function<void(bool)> onComplete) {
     Ship::FileBrowserRequest req;
     req.Title = "Select a N64 ROM";
     req.Filters = { { "N64 ROMs (.z64, .n64, .v64)", { "*.z64", "*.n64", "*.v64" } }, { "All files", { "*" } } };
-    Lighthouse::PickFile(std::move(req),
-                         [this, onComplete = std::move(onComplete)](std::optional<std::filesystem::path> path) {
-                             const bool ok = path.has_value() && LoadRomFromPath(path->string());
-                             if (onComplete) {
-                                 onComplete(ok);
-                             }
-                         });
+    Lighthouse::PickFile(
+        std::move(req), [this, onComplete = std::move(onComplete)](std::optional<std::filesystem::path> path) {
+            bool ok = path.has_value() && LoadRomFromPath(path->string());
+            if (ok && !IsN64Rom(mGameData)) {
+                const bool swapped = IsByteSwapped(mGameData);
+                LighthouseGui::RegisterPopup(
+                    swapped ? "Wrong ROM byte order" : "Not a N64 ROM",
+                    swapped ? "That ROM is a .n64 or .v64 image.\nConvert it to .z64 and select it again."
+                            : "That file is not a N64 ROM.\nSelect a .z64 image of Banjo-Kazooie.");
+                mGameData.clear();
+                ok = false;
+            }
+            if (onComplete) {
+                onComplete(ok);
+            }
+        });
 }

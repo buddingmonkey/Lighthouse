@@ -53,6 +53,10 @@ Your ROM needs to be in .z64 format. If it's in .n64 format, use the following t
 * Apple's restrictions allow no prebuilt release, so build and install it with Xcode. See the [building instructions](https://github.com/HarbourMasters/Lighthouse/blob/main/docs/BUILDING.md#ios-iphone--ipad).
 * Launch the app once, copy your compatible ROM into the `Lighthouse` folder it makes in the Files app, and relaunch.
 
+#### Android
+* Build the APK with Gradle and sideload it. See the [building instructions](https://github.com/HarbourMasters/Lighthouse/blob/main/docs/BUILDING.md#android).
+* Copy your compatible ROM onto the device, then launch the app and pick it in the file picker it opens.
+
 # Configuration
 
 Lighthouse ships with a file with many standard controller mappings that can be used as-is with most controllers. If your controller isn't recognized by Lighthouse, or isn't working properly, you can create your own custom mapping using the built-in mapper in the Settings menu.

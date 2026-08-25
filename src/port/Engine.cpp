@@ -35,6 +35,7 @@
 #include "Extractor/ExtractFlow.h"
 #include "Extractor/GameExtractor.h"
 #include "ship/window/gui/FileBrowserWindow.h"
+#include "port/FilePicker.h"
 #include "Interpolation/FrameInterpolation.h"
 #include "Nametag/Nametag.h"
 #include "OS/OS.h"
@@ -77,11 +78,38 @@ uint32_t DefaultImGuiScaleIndex() {
             return 0u;
         }
         float shortSide = static_cast<float>(std::min(window->GetWidth(), window->GetHeight()));
+#ifdef __ANDROID__
+        // Android measures windows in pixels, and 600 is a count of density-independent ones.
+        float ddpi = 0.0f;
+        float hdpi = 0.0f;
+        float vdpi = 0.0f;
+        if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) == 0 && vdpi > 0.0f) {
+            shortSide = shortSide * 160.0f / vdpi;
+        }
+#endif
         return shortSide >= 600.0f ? 2u : 0u;
     }();
     return index;
 #else
     return 1;
+#endif
+}
+
+// Android counts window units in pixels where iOS counts points, so the menu comes out much smaller there.
+float ImGuiDensityScale() {
+#ifdef __ANDROID__
+    static const float density = []() {
+        float ddpi = 0.0f;
+        float hdpi = 0.0f;
+        float vdpi = 0.0f;
+        if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) == 0 && vdpi > 0.0f) {
+            return std::max(1.0f, vdpi / 160.0f);
+        }
+        return 1.0f;
+    }();
+    return density;
+#else
+    return 1.0f;
 #endif
 }
 
@@ -137,6 +165,8 @@ GameEngine::GameEngine() {
 #ifdef LIGHTHOUSE_MOBILE
     // Otherwise the accelerometer appears as a phantom joystick in the device list.
     SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+    // Without this hint SDL sets the Android activity to FULL_USER, which allows the portrait the manifest excludes.
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
 #ifdef __IOS__
     // Play through the ring/silent switch like other games do.
@@ -392,7 +422,7 @@ void GameEngine::ScaleImGui() {
         return;
     }
 
-    float scale = imguiScaleOptionToValue[imGuiScaleIndex];
+    float scale = imguiScaleOptionToValue[imGuiScaleIndex] * ImGuiDensityScale();
     float newScale = scale / previousImGuiScale;
     ImGui::GetStyle().ScaleAllSizes(newScale);
     ImGui::GetIO().FontGlobalScale = scale;
