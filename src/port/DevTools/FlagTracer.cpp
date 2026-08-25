@@ -28,7 +28,8 @@
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
 #define LH_FLAGTRACE_STACKS_WIN 1
-#elif defined(__linux__) || defined(__APPLE__)
+// Bionic only declares backtrace() from API 33, below which there is no stack capture.
+#elif (defined(__linux__) && (!defined(__ANDROID__) || __ANDROID_API__ >= 33)) || defined(__APPLE__)
 #include <cxxabi.h>
 #include <dlfcn.h>
 #include <execinfo.h>
