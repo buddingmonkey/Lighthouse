@@ -77,6 +77,11 @@ static void currentRenderSize(int* w, int* h) {
 static void createPauseFb(void* arg) {
     (void)arg;
     s_pauseFbId = gfx_create_framebuffer(s_pauseFbW, s_pauseFbH, s_pauseFbW, s_pauseFbH, 0, 0);
+    // The snapshot is taken and drawn once per eye, so the right eye needs a picture of its own.
+    if (IsHeadsetWindow() && s_pauseFbId >= 0) {
+        s32 rightFb = gfx_create_framebuffer(s_pauseFbW, s_pauseFbH, s_pauseFbW, s_pauseFbH, 0, 0);
+        gfx_register_stereo_fb_pair(s_pauseFbId, rightFb);
+    }
 }
 
 int port_getPauseFramebufferId(void) {
