@@ -11,6 +11,8 @@
 #include "port/Localization/Language.h"
 #include "port/Save/SaveConverter.h"
 #include "UIWidgets.hpp"
+#include <fast/Fast3dWindow.h>
+#include <fast/backends/gfx_xr_view.h>
 #include <spdlog/fmt/fmt.h>
 
 #include "variables.h"
@@ -20,6 +22,11 @@ namespace LighthouseGui {
 extern std::shared_ptr<LighthouseMenu> mLighthouseMenu;
 extern std::shared_ptr<LighthouseModalWindow> mModalWindow;
 using namespace UIWidgets;
+
+static bool HeadsetWindow() {
+    auto window = Ship::Context::GetRawInstance()->GetWindow();
+    return window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+}
 
 static std::unordered_map<int32_t, const char*> imguiScaleOptions = {
     { 0, "Small" },
@@ -462,7 +469,103 @@ void LighthouseMenu::AddMenuSettings() {
     AddWidget(path, "Match Refresh Rate", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_SETTING("MatchRefreshRate"))
         .RaceDisable(false)
-        .Options(CheckboxOptions().Tooltip("Matches interpolation value to the refresh rate of your display."));
+        .Options(CheckboxOptions()
+                     .Tooltip("Matches interpolation value to the refresh rate of your display.")
+                     .DefaultValue(HeadsetWindow()));
+#ifdef ENABLE_OPENXR
+    AddWidget(path, "Window Range", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("XrWindowRange"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(FloatSliderOptions()
+                     .Tooltip("How far away the window hangs. The window keeps the size it has, so a further range "
+                              "makes it small in the eye and takes it out into the room. The depth of the world "
+                              "behind it does not change with the range.\n\nThe move bar under the window sets the "
+                              "same range, so this reads back what a pull towards you left.")
+                     .Min(0.5f)
+                     .Max(4.0f)
+                     .DefaultValue(1.3f)
+                     .Format("%.2f m"));
+    AddWidget(path, "Window Size", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("XrWindowScale"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(FloatSliderOptions()
+                     .Tooltip("How large the glass is, against the width the game's field of view gives it at the "
+                              "nearest range. The range does not touch it, so a large screen far away asks for both: "
+                              "move the window out, then make it larger.\n\nThe corner handles set the same size.")
+                     .Min(0.5f)
+                     .Max(8.0f)
+                     .DefaultValue(2.6f)
+                     .Format("%.2f"));
+    AddWidget(path, "Diorama Depth", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("XrDioramaDepth"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(FloatSliderOptions()
+                     .Tooltip("How deep the world reaches behind the glass. The farthest thing the game draws sits "
+                              "this far behind the window, and everything nearer sorts itself in between, whatever "
+                              "the range and size of the window.\n\nA small depth keeps the whole world near the "
+                              "glass, which is the easiest to look at for a long session. No depth can make the "
+                              "eyes diverge.")
+                     .Min(0.5f)
+                     .Max(4.0f)
+                     .DefaultValue(2.0f)
+                     .Format("%.2f m"));
+    AddWidget(path, "Edge Float", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("XrEdgeFloat"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(FloatSliderOptions()
+                     .Tooltip("How far the side edges of the window come towards you, against the space between your "
+                              "eyes. At a side edge one eye sees a little of the world the other cannot, as it does "
+                              "at any window. Floating the edge forward makes that sliver read as something behind a "
+                              "near frame instead of as one eye covered.\n\nEach eye gives up this much width at one "
+                              "side, so a large value takes a visible strip off the picture. Zero turns it off.")
+                     .Min(0.0f)
+                     .Max(1.0f)
+                     .DefaultValue(0.15f)
+                     .Format("%.2f"));
+    AddWidget(path, "Edge Softness", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("XrEdgeSoftness"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(FloatSliderOptions()
+                     .Tooltip("How far the picture fades out at the edge of the window. It softens the frame but it "
+                              "does not change what each eye sees through it, so use Edge Float for that.")
+                     .Min(0.0f)
+                     .Max(3.0f)
+                     .DefaultValue(0.36f)
+                     .Format("%.2f"));
+    AddWidget(path, "Max Refresh Rate", WIDGET_CVAR_SLIDER_INT)
+        .CVar(CVAR_SETTING("XrMaxRate"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(IntSliderOptions()
+                     .Tooltip("The fastest the headset is asked to run. The game draws a whole number of frames a "
+                              "tick, so it can only use a rate its 30 Hz logic divides into, and it takes the "
+                              "fastest one the headset offers. Hold it down for battery or for heat.\n\nA rate the "
+                              "device cannot keep runs the game slowly rather than dropping frames, so if the game "
+                              "ticks under 30 a second, set this lower.")
+                     .Min(60)
+                     .Max(120)
+                     .DefaultValue(120)
+                     .Format("%d Hz"));
+    AddWidget(path, "Recenter Window", WIDGET_BUTTON)
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Callback([](WidgetInfo&) { Fast::RecenterXrWindow(); })
+        .Options(
+            ButtonOptions().Size(Sizes::Inline).Tooltip("Puts the window in front of you, where you are looking now."));
+    AddWidget(path, "Stereo", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_SETTING("XrStereo"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(CheckboxOptions()
+                     .Tooltip("Draws the frame once per eye so the world has depth. Turn it off to draw one image "
+                              "for both eyes, which costs half as much and sends one layer to the compositor.")
+                     .DefaultValue(true));
+#endif
     AddWidget(path, "Renderer API (Needs reload)", WIDGET_VIDEO_BACKEND).RaceDisable(false);
     AddWidget(path, "Enable Vsync", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_VSYNC_ENABLED)

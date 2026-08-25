@@ -21,6 +21,10 @@ if "$ADB" shell "test -e $FILES/capture-request" 2>/dev/null; then
     exit 1
 fi
 
+# The request is consumed as the last image is written, and the ones before it can take a moment
+# longer to appear over the app's external storage. Listing at once loses them.
+"$ADB" shell sleep 1 >/dev/null 2>&1 || true
+
 mapfile -t RAWS < <("$ADB" shell "ls $FILES/capture-*.raw 2>/dev/null" | tr -d '\r')
 if [ "${#RAWS[@]}" -eq 0 ]; then
     echo "The request was consumed but no capture-*.raw was written." >&2

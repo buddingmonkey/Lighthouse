@@ -6,6 +6,7 @@
 #include "core2/particle.h"
 
 #include "port/Interpolation/FrameInterpolation.h"
+#include "port/Patches/Patches.h"
 
 
 extern s32 sprite_getFrameCount(BKSprite *);
@@ -825,16 +826,20 @@ void partEmitMgr_update(void){
 
 void partEmitMgr_drawPass0(Gfx **gdl, Mtx **mptr, Vtx **vptr){
     int i;
+    port_xr_beginNoSceneDepth(gdl);
     for(i = 0; i < partEmitMgrLength; i++){
         __particleEmitter_drawOnPass(partEmitMgr[i], gdl, mptr, vptr, 4);
     }
+    port_xr_endNoSceneDepth(gdl);
 }
 
 void partEmitMgr_drawPass1(Gfx **gdl, Mtx **mptr, Vtx **vptr){
     int i;
+    port_xr_beginNoSceneDepth(gdl);
     for(i = 0; i < partEmitMgrLength; i++){
         __particleEmitter_drawOnPass(partEmitMgr[i], gdl, mptr, vptr, 0);
     }
+    port_xr_endNoSceneDepth(gdl);
 }
 
 void partEmitMgr_draw(Gfx **gdl, Mtx **mptr, Vtx **vptr){

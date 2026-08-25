@@ -49,6 +49,10 @@ void RegisterTransitionPatches_Init() {
         float aspectRatio = GameEngine_GetAspectRatio() / (320.0f / 240.0f);
         bool isJigsaw = (ev->uid == TRANSITION_FALLING_PIECES_IN || ev->uid == TRANSITION_FALLING_PIECES_OUT);
 
+        // The transition material never writes PRIM; pin it so a black PRIM left by an
+        // earlier model cannot multiply the piece faces to black.
+        gDPSetPrimColor((*ev->gfx)++, 0, 0, 255, 255, 255, 255);
+
         if (isJigsaw && aspectRatio > 1.01f) {
             *ev->scale = 1.0f;
             Mtx* xScaleMtx = (*ev->mtx)++;

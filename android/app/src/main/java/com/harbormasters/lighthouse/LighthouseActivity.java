@@ -82,6 +82,13 @@ public class LighthouseActivity extends SDLActivity {
         }
     }
 
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // A second SDL_main in this process never ticks: the shutdown flags stay set. Start clean.
+        System.exit(0);
+    }
+
     private void goImmersive() {
         Window window = getWindow();
         // SDLActivity sets this to force the status bar on; it beats every other request.

@@ -5,8 +5,22 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.software.xr.api.openxr" android:version="65537" android:required="false" />
+
+    <!-- Horizon OS. Without the hand-tracking pair the launcher blocks the app until a Touch
+         controller is awake; the window controls are driven by pinch. -->
+    <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="false" />
+    <uses-feature android:name="oculus.software.handtracking" android:required="false" />
+    <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false" />
 
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+    <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
+
+    <queries>
+        <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker" />
+    </queries>
 
     <application
         android:allowBackup="true"
@@ -16,17 +30,34 @@
         android:label="@string/app_name"
         android:theme="@style/LighthouseTheme">
 
+        <!-- Both brokers answer with a null cursor on Galaxy XR, so the loader falls back to the
+             manifest in /system/etc/openxr and dlopens a library the app must opt into. -->
+        <uses-native-library android:name="libopenxr.google.so" android:required="false" />
+        <!-- Horizon OS keeps its runtime in an APEX and names it in
+             /odm/etc/openxr/1/active_runtime.aarch64.json. -->
+        <uses-native-library android:name="libopenxr_forwardloader.so" android:required="false" />
+
+        <meta-data android:name="com.oculus.handtracking.version" android:value="V2.0" />
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest3|quest3s" />
+
         <activity
             android:name=".LighthouseActivity"
             android:alwaysRetainTaskState="true"
             android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name"
             android:launchMode="singleInstance"
             android:preferMinimalPostProcessing="true"
             android:screenOrientation="sensorLandscape">
+            <property
+                android:name="android.window.PROPERTY_XR_ACTIVITY_START_MODE"
+                android:value="XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
+                <category android:name="com.oculus.intent.category.VR" />
             </intent-filter>
         </activity>
 

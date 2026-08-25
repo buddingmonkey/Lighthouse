@@ -35,8 +35,11 @@ android {
             cmake {
                 arguments += listOf(
                     "-DUSE_OPENGLES=ON",
+                    "-DENABLE_OPENXR=ON",
                     "-DANDROID_STL=c++_shared",
-                    "-DFETCHCONTENT_SOURCE_DIR_SDL2=${sdl2Src.absolutePath}"
+                    "-DFETCHCONTENT_SOURCE_DIR_SDL2=${sdl2Src.absolutePath}",
+                    // -PdebugTools=ON builds the bring-up capture and pad tools. Never for a release.
+                    "-DENABLE_DEBUG_TOOLS=${providers.gradleProperty("debugTools").getOrElse("OFF")}"
                 )
                 // The game is one big translation set; -j is left to Gradle.
                 targets += "Lighthouse"
