@@ -2392,10 +2392,12 @@ typedef struct RandoSaveCheck {
     const char* name;
     RandoCheckId randoCheckId;
     RandoItemId randoItemId;
+    RandoCheckId shuffledCheckId;
     int32_t randoCollectionId;
     bool isShuffled;
     bool eligible;
     bool received;
+    bool obtained;
     bool skipped;
 } RandoSaveCheck;
 
