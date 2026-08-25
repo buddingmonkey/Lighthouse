@@ -162,10 +162,75 @@ void func_802EED1C(ParticleEmitter *this, f32 age, f32 arg2[3]){
     }
 }
 
-void __particleEmitter_drawOnPass(ParticleEmitter *this, Gfx **gfx, Mtx **mtx, Vtx **vtx, u32 draw_pass){
+// [port] Split out of __particleEmitter_drawOnPass so a run of emitters that share a sprite and a
+// setup can emit one setup and then their particles in texture order. The commands each particle
+// emits, and the scope path the interpolation recorder sees, are the same either way.
+static bool __particleEmitter_spriteIsColored(ParticleEmitter *this){
+    return this->rgb[0] != 0xff || this->rgb[1] != 0xff || this->rgb[2] != 0xff || this->alpha != 0xff;
+}
+
+static void __particleEmitter_beginSprites(ParticleEmitter *this, Gfx **gfx){
+    if(__particleEmitter_spriteIsColored(this)){
+        codeAEDA0_setSpriteDrawMode((this->draw_mode & PART_EMIT_NO_DEPTH)? 9: 0xf);
+        codeAEDA0_setPrimaryColorRGB(this->rgb[0], this->rgb[1], this->rgb[2]);
+        func_803382B4(
+            (this->rgb[0] < 8)? 0 : this->rgb[0] - 8,
+            (this->rgb[1] < 8)? 0 : this->rgb[1] - 8,
+            (this->rgb[2] < 8)? 0 : this->rgb[2] - 8,
+            (this->draw_mode & PART_EMIT_NO_OPA)? 0xff : this->alpha
+        );
+        func_80338370();
+        codeAEDA0_postDrawSprite(gfx);
+    }
+    else if(this->draw_mode & PART_EMIT_NO_DEPTH){//L802EF0C0
+        gSPDisplayList((*gfx)++, D_80368978);
+    }
+    else{//L802EF0EC
+        gSPDisplayList((*gfx)++, D_80368940);
+    }//L802EF10C
+}
+
+static void __particleEmitter_endSprites(ParticleEmitter *this, Gfx **gfx){
+    if(__particleEmitter_spriteIsColored(this)){
+        codeAEDA0_drawSprite(gfx);
+    }
+}
+
+static void __particleEmitter_drawSpriteParticle(ParticleEmitter *this, Particle *iPtr, Gfx **gfx, Mtx **mtx){
     f32 position[3];
     f32 flat_rotation[3];
     f32 scale[3];
+
+    flat_rotation[0] = 90.0f;
+    flat_rotation[1] = 0.0f;
+    flat_rotation[2] = 0.0f;
+    // [port] Same spawn-serial identity as the model branch.
+    FrameInterpolation_RecordOpenChild("part_emit", FrameInterpolation_GetId(this));
+    FrameInterpolation_RecordOpenChildHash3("part", (uint64_t)iPtr->portSerial, 0, 0);
+    gDPSetPrimColor((*gfx)++, 0, 0, this->rgb[0], this->rgb[1], this->rgb[2], iPtr->fade*this->alpha);
+    position[0] = iPtr->position[0] + this->unk4[0];
+    position[1] = iPtr->position[1] + this->unk4[1];
+    position[2] = iPtr->position[2] + this->unk4[2];
+
+    scale[0] = iPtr->scale;
+    scale[1] = iPtr->scale;
+    scale[2] = iPtr->scale;
+    if(0.0f != this->unk108){
+        func_802EED1C(this, iPtr->age_48, scale);
+    }
+    func_80344C2C(this->unk0_16);
+    if(this->draw_mode & PART_EMIT_ROTATABLE){
+        func_80344720(this->unk34, (s32)iPtr->frame, 0, position, flat_rotation, scale, gfx, mtx);
+    }//L802EF2F8
+    else{
+        func_80344424(this->unk34, (s32)iPtr->frame, 0, position, scale, iPtr->rotation[2], gfx, mtx);
+    }//L802EF324
+    FrameInterpolation_RecordCloseChild();
+    FrameInterpolation_RecordCloseChild();
+}
+
+void __particleEmitter_drawOnPass(ParticleEmitter *this, Gfx **gfx, Mtx **mtx, Vtx **vtx, u32 draw_pass){
+    f32 position[3];
     Particle *iPtr;
 
     if(reinterpret_cast(u32, draw_pass) != (this->draw_mode & 0x4) != 0)
@@ -191,60 +256,11 @@ void __particleEmitter_drawOnPass(ParticleEmitter *this, Gfx **gfx, Mtx **mtx, V
     }
     
     if(this->unk34){//L802EEFC4
-        if( this->rgb[0] != 0xff 
-            || this->rgb[1] != 0xff 
-            || this->rgb[2] != 0xff 
-            || this->alpha != 0xff 
-        ){
-            codeAEDA0_setSpriteDrawMode((this->draw_mode & PART_EMIT_NO_DEPTH)? 9: 0xf);
-            codeAEDA0_setPrimaryColorRGB(this->rgb[0], this->rgb[1], this->rgb[2]);
-            func_803382B4(
-                (this->rgb[0] < 8)? 0 : this->rgb[0] - 8,
-                (this->rgb[1] < 8)? 0 : this->rgb[1] - 8,
-                (this->rgb[2] < 8)? 0 : this->rgb[2] - 8,
-                (this->draw_mode & PART_EMIT_NO_OPA)? 0xff : this->alpha
-            );
-            func_80338370();
-            codeAEDA0_postDrawSprite(gfx);
-        }
-        else if(this->draw_mode & PART_EMIT_NO_DEPTH){//L802EF0C0
-            gSPDisplayList((*gfx)++, D_80368978);
-        }
-        else{//L802EF0EC
-            gSPDisplayList((*gfx)++, D_80368940);
-        }//L802EF10C
-        flat_rotation[0] = 90.0f;
-        flat_rotation[1] = 0.0f;
-        flat_rotation[2] = 0.0f;
-        // [port] Same spawn-serial identity as the model branch above.
-        FrameInterpolation_RecordOpenChild("part_emit", FrameInterpolation_GetId(this));
+        __particleEmitter_beginSprites(this, gfx);
         for(iPtr = this->pList_start_124; iPtr < this->pList_end_128; iPtr++){
-            FrameInterpolation_RecordOpenChildHash3("part", (uint64_t)iPtr->portSerial, 0, 0);
-            gDPSetPrimColor((*gfx)++, 0, 0, this->rgb[0], this->rgb[1], this->rgb[2], iPtr->fade*this->alpha);
-            position[0] = iPtr->position[0] + this->unk4[0];
-            position[1] = iPtr->position[1] + this->unk4[1];
-            position[2] = iPtr->position[2] + this->unk4[2];
-
-            scale[0] = iPtr->scale;
-            scale[1] = iPtr->scale;
-            scale[2] = iPtr->scale;
-            if(0.0f != this->unk108){
-                func_802EED1C(this, iPtr->age_48, scale);
-            }
-            func_80344C2C(this->unk0_16);
-            if(this->draw_mode & PART_EMIT_ROTATABLE){
-                func_80344720(this->unk34, (s32)iPtr->frame, 0, position, flat_rotation, scale, gfx, mtx);
-            }//L802EF2F8
-            else{
-                func_80344424(this->unk34, (s32)iPtr->frame, 0, position, scale, iPtr->rotation[2], gfx, mtx);
-            }//L802EF324
-            FrameInterpolation_RecordCloseChild();
+            __particleEmitter_drawSpriteParticle(this, iPtr, gfx, mtx);
         }//L802EF338
-        FrameInterpolation_RecordCloseChild();
-        if( this->rgb[0] != 0xff || this->rgb[1] != 0xff || this->rgb[2] != 0xff || this->alpha != 0xff 
-        ){
-            codeAEDA0_drawSprite(gfx);
-        }
+        __particleEmitter_endSprites(this, gfx);
     }
 }
 
@@ -824,21 +840,128 @@ void partEmitMgr_update(void){
     }//L802F0A14
 }
 
-void partEmitMgr_drawPass0(Gfx **gdl, Mtx **mptr, Vtx **vptr){
-    int i;
-    port_xr_beginNoSceneDepth(gdl);
-    for(i = 0; i < partEmitMgrLength; i++){
-        __particleEmitter_drawOnPass(partEmitMgr[i], gdl, mptr, vptr, 4);
+// [port] A draw ends when the texture binding changes, and a particle's texture is its sprite frame.
+// A burst is many emitters of one or two particles each, all of one sprite, whose frames are spawned
+// at random inside a range - so two draws in a row almost never share a texture and every particle
+// costs a draw call. Emit a run of neighbouring emitters that share a sprite and a setup in frame
+// order rather than emitter order, so one texture covers one draw. An emitter on its own gains the
+// same way, because its own particles carry frames drawn at random from a range. Only neighbours are
+// grouped, so nothing is re-ordered across a different sprite, a different colour or a model
+// emitter, and the commands a particle emits do not change.
+#define PART_GROUP_FRAME_SPAN_MAX 32
+
+static bool __particleEmitter_groupable(ParticleEmitter *this, u32 draw_pass){
+    return (this->draw_mode & 0x4) == draw_pass && this->model_20 == NULL && this->unk34 != NULL;
+}
+
+static bool __particleEmitter_sameGroup(ParticleEmitter *a, ParticleEmitter *b){
+    return a->unk34 == b->unk34
+        && a->rgb[0] == b->rgb[0] && a->rgb[1] == b->rgb[1] && a->rgb[2] == b->rgb[2]
+        && a->alpha == b->alpha
+        && (a->draw_mode & (PART_EMIT_NO_DEPTH | PART_EMIT_NO_OPA | PART_EMIT_ROTATABLE))
+               == (b->draw_mode & (PART_EMIT_NO_DEPTH | PART_EMIT_NO_OPA | PART_EMIT_ROTATABLE))
+        && a->unk0_16 == b->unk0_16
+        && (0.0f != a->unk108) == (0.0f != b->unk108);
+}
+
+// [port] Bring-up only: how well the run grouping actually catches. Read and cleared once a tick.
+s32 gPartGroupedEmitters = 0;
+s32 gPartSingleEmitters = 0;
+s32 gPartGroups = 0;
+s32 gPartParticles = 0;
+
+static void partEmitMgr_drawGroupedPass(Gfx **gdl, Mtx **mptr, Vtx **vptr, u32 draw_pass){
+    ParticleEmitter *head;
+    Particle *pPtr;
+    s32 i;
+    s32 j;
+    s32 end;
+    s32 frame;
+    s32 lowFrame;
+    s32 highFrame;
+    s32 members;
+
+    i = 0;
+    while(i < partEmitMgrLength){
+        head = partEmitMgr[i];
+        if(!__particleEmitter_groupable(head, draw_pass)){
+            __particleEmitter_drawOnPass(head, gdl, mptr, vptr, draw_pass);
+            i++;
+            continue;
+        }
+
+        // How far the run of neighbours reaches. An emitter of the other pass draws nothing here, so
+        // it does not break the run.
+        end = i + 1;
+        members = 1;
+        lowFrame = 0x7FFFFFFF;
+        highFrame = -0x7FFFFFFF;
+        for(j = i + 1; j < partEmitMgrLength; j++){
+            if((partEmitMgr[j]->draw_mode & 0x4) != draw_pass){
+                continue;
+            }
+            if(!__particleEmitter_groupable(partEmitMgr[j], draw_pass) || !__particleEmitter_sameGroup(partEmitMgr[j], head)){
+                break;
+            }
+            end = j + 1;
+            members++;
+        }
+
+        for(j = i; j < end; j++){
+            if(!__particleEmitter_groupable(partEmitMgr[j], draw_pass)){
+                continue;
+            }
+            for(pPtr = partEmitMgr[j]->pList_start_124; pPtr < partEmitMgr[j]->pList_end_128; pPtr++){
+                frame = (s32)pPtr->frame;
+                if(frame < lowFrame) lowFrame = frame;
+                if(frame > highFrame) highFrame = frame;
+            }
+        }
+
+        // Nothing to gather, or so many frames in flight that the sweep costs more than the draws it
+        // saves. Either way the run falls back to what it did before.
+        if(lowFrame > highFrame || (highFrame - lowFrame) >= PART_GROUP_FRAME_SPAN_MAX){
+            for(j = i; j < end; j++){
+                __particleEmitter_drawOnPass(partEmitMgr[j], gdl, mptr, vptr, draw_pass);
+            }
+            i = end;
+            continue;
+        }
+
+        gPartGroups++;
+        if(members < 2){ gPartSingleEmitters++; } else { gPartGroupedEmitters += members; }
+        __particleEmitter_beginSprites(head, gdl);
+        for(frame = lowFrame; frame <= highFrame; frame++){
+            for(j = i; j < end; j++){
+                if(!__particleEmitter_groupable(partEmitMgr[j], draw_pass)){
+                    continue;
+                }
+                for(pPtr = partEmitMgr[j]->pList_start_124; pPtr < partEmitMgr[j]->pList_end_128; pPtr++){
+                    if((s32)pPtr->frame == frame){
+                        gPartParticles++;
+                        __particleEmitter_drawSpriteParticle(partEmitMgr[j], pPtr, gdl, mptr);
+                    }
+                }
+            }
+        }
+        __particleEmitter_endSprites(head, gdl);
+        i = end;
     }
+}
+
+void partEmitMgr_drawPass0(Gfx **gdl, Mtx **mptr, Vtx **vptr){
+    port_xr_beginNoSceneDepth(gdl);
+    gSPTextureBatch((*gdl)++, 1);
+    partEmitMgr_drawGroupedPass(gdl, mptr, vptr, 4);
+    gSPTextureBatch((*gdl)++, 0);
     port_xr_endNoSceneDepth(gdl);
 }
 
 void partEmitMgr_drawPass1(Gfx **gdl, Mtx **mptr, Vtx **vptr){
-    int i;
     port_xr_beginNoSceneDepth(gdl);
-    for(i = 0; i < partEmitMgrLength; i++){
-        __particleEmitter_drawOnPass(partEmitMgr[i], gdl, mptr, vptr, 0);
-    }
+    gSPTextureBatch((*gdl)++, 1);
+    partEmitMgr_drawGroupedPass(gdl, mptr, vptr, 0);
+    gSPTextureBatch((*gdl)++, 0);
     port_xr_endNoSceneDepth(gdl);
 }
 
