@@ -1,3 +1,4 @@
+import Foundation
 import RealityKit
 import Spatial
 import SwiftUI
@@ -43,7 +44,7 @@ private struct LighthouseVolumeView: View {
         }
         .task {
             let unavailable = await probe.session.run(.init(tracking: [.world]))
-            print("Lighthouse volume: spatial tracking session unavailable \(String(describing: unavailable))")
+            FileHandle.standardError.write("Lighthouse volume: spatial tracking session unavailable \(String(describing: unavailable))\n".data(using: .utf8)!)
             LighthouseVolumeStart()
         }
         .onChange(of: scenePhase, initial: true) { _, phase in

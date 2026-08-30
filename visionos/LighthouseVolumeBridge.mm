@@ -5,6 +5,8 @@
 #import <QuartzCore/QuartzCore.h>
 #import <simd/simd.h>
 
+#include <cstdio>
+
 namespace {
 
 struct VolumeState {
@@ -72,9 +74,12 @@ void LighthouseVolumeProbe(LighthouseVolumeSample sample) {
         world = Translation(simd_mul(sample.QuadFromWorld, originFromDevice));
     }
 
-    NSLog(@"Lighthouse volume: supported %d, phase %d, status %d, device %@, bounds center %.3f %.3f %.3f "
-          @"extents %.3f %.3f %.3f, head in quad: arkit %@, head anchor %@, world anchor %@",
-          (int)gVolume.Supported, sample.ScenePhase, (int)status, Translation(originFromDevice), sample.BoundsCenter.x,
-          sample.BoundsCenter.y, sample.BoundsCenter.z, sample.BoundsExtents.x, sample.BoundsExtents.y,
-          sample.BoundsExtents.z, arkit, head, world);
+    // devicectl reaches the app's stderr and nothing else, so the report goes there and not to NSLog.
+    fprintf(stderr,
+            "Lighthouse volume: supported %d, phase %d, status %d, device %s, bounds center %.3f %.3f %.3f "
+            "extents %.3f %.3f %.3f, head in quad: arkit %s, head anchor %s, world anchor %s\n",
+            (int)gVolume.Supported, sample.ScenePhase, (int)status, Translation(originFromDevice).UTF8String,
+            sample.BoundsCenter.x, sample.BoundsCenter.y, sample.BoundsCenter.z, sample.BoundsExtents.x,
+            sample.BoundsExtents.y, sample.BoundsExtents.z, arkit.UTF8String, head.UTF8String, world.UTF8String);
+    fflush(stderr);
 }
