@@ -133,8 +133,9 @@ uint32_t DefaultImGuiScaleIndex() {
 
 // Android counts window units in pixels where iOS counts points, so the menu comes out much smaller there.
 float ImGuiDensityScale() {
+    float density = 1.0f;
 #ifdef __ANDROID__
-    static const float density = []() {
+    static const float androidDensity = []() {
         float ddpi = 0.0f;
         float hdpi = 0.0f;
         float vdpi = 0.0f;
@@ -143,6 +144,8 @@ float ImGuiDensityScale() {
         }
         return 1.0f;
     }();
+    density = androidDensity;
+#endif
 
     // A headset reads the menu on a window in the room, and the only thing that decides whether a
     // letter can be read is the angle it covers in the eye. That angle is the angle the window
@@ -154,21 +157,18 @@ float ImGuiDensityScale() {
     //
     // A window put far away and left small covers too small an angle to hold a menu at that rate.
     // The angle has a floor, so the letters give up their angle rather than the menu its width.
+#ifdef ENABLE_XR_WINDOW
     if (IsHeadsetWindow()) {
-#ifdef ENABLE_OPENXR
         auto window = Ship::Context::GetRawInstance()->GetWindow();
         const float angularWidth = Fast::GetXrWindowAngularWidth();
         if (angularWidth > 0.0f && window != nullptr && window->GetWidth() > 0) {
             return MENU_ANGLE_PER_UNIT * static_cast<float>(window->GetWidth()) /
                    std::max(angularWidth, MENU_ANGLE_MIN);
         }
-#endif
         return density * 0.66f;
     }
-    return density;
-#else
-    return 1.0f;
 #endif
+    return density;
 }
 
 // Engine globals
@@ -1098,7 +1098,7 @@ SubframePacing ComputeSubframePacing() {
     return { subframesPerTick, fps, viPerTick };
 }
 
-#ifdef ENABLE_OPENXR
+#ifdef ENABLE_XR_WINDOW
 // The menu and the window's own handles write the same number. Push it when the menu moved it since
 // the last frame, and read the window back when the menu did not, so the one that moved last wins
 // and a slider always shows where the hand left the window. Both numbers are themselves, so the
@@ -1133,7 +1133,7 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
 
     SelectDisplayRefreshRate(wnd.get());
 
-#ifdef ENABLE_OPENXR
+#ifdef ENABLE_XR_WINDOW
     // The range is meters from the user to the glass, and the size is meters of glass. They are
     // apart: a range that goes out leaves the window the width it had, so it goes small in the eye
     // and takes the diorama into the room with it. The move bar and the corner handles write the
@@ -1145,7 +1145,9 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 8.0f, 2.6f, pushedScale, Fast::GetXrWindowScale(),
                   Fast::SetXrWindowScale, [](float value) { return value; });
     Fast::SetXrDioramaDepth(CVarGetFloat(CVAR_SETTING("XrDioramaDepth"), 2.0f));
+#endif
 
+#ifdef ENABLE_OPENXR
     // The window covers part of the view, and everything the game draws past what that window can
     // show is thrown away. The window backend now reports the size of that fit as the window size,
     // so the multiplier carries Internal Resolution alone: 1 is one game pixel to an eye pixel and

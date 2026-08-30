@@ -80,9 +80,9 @@ static bool ClearDrawable(cp_drawable_t drawable, id<MTLCommandBuffer> commandBu
 
 static const uint32_t kGameTextureWidth = 1280;
 static const uint32_t kGameTextureHeight = 720;
-static const float kScreenHalfWidth = 0.6f;
-static const float kScreenHalfHeight = 0.3375f;
-static const float kScreenRange = 1.3f;
+// A window placed with the head bowed hangs low but stands up, and only a steep look tips it.
+static const float kRiseFlat = 0.35f;
+static const float kRiseMax = 1.22f;
 
 struct ScreenPipeline {
     id<MTLRenderPipelineState> render = nil;
@@ -103,8 +103,10 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
         using namespace metal;
         struct VertexOut { float4 position [[position]]; float2 uv; ushort eye [[flat]]; };
         vertex VertexOut screenVertex(uint vertexID [[vertex_id]], ushort ampID [[amplification_id]],
-                                      constant float4x4* mvp [[buffer(0)]], constant ushort& eyeBase [[buffer(2)]]) {
-            const float2 positions[] = { {-0.6, -0.3375}, {0.6, -0.3375}, {-0.6, 0.3375}, {0.6, 0.3375} };
+                                      constant float4x4* mvp [[buffer(0)]], constant float2& halfSize [[buffer(1)]],
+                                      constant ushort& eyeBase [[buffer(2)]]) {
+            const float2 positions[] = { {-halfSize.x, -halfSize.y}, {halfSize.x, -halfSize.y},
+                                         {-halfSize.x, halfSize.y}, {halfSize.x, halfSize.y} };
             const float2 uvs[] = { {0, 1}, {1, 1}, {0, 0}, {1, 0} };
             VertexOut out;
             out.position = mvp[ampID] * float4(positions[vertexID], 0, 1);
@@ -187,7 +189,7 @@ static simd_float4x4 ScreenMVP(cp_drawable_t drawable, size_t viewIndex, simd_fl
 
 static void DrawScreen(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffer, ScreenPipeline& pipeline,
                        cp_layer_renderer_layout layout, simd_float4x4 originFromDevice,
-                       simd_float4x4 originFromScreen) {
+                       simd_float4x4 originFromScreen, simd_float2 halfSize) {
     NSUInteger viewCount = cp_drawable_get_view_count(drawable);
     if (viewCount == 0 || viewCount > 2) {
         return;
@@ -226,6 +228,7 @@ static void DrawScreen(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffe
         [encoder setViewports:viewports count:viewCount];
         [encoder setVertexAmplificationCount:viewCount viewMappings:mappings];
         [encoder setVertexBytes:mvp length:sizeof(simd_float4x4) * viewCount atIndex:0];
+        [encoder setVertexBytes:&halfSize length:sizeof(halfSize) atIndex:1];
         const uint16_t eyeBase = 0;
         [encoder setVertexBytes:&eyeBase length:sizeof(eyeBase) atIndex:2];
         [encoder setFragmentTexture:pipeline.game[0] atIndex:0];
@@ -263,6 +266,7 @@ static void DrawScreen(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffe
         [encoder setDepthStencilState:pipeline.depth];
         [encoder setViewport:cp_view_texture_map_get_viewport(map)];
         [encoder setVertexBytes:&mvp length:sizeof(mvp) atIndex:0];
+        [encoder setVertexBytes:&halfSize length:sizeof(halfSize) atIndex:1];
         const uint16_t eyeBase = (uint16_t)i;
         [encoder setVertexBytes:&eyeBase length:sizeof(eyeBase) atIndex:2];
         [encoder setFragmentTexture:pipeline.game[0] atIndex:0];
@@ -274,7 +278,7 @@ static void DrawScreen(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffe
 
 static void DrawTrackingAreas(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffer, ScreenPipeline& pipeline,
                               cp_layer_renderer_layout layout, simd_float4x4 originFromDevice,
-                              simd_float4x4 originFromScreen, cp_layer_renderer_t renderer) {
+                              simd_float4x4 originFromScreen, simd_float2 halfSize, cp_layer_renderer_t renderer) {
     const NSUInteger viewCount = cp_drawable_get_view_count(drawable);
     if (pipeline.tracking == nil || viewCount == 0 || viewCount > 2 ||
         cp_drawable_get_tracking_areas_texture_count(drawable) == 0) {
@@ -359,10 +363,10 @@ static void DrawTrackingAreas(cp_drawable_t drawable, id<MTLCommandBuffer> comma
             }
 
             // The item is in game texture pixels. The screen quad spans the whole texture.
-            const float left = (rect.MinX / kGameTextureWidth * 2.0f - 1.0f) * kScreenHalfWidth;
-            const float right = (rect.MaxX / kGameTextureWidth * 2.0f - 1.0f) * kScreenHalfWidth;
-            const float top = (1.0f - rect.MinY / kGameTextureHeight * 2.0f) * kScreenHalfHeight;
-            const float bottom = (1.0f - rect.MaxY / kGameTextureHeight * 2.0f) * kScreenHalfHeight;
+            const float left = (rect.MinX / kGameTextureWidth * 2.0f - 1.0f) * halfSize.x;
+            const float right = (rect.MaxX / kGameTextureWidth * 2.0f - 1.0f) * halfSize.x;
+            const float top = (1.0f - rect.MinY / kGameTextureHeight * 2.0f) * halfSize.y;
+            const float bottom = (1.0f - rect.MaxY / kGameTextureHeight * 2.0f) * halfSize.y;
             const simd_float4 corners = simd_make_float4(left, bottom, right, top);
 
             [encoder setVertexBytes:&corners length:sizeof(corners) atIndex:1];
@@ -388,6 +392,10 @@ struct CompositorState {
     ScreenPipeline Screen;
     bool ScreenFailed = false;
     simd_float4x4 OriginFromScreen = matrix_identity_float4x4;
+    simd_float4x4 ScreenRotation = matrix_identity_float4x4;
+    simd_float3 PlacementHead = { 0.0f, 0.0f, 0.0f };
+    simd_float3 PlacementDir = { 0.0f, 0.0f, -1.0f };
+    Fast::VisionOSWindow Window = { 0.6f, 0.3375f, 1.3f };
     bool ScreenPositioned = false;
     bool Running = true;
 
@@ -412,7 +420,7 @@ void LighthouseVisionSpatialEvent(int phase, int hasRay, uint64_t trackingArea, 
 
     if (hasRay != 0 && gState.ScreenPositioned) {
         // The ray is in world coordinates. The screen is a quad at the origin of originFromScreen,
-        // 1.2 by 0.675 meters, facing -z, so take the ray into that frame and cross the z plane.
+        // facing -z, so take the ray into that frame and cross the z plane.
         const simd_float4x4 screenFromOrigin = simd_inverse(gState.OriginFromScreen);
         const simd_float3 origin = simd_mul(screenFromOrigin, simd_make_float4(originX, originY, originZ, 1.0f)).xyz;
         const simd_float3 direction =
@@ -422,9 +430,11 @@ void LighthouseVisionSpatialEvent(int phase, int hasRay, uint64_t trackingArea, 
             const float t = -origin.z / direction.z;
             if (t > 0.0f) {
                 const simd_float3 hit = origin + t * direction;
-                if (fabsf(hit.x) <= kScreenHalfWidth && fabsf(hit.y) <= kScreenHalfHeight) {
-                    sPointer.X = (hit.x + kScreenHalfWidth) / (2.0f * kScreenHalfWidth) * kGameTextureWidth;
-                    sPointer.Y = (kScreenHalfHeight - hit.y) / (2.0f * kScreenHalfHeight) * kGameTextureHeight;
+                const float halfWidth = gState.Window.HalfWidth;
+                const float halfHeight = gState.Window.HalfHeight;
+                if (fabsf(hit.x) <= halfWidth && fabsf(hit.y) <= halfHeight) {
+                    sPointer.X = (hit.x + halfWidth) / (2.0f * halfWidth) * kGameTextureWidth;
+                    sPointer.Y = (halfHeight - hit.y) / (2.0f * halfHeight) * kGameTextureHeight;
                     sPointer.Valid = true;
                 }
             }
@@ -548,6 +558,38 @@ void NoteFrameCadence(CFTimeInterval presentationTime) {
     sLast = presentationTime;
 }
 
+float Clamp(float value, float low, float high) {
+    return value < low ? low : (value > high ? high : value);
+}
+
+float Smoothstep(float low, float high, float value) {
+    const float t = Clamp((value - low) / (high - low), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+// The window hangs where the viewer looks. It takes the yaw always and a part of the rise, and it
+// takes no roll at all, so a head held at an angle does not leave the window askew in the room.
+void PlaceScreen(simd_float4x4 originFromDevice) {
+    const simd_float3 look = -originFromDevice.columns[2].xyz;
+    const float across = sqrtf(look.x * look.x + look.z * look.z);
+    const simd_float3 flat =
+        across > 1e-4f ? simd_make_float3(look.x / across, 0.0f, look.z / across) : simd_make_float3(0.0f, 0.0f, -1.0f);
+    const float rise = Clamp(atan2f(look.y, across), -kRiseMax, kRiseMax);
+    const float pitch = rise * Smoothstep(kRiseFlat, kRiseMax, fabsf(rise));
+
+    gState.PlacementHead = originFromDevice.columns[3].xyz;
+    gState.PlacementDir = simd_make_float3(flat.x * cosf(rise), sinf(rise), flat.z * cosf(rise));
+
+    const simd_float3 face = simd_make_float3(flat.x * cosf(pitch), sinf(pitch), flat.z * cosf(pitch));
+    const simd_float3 zAxis = -face;
+    const simd_float3 xAxis = simd_normalize(simd_cross(simd_make_float3(0.0f, 1.0f, 0.0f), zAxis));
+    const simd_float3 yAxis = simd_cross(zAxis, xAxis);
+    gState.ScreenRotation = matrix_identity_float4x4;
+    gState.ScreenRotation.columns[0] = simd_make_float4(xAxis, 0.0f);
+    gState.ScreenRotation.columns[1] = simd_make_float4(yAxis, 0.0f);
+    gState.ScreenRotation.columns[2] = simd_make_float4(zAxis, 0.0f);
+}
+
 bool CompositorOpenFrame() {
     RunScriptedTaps();
     @autoreleasepool {
@@ -585,12 +627,17 @@ bool CompositorOpenFrame() {
                                ar_device_anchor_query_status_success;
     if (gState.DeviceAnchorValid) {
         gState.OriginFromDevice = ar_device_anchor_get_origin_from_anchor_transform(gState.DeviceAnchor);
-        if (!gState.ScreenPositioned) {
-            simd_float4x4 deviceFromScreen = matrix_identity_float4x4;
-            deviceFromScreen.columns[3].z = -kScreenRange;
-            gState.OriginFromScreen = simd_mul(gState.OriginFromDevice, deviceFromScreen);
+        gState.Window = Fast::GetVisionOSWindow();
+        const bool recenter = Fast::TakeVisionOSRecenter();
+        if (!gState.ScreenPositioned || recenter) {
+            PlaceScreen(gState.OriginFromDevice);
             gState.ScreenPositioned = true;
         }
+        // The range is applied every frame, so the menu can pull the window in and push it out
+        // without placing it again.
+        gState.OriginFromScreen = gState.ScreenRotation;
+        gState.OriginFromScreen.columns[3] =
+            simd_make_float4(gState.PlacementHead + gState.PlacementDir * gState.Window.Range, 1.0f);
         for (size_t i = 0; i < gState.DrawableCount; ++i) {
             cp_drawable_t each = cp_drawable_array_get_drawable(gState.Drawables, i);
             cp_drawable_set_device_anchor(each, gState.DeviceAnchor);
@@ -630,10 +677,11 @@ void CompositorCloseFrame() {
             cp_drawable_t each = cp_drawable_array_get_drawable(gState.Drawables, i);
             ClearDrawable(each, commandBuffer, gState.Layout);
             if (gState.DeviceAnchorValid && gState.Screen.render != nil) {
+                const simd_float2 halfSize = simd_make_float2(gState.Window.HalfWidth, gState.Window.HalfHeight);
                 DrawScreen(each, commandBuffer, gState.Screen, gState.Layout, gState.OriginFromDevice,
-                           gState.OriginFromScreen);
+                           gState.OriginFromScreen, halfSize);
                 DrawTrackingAreas(each, commandBuffer, gState.Screen, gState.Layout, gState.OriginFromDevice,
-                                  gState.OriginFromScreen, gState.Renderer);
+                                  gState.OriginFromScreen, halfSize, gState.Renderer);
             }
             cp_drawable_encode_present(each, commandBuffer);
         }
@@ -699,7 +747,6 @@ void LighthouseVisionRun(cp_layer_renderer_t renderer) {
     gState.Layout = cp_layer_renderer_configuration_get_layout(cp_layer_renderer_get_configuration(renderer));
 
     Fast::SetVisionOSCompositor((__bridge void*)device, (__bridge void*)queue, kGameTextureWidth, kGameTextureHeight);
-    Fast::SetVisionOSScreen(kScreenHalfWidth, kScreenRange);
     Fast::SetVisionOSFrameHooks(
         { CompositorOpenFrame, CompositorCloseFrame, CompositorIsRunning, CompositorPollState });
 

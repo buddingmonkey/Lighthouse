@@ -25,7 +25,12 @@ using namespace UIWidgets;
 
 static bool HeadsetWindow() {
     auto window = Ship::Context::GetRawInstance()->GetWindow();
-    return window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+    if (window == nullptr) {
+        return false;
+    }
+    const auto backend = window->GetWindowBackend();
+    return backend == Fast::WindowBackend::FAST3D_OPENXR_OPENGL ||
+           backend == Fast::WindowBackend::FAST3D_VISIONOS_METAL;
 }
 
 static std::unordered_map<int32_t, const char*> imguiScaleOptions = {
@@ -472,7 +477,7 @@ void LighthouseMenu::AddMenuSettings() {
         .Options(CheckboxOptions()
                      .Tooltip("Matches interpolation value to the refresh rate of your display.")
                      .DefaultValue(HeadsetWindow()));
-#ifdef ENABLE_OPENXR
+#ifdef ENABLE_XR_WINDOW
     AddWidget(path, "Window Range", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrWindowRange"))
         .RaceDisable(false)
@@ -512,6 +517,7 @@ void LighthouseMenu::AddMenuSettings() {
                      .Max(4.0f)
                      .DefaultValue(2.0f)
                      .Format("%.2f m"));
+#ifdef ENABLE_OPENXR
     AddWidget(path, "Edge Float", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrEdgeFloat"))
         .RaceDisable(false)
@@ -551,12 +557,14 @@ void LighthouseMenu::AddMenuSettings() {
                      .Max(120)
                      .DefaultValue(120)
                      .Format("%d Hz"));
+#endif
     AddWidget(path, "Recenter Window", WIDGET_BUTTON)
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
         .Callback([](WidgetInfo&) { Fast::RecenterXrWindow(); })
         .Options(
             ButtonOptions().Size(Sizes::Inline).Tooltip("Puts the window in front of you, where you are looking now."));
+#ifdef ENABLE_OPENXR
     AddWidget(path, "Stereo", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_SETTING("XrStereo"))
         .RaceDisable(false)
@@ -565,6 +573,7 @@ void LighthouseMenu::AddMenuSettings() {
                      .Tooltip("Draws the frame once per eye so the world has depth. Turn it off to draw one image "
                               "for both eyes, which costs half as much and sends one layer to the compositor.")
                      .DefaultValue(true));
+#endif
 #endif
     AddWidget(path, "Renderer API (Needs reload)", WIDGET_VIDEO_BACKEND).RaceDisable(false);
     AddWidget(path, "Enable Vsync", WIDGET_CVAR_CHECKBOX)
