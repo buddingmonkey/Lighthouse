@@ -261,12 +261,22 @@ file(GLOB_RECURSE ALL_FILES CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DI
 
 list(FILTER ALL_FILES EXCLUDE REGEX "src/unused/")
 
+option(LIGHTHOUSE_VISIONOS_COMPOSITOR "Build the visionOS app on Compositor Services, not on a volume" OFF)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
-    list(APPEND ALL_FILES
-        visionos/LighthouseVisionApp.swift
-        visionos/LighthouseVisionBridge.h
-        visionos/LighthouseVisionBridge.mm
-    )
+    if(LIGHTHOUSE_VISIONOS_COMPOSITOR)
+        list(APPEND ALL_FILES
+            visionos/LighthouseVisionApp.swift
+            visionos/LighthouseVisionBridge.h
+            visionos/LighthouseVisionBridge.mm
+        )
+    else()
+        list(APPEND ALL_FILES
+            visionos/LighthouseVolumeApp.swift
+            visionos/LighthouseVolumeBridge.h
+            visionos/LighthouseVolumeBridge.mm
+        )
+    endif()
 endif()
 
 if (NOT LIGHTHOUSE_APPLE_MOBILE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
@@ -284,7 +294,13 @@ endforeach()
 if (LIGHTHOUSE_APPLE_MOBILE)
     set(IOS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ios)
     if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
-        set(APPLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Info.plist.in)
+        if(LIGHTHOUSE_VISIONOS_COMPOSITOR)
+            set(APPLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Info.plist.in)
+            set(VISIONOS_BRIDGING_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/visionos/LighthouseVisionBridge.h)
+        else()
+            set(APPLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Info.volume.plist.in)
+            set(VISIONOS_BRIDGING_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/visionos/LighthouseVolumeBridge.h)
+        endif()
         set(APPLE_ASSET_CATALOG ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Assets.xcassets)
     else()
         set(APPLE_INFO_PLIST ${IOS_DIR}/Info.plist.in)
@@ -309,7 +325,7 @@ if (LIGHTHOUSE_APPLE_MOBILE)
     )
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         set_target_properties(${PROJECT_NAME} PROPERTIES
-            XCODE_ATTRIBUTE_SWIFT_OBJC_BRIDGING_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/visionos/LighthouseVisionBridge.h"
+            XCODE_ATTRIBUTE_SWIFT_OBJC_BRIDGING_HEADER "${VISIONOS_BRIDGING_HEADER}"
         )
     endif()
     if(IOS_DEVELOPMENT_TEAM STREQUAL "")
