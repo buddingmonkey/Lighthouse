@@ -5,7 +5,9 @@
 #import <simd/simd.h>
 
 #include <fast/backends/gfx_visionos.h>
+#include <fast/backends/gfx_xr_view.h>
 
+#include <mutex>
 #include <vector>
 
 static bool ClearPass(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffer, size_t textureIndex,
@@ -86,6 +88,7 @@ static const float kRiseMax = 1.22f;
 
 struct ScreenPipeline {
     id<MTLRenderPipelineState> render = nil;
+    id<MTLRenderPipelineState> solid = nil;
     id<MTLRenderPipelineState> tracking = nil;
     id<MTLDepthStencilState> depth = nil;
     id<MTLTexture> game[2] = { nil, nil };
@@ -123,6 +126,9 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
         }
         fragment uint trackingFragment(constant uint& value [[buffer(0)]]) {
             return value;
+        }
+        fragment half4 solidFragment(constant float4& color [[buffer(0)]]) {
+            return half4(color);
         }
         fragment half4 screenFragment(VertexOut in [[stage_in]], texture2d<float> gameLeft [[texture(0)]],
                                       texture2d<float> gameRight [[texture(1)]]) {
@@ -164,6 +170,23 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
         }
     }
 
+    MTLRenderPipelineDescriptor* solidDescriptor = [MTLRenderPipelineDescriptor new];
+    solidDescriptor.vertexFunction = [library newFunctionWithName:@"trackingVertex"];
+    solidDescriptor.fragmentFunction = [library newFunctionWithName:@"solidFragment"];
+    solidDescriptor.colorAttachments[0].pixelFormat = color.pixelFormat;
+    solidDescriptor.colorAttachments[0].blendingEnabled = YES;
+    solidDescriptor.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
+    solidDescriptor.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+    solidDescriptor.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
+    solidDescriptor.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+    solidDescriptor.depthAttachmentPixelFormat = depth.pixelFormat;
+    solidDescriptor.rasterSampleCount = color.sampleCount;
+    solidDescriptor.maxVertexAmplificationCount = cp_drawable_get_view_count(drawable);
+    pipeline.solid = [device newRenderPipelineStateWithDescriptor:solidDescriptor error:&error];
+    if (pipeline.solid == nil) {
+        NSLog(@"Lighthouse: the visionOS handle pipeline failed: %@", error);
+    }
+
     for (int eye = 0; eye < 2; ++eye) {
         pipeline.game[eye] = (__bridge id<MTLTexture>)Fast::GetVisionOSGameTexture(eye);
         if (pipeline.game[eye] == nil) {
@@ -176,6 +199,62 @@ static bool InitScreenPipeline(ScreenPipeline& pipeline, id<MTLDevice> device, c
     depthDescriptor.depthWriteEnabled = YES;
     pipeline.depth = [device newDepthStencilStateWithDescriptor:depthDescriptor];
     return pipeline.render != nil && pipeline.game[0] != nil && pipeline.game[1] != nil && pipeline.depth != nil;
+}
+
+// The window's own controls: a bar to move it and a corner to resize it, in a row under the
+// picture so neither covers the game. The identifiers are above every ImGui id, which is 32 bits.
+static const uint64_t kMoveAreaId = 1ull << 40;
+static const uint64_t kResizeAreaId = (1ull << 40) + 1;
+static const size_t kWindowHandleCount = 3;
+
+struct WindowHandle {
+    simd_float4 Rect;  ///< left, bottom, right, top, in meters in the screen's own plane.
+    simd_float4 Outer; ///< The same handle with the dark edge that holds it against a light room.
+    uint64_t Identifier;
+};
+
+static void WindowHandles(simd_float2 halfSize, WindowHandle handles[kWindowHandleCount]) {
+    const float side = 0.10f * halfSize.y;
+    const float gap = 0.5f * side;
+    const float edge = 0.2f * side;
+    const float top = -halfSize.y - gap;
+    const float bottom = top - side;
+    const float barHalfWidth = 0.25f * halfSize.x;
+    const simd_float4 rects[kWindowHandleCount] = {
+        simd_make_float4(-barHalfWidth, bottom, barHalfWidth, top),
+        simd_make_float4(-barHalfWidth - gap - side, bottom, -barHalfWidth - gap, top),
+        simd_make_float4(barHalfWidth + gap, bottom, barHalfWidth + gap + side, top),
+    };
+    const uint64_t identifiers[kWindowHandleCount] = { kMoveAreaId, kResizeAreaId, kResizeAreaId };
+    for (size_t i = 0; i < kWindowHandleCount; ++i) {
+        handles[i].Rect = rects[i];
+        handles[i].Outer = rects[i] + simd_make_float4(-edge, -edge, edge, edge);
+        handles[i].Identifier = identifiers[i];
+    }
+}
+
+static void DrawHandles(id<MTLRenderCommandEncoder> encoder, ScreenPipeline& pipeline, simd_float2 halfSize) {
+    if (pipeline.solid == nil) {
+        return;
+    }
+    WindowHandle handles[kWindowHandleCount];
+    WindowHandles(halfSize, handles);
+    [encoder setRenderPipelineState:pipeline.solid];
+
+    // A dark edge under a light face, because the room behind can be any color.
+    const simd_float4 edgeColor = simd_make_float4(0.0f, 0.0f, 0.0f, 0.55f);
+    [encoder setFragmentBytes:&edgeColor length:sizeof(edgeColor) atIndex:0];
+    for (size_t i = 0; i < kWindowHandleCount; ++i) {
+        [encoder setVertexBytes:&handles[i].Outer length:sizeof(simd_float4) atIndex:1];
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+    }
+
+    const simd_float4 faceColor = simd_make_float4(1.0f, 1.0f, 1.0f, 0.9f);
+    [encoder setFragmentBytes:&faceColor length:sizeof(faceColor) atIndex:0];
+    for (size_t i = 0; i < kWindowHandleCount; ++i) {
+        [encoder setVertexBytes:&handles[i].Rect length:sizeof(simd_float4) atIndex:1];
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+    }
 }
 
 static simd_float4x4 ScreenMVP(cp_drawable_t drawable, size_t viewIndex, simd_float4x4 originFromDevice,
@@ -234,6 +313,7 @@ static void DrawScreen(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffe
         [encoder setFragmentTexture:pipeline.game[0] atIndex:0];
         [encoder setFragmentTexture:pipeline.game[1] atIndex:1];
         [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        DrawHandles(encoder, pipeline, halfSize);
         [encoder endEncoding];
         return;
     }
@@ -272,6 +352,7 @@ static void DrawScreen(cp_drawable_t drawable, id<MTLCommandBuffer> commandBuffe
         [encoder setFragmentTexture:pipeline.game[0] atIndex:0];
         [encoder setFragmentTexture:pipeline.game[1] atIndex:1];
         [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        DrawHandles(encoder, pipeline, halfSize);
         [encoder endEncoding];
     }
 }
@@ -338,6 +419,21 @@ static void DrawTrackingAreas(cp_drawable_t drawable, id<MTLCommandBuffer> comma
         [encoder setVertexBytes:mvp length:sizeof(simd_float4x4) * (layered ? viewCount : 1) atIndex:0];
 
         uint32_t added = 0;
+        WindowHandle handles[kWindowHandleCount];
+        WindowHandles(halfSize, handles);
+        for (size_t i = 0; i < kWindowHandleCount; ++i) {
+            cp_tracking_area_t area = cp_drawable_add_tracking_area(drawable, handles[i].Identifier);
+            if (area == nullptr) {
+                continue;
+            }
+            cp_tracking_area_add_automatic_hover_effect(area);
+            uint32_t value = cp_tracking_area_get_render_value(area);
+            ++added;
+            [encoder setVertexBytes:&handles[i].Outer length:sizeof(simd_float4) atIndex:1];
+            [encoder setFragmentBytes:&value length:sizeof(value) atIndex:0];
+            [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        }
+
         for (size_t i = 0; i < rectCount; ++i) {
             const Fast::VisionOSTrackingRect rect = Fast::GetVisionOSTrackingRect(i);
 
@@ -408,6 +504,18 @@ struct CompositorState {
 
 CompositorState gState;
 
+// A pinch on a handle is a drag, and the events arrive on the main thread. Keep the last ray and
+// let the render thread, which owns the window, act on it.
+struct DragState {
+    std::mutex Mutex;
+    int Kind = 0; ///< 0 none, 1 move, 2 resize.
+    bool Begin = false;
+    simd_float3 Origin = { 0.0f, 0.0f, 0.0f };
+    simd_float3 Direction = { 0.0f, 0.0f, -1.0f };
+};
+
+DragState gDrag;
+
 bool CompositorIsRunning() {
     return gState.Running;
 }
@@ -417,6 +525,28 @@ bool CompositorIsRunning() {
 void LighthouseVisionSpatialEvent(int phase, int hasRay, uint64_t trackingArea, float originX, float originY,
                                   float originZ, float directionX, float directionY, float directionZ) {
     static Fast::VisionOSPointer sPointer{};
+
+    if (trackingArea == kMoveAreaId || trackingArea == kResizeAreaId) {
+        {
+            std::lock_guard<std::mutex> lock(gDrag.Mutex);
+            if (phase == 0 && hasRay != 0) {
+                if (gDrag.Kind == 0) {
+                    gDrag.Kind = trackingArea == kMoveAreaId ? 1 : 2;
+                    gDrag.Begin = true;
+                }
+                gDrag.Origin = simd_make_float3(originX, originY, originZ);
+                gDrag.Direction = simd_make_float3(directionX, directionY, directionZ);
+            } else {
+                gDrag.Kind = 0;
+                gDrag.Begin = false;
+            }
+        }
+
+        // A handle is not an ImGui item, so nothing may be held down while one is dragged.
+        sPointer.Pressed = false;
+        Fast::PushVisionOSPointer(sPointer);
+        return;
+    }
 
     if (hasRay != 0 && gState.ScreenPositioned) {
         // The ray is in world coordinates. The screen is a quad at the origin of originFromScreen,
@@ -567,18 +697,16 @@ float Smoothstep(float low, float high, float value) {
     return t * t * (3.0f - 2.0f * t);
 }
 
-// The window hangs where the viewer looks. It takes the yaw always and a part of the rise, and it
-// takes no roll at all, so a head held at an angle does not leave the window askew in the room.
-void PlaceScreen(simd_float4x4 originFromDevice) {
-    const simd_float3 look = -originFromDevice.columns[2].xyz;
-    const float across = sqrtf(look.x * look.x + look.z * look.z);
+// The window faces the viewer along the direction it hangs in. It takes the yaw always and a part
+// of the rise, and it takes no roll at all, so a head held at an angle does not leave the window
+// askew in the room.
+void FaceScreen() {
+    const simd_float3 dir = gState.PlacementDir;
+    const float across = sqrtf(dir.x * dir.x + dir.z * dir.z);
     const simd_float3 flat =
-        across > 1e-4f ? simd_make_float3(look.x / across, 0.0f, look.z / across) : simd_make_float3(0.0f, 0.0f, -1.0f);
-    const float rise = Clamp(atan2f(look.y, across), -kRiseMax, kRiseMax);
+        across > 1e-4f ? simd_make_float3(dir.x / across, 0.0f, dir.z / across) : simd_make_float3(0.0f, 0.0f, -1.0f);
+    const float rise = Clamp(atan2f(dir.y, across), -kRiseMax, kRiseMax);
     const float pitch = rise * Smoothstep(kRiseFlat, kRiseMax, fabsf(rise));
-
-    gState.PlacementHead = originFromDevice.columns[3].xyz;
-    gState.PlacementDir = simd_make_float3(flat.x * cosf(rise), sinf(rise), flat.z * cosf(rise));
 
     const simd_float3 face = simd_make_float3(flat.x * cosf(pitch), sinf(pitch), flat.z * cosf(pitch));
     const simd_float3 zAxis = -face;
@@ -588,6 +716,116 @@ void PlaceScreen(simd_float4x4 originFromDevice) {
     gState.ScreenRotation.columns[0] = simd_make_float4(xAxis, 0.0f);
     gState.ScreenRotation.columns[1] = simd_make_float4(yAxis, 0.0f);
     gState.ScreenRotation.columns[2] = simd_make_float4(zAxis, 0.0f);
+}
+
+void PlaceScreen(simd_float4x4 originFromDevice) {
+    const simd_float3 look = -originFromDevice.columns[2].xyz;
+    const float across = sqrtf(look.x * look.x + look.z * look.z);
+    const simd_float3 flat =
+        across > 1e-4f ? simd_make_float3(look.x / across, 0.0f, look.z / across) : simd_make_float3(0.0f, 0.0f, -1.0f);
+    const float rise = Clamp(atan2f(look.y, across), -kRiseMax, kRiseMax);
+
+    gState.PlacementHead = originFromDevice.columns[3].xyz;
+    gState.PlacementDir = simd_make_float3(flat.x * cosf(rise), sinf(rise), flat.z * cosf(rise));
+    FaceScreen();
+}
+
+void UpdateScreenTransform() {
+    gState.OriginFromScreen = gState.ScreenRotation;
+    gState.OriginFromScreen.columns[3] =
+        simd_make_float4(gState.PlacementHead + gState.PlacementDir * gState.Window.Range, 1.0f);
+}
+
+bool ScreenPlaneHit(simd_float3 origin, simd_float3 direction, simd_float2* hit) {
+    const simd_float4x4 screenFromOrigin = simd_inverse(gState.OriginFromScreen);
+    const simd_float3 o = simd_mul(screenFromOrigin, simd_make_float4(origin, 1.0f)).xyz;
+    const simd_float3 d = simd_mul(screenFromOrigin, simd_make_float4(direction, 0.0f)).xyz;
+    if (d.z == 0.0f) {
+        return false;
+    }
+    const float t = -o.z / d.z;
+    if (t <= 0.0f) {
+        return false;
+    }
+    const simd_float3 p = o + t * d;
+    *hit = simd_make_float2(p.x, p.y);
+    return true;
+}
+
+simd_float3 RotateBetween(simd_float3 from, simd_float3 to, simd_float3 value) {
+    const simd_float3 axis = simd_cross(from, to);
+    const float sine = simd_length(axis);
+    if (sine < 1e-6f) {
+        return value;
+    }
+    const simd_float3 unit = axis / sine;
+    const float angle = atan2f(sine, simd_dot(from, to));
+    return value * cosf(angle) + simd_cross(unit, value) * sinf(angle) +
+           unit * simd_dot(unit, value) * (1.0f - cosf(angle));
+}
+
+// The move carries the window with the direction the ray points, and the resize keeps the corner
+// under the ray. Both write the numbers the menu holds, so a slider reads back what a hand left.
+void ApplyDrag() {
+    int kind = 0;
+    bool begin = false;
+    simd_float3 origin = { 0.0f, 0.0f, 0.0f };
+    simd_float3 direction = { 0.0f, 0.0f, -1.0f };
+    {
+        std::lock_guard<std::mutex> lock(gDrag.Mutex);
+        kind = gDrag.Kind;
+        begin = gDrag.Begin;
+        gDrag.Begin = false;
+        origin = gDrag.Origin;
+        direction = gDrag.Direction;
+    }
+    if (kind == 0) {
+        return;
+    }
+    const float length = simd_length(direction);
+    if (length < 1e-4f) {
+        return;
+    }
+    const simd_float3 ray = direction / length;
+
+    static simd_float3 sGrabRay = { 0.0f, 0.0f, -1.0f };
+    static simd_float3 sGrabDir = { 0.0f, 0.0f, -1.0f };
+    static float sGrabScale = 1.0f;
+    static float sGrabReach = 0.0f;
+
+    if (kind == 1) {
+        if (begin) {
+            // The head has moved since the window was placed, so the range the window keeps is the
+            // one it has from where the viewer stands now.
+            const simd_float3 head = gState.OriginFromDevice.columns[3].xyz;
+            const simd_float3 reach = gState.OriginFromScreen.columns[3].xyz - head;
+            const float radius = simd_length(reach);
+            if (radius < 1e-3f) {
+                return;
+            }
+            gState.PlacementHead = head;
+            gState.PlacementDir = reach / radius;
+            Fast::SetXrWindowDistance(radius);
+            sGrabRay = ray;
+            sGrabDir = gState.PlacementDir;
+        }
+        gState.PlacementDir = RotateBetween(sGrabRay, ray, sGrabDir);
+        FaceScreen();
+        return;
+    }
+
+    simd_float2 hit = { 0.0f, 0.0f };
+    if (!ScreenPlaneHit(origin, ray, &hit)) {
+        return;
+    }
+    const float reach = simd_length(hit);
+    if (begin) {
+        sGrabScale = Fast::GetXrWindowScale();
+        sGrabReach = reach;
+    }
+    if (sGrabReach > 1e-3f && reach > 1e-3f) {
+        Fast::SetXrWindowScale(sGrabScale * reach / sGrabReach);
+    }
 }
 
 bool CompositorOpenFrame() {
@@ -635,9 +873,10 @@ bool CompositorOpenFrame() {
         }
         // The range is applied every frame, so the menu can pull the window in and push it out
         // without placing it again.
-        gState.OriginFromScreen = gState.ScreenRotation;
-        gState.OriginFromScreen.columns[3] =
-            simd_make_float4(gState.PlacementHead + gState.PlacementDir * gState.Window.Range, 1.0f);
+        UpdateScreenTransform();
+        ApplyDrag();
+        gState.Window = Fast::GetVisionOSWindow();
+        UpdateScreenTransform();
         for (size_t i = 0; i < gState.DrawableCount; ++i) {
             cp_drawable_t each = cp_drawable_array_get_drawable(gState.Drawables, i);
             cp_drawable_set_device_anchor(each, gState.DeviceAnchor);

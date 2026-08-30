@@ -1103,19 +1103,22 @@ SubframePacing ComputeSubframePacing() {
 // the last frame, and read the window back when the menu did not, so the one that moved last wins
 // and a slider always shows where the hand left the window. Both numbers are themselves, so the
 // same conversion serves both ways.
-void SyncXrSetting(const char* cVar, float low, float high, float defaultValue, float& pushed, float held,
+// Answers true when the window is what moved, so the caller can save once the hand lets go.
+bool SyncXrSetting(const char* cVar, float low, float high, float defaultValue, float& pushed, float held,
                    void (*apply)(float), float (*convert)(float)) {
     const float shown = std::clamp(CVarGetFloat(cVar, defaultValue), low, high);
     if (shown != pushed) {
         apply(convert(shown));
         pushed = shown;
-        return;
+        return false;
     }
     const float left = std::clamp(convert(held), low, high);
     if (fabsf(left - shown) > 0.001f) {
         CVarSetFloat(cVar, left);
         pushed = left;
+        return true;
     }
+    return false;
 }
 #endif
 } // namespace
@@ -1140,11 +1143,22 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     // same two numbers from inside the headset.
     static float pushedRange = 0.0f;
     static float pushedScale = 0.0f;
-    SyncXrSetting(CVAR_SETTING("XrWindowRange"), 0.5f, 4.0f, 1.3f, pushedRange, Fast::GetXrWindowDistance(),
-                  Fast::SetXrWindowDistance, [](float value) { return value; });
-    SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 8.0f, 2.6f, pushedScale, Fast::GetXrWindowScale(),
-                  Fast::SetXrWindowScale, [](float value) { return value; });
+    const bool rangeMoved =
+        SyncXrSetting(CVAR_SETTING("XrWindowRange"), 0.5f, 4.0f, 1.3f, pushedRange, Fast::GetXrWindowDistance(),
+                      Fast::SetXrWindowDistance, [](float value) { return value; });
+    const bool scaleMoved =
+        SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 8.0f, 2.6f, pushedScale, Fast::GetXrWindowScale(),
+                      Fast::SetXrWindowScale, [](float value) { return value; });
     Fast::SetXrDioramaDepth(CVarGetFloat(CVAR_SETTING("XrDioramaDepth"), 2.0f));
+
+    // The menu saves what the menu changes. A hand on the window writes the same numbers with the
+    // menu closed, so the save comes when the window stops moving.
+    static bool wasMoving = false;
+    const bool moving = rangeMoved || scaleMoved;
+    if (wasMoving && !moving) {
+        CVarSave();
+    }
+    wasMoving = moving;
 #endif
 
 #ifdef ENABLE_OPENXR
