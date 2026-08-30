@@ -285,8 +285,10 @@ if (LIGHTHOUSE_APPLE_MOBILE)
     set(IOS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ios)
     if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
         set(APPLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Info.plist.in)
+        set(APPLE_ASSET_CATALOG ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Assets.xcassets)
     else()
         set(APPLE_INFO_PLIST ${IOS_DIR}/Info.plist.in)
+        set(APPLE_ASSET_CATALOG ${IOS_DIR}/Assets.xcassets)
     endif()
 
     add_executable(${PROJECT_NAME} ${ALL_FILES})
@@ -302,11 +304,10 @@ if (LIGHTHOUSE_APPLE_MOBILE)
         XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
         XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
     )
-    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-        set_target_properties(${PROJECT_NAME} PROPERTIES
-            XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
-        )
-    else()
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+    )
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         set_target_properties(${PROJECT_NAME} PROPERTIES
             XCODE_ATTRIBUTE_SWIFT_OBJC_BRIDGING_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/visionos/LighthouseVisionBridge.h"
         )
@@ -968,11 +969,12 @@ if(LIGHTHOUSE_APPLE_MOBILE)
         https://raw.githubusercontent.com/mdqinc/SDL_GameControllerDB/master/gamecontrollerdb.txt
         ${CMAKE_BINARY_DIR}/gamecontrollerdb.txt)
 
-    # App icons come from an asset catalog, which Xcode compiles with actool. The 1024px
-    # icon is committed rather than derived from logo.png: iOS rejects icons with an alpha
-    # channel, and logo.png is a 256px RGBA source.
-    target_sources(${PROJECT_NAME} PRIVATE ${IOS_DIR}/Assets.xcassets)
-    set_source_files_properties(${IOS_DIR}/Assets.xcassets PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    # App icons come from an asset catalog, which Xcode compiles with actool. The icon is
+    # committed rather than derived from logo.png: iOS rejects an alpha channel, and
+    # logo.png is a rounded desktop tile with transparent margins. visionOS needs a layered
+    # icon instead of a flat one, so it gets its own catalog.
+    target_sources(${PROJECT_NAME} PRIVATE ${APPLE_ASSET_CATALOG})
+    set_source_files_properties(${APPLE_ASSET_CATALOG} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
     # Shipped read-only data. Context::GetAppBundlePath() resolves to the bundle on iOS, so
     # LocateFileAcrossAppDirs finds these here while user data stays in Documents.
