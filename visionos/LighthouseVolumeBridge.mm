@@ -65,21 +65,24 @@ void LighthouseVolumeProbe(LighthouseVolumeSample sample) {
 
     NSString* arkit = @"none";
     if (sample.HasImmersiveSpace && status == ar_device_anchor_query_status_success) {
-        const simd_float4x4 quadFromDevice = simd_mul(simd_inverse(sample.ImmersiveFromQuad), originFromDevice);
-        arkit = Translation(quadFromDevice);
+        arkit = Translation(simd_mul(simd_inverse(sample.ImmersiveFromQuad), originFromDevice));
     }
-    NSString* head = sample.HeadAnchored ? Translation(sample.QuadFromHead) : @"none";
     NSString* world = @"none";
-    if (sample.WorldAnchored && status == ar_device_anchor_query_status_success) {
+    if (status == ar_device_anchor_query_status_success) {
         world = Translation(simd_mul(sample.QuadFromWorld, originFromDevice));
     }
 
     // devicectl reaches the app's stderr and nothing else, so the report goes there and not to NSLog.
     fprintf(stderr,
-            "Lighthouse volume: supported %d, phase %d, status %d, device %s, bounds center %.3f %.3f %.3f "
-            "extents %.3f %.3f %.3f, head in quad: arkit %s, head anchor %s, world anchor %s\n",
-            (int)gVolume.Supported, sample.ScenePhase, (int)status, Translation(originFromDevice).UTF8String,
-            sample.BoundsCenter.x, sample.BoundsCenter.y, sample.BoundsCenter.z, sample.BoundsExtents.x,
-            sample.BoundsExtents.y, sample.BoundsExtents.z, arkit.UTF8String, head.UTF8String, world.UTF8String);
+            "Lighthouse volume: supported %d, phase %d, space %d, status %d, device %s, "
+            "bounds center %.3f %.3f %.3f extents %.3f %.3f %.3f, "
+            "immersive %d %s, head anchor %d %s, world anchor %d %s, "
+            "head in quad: arkit %s, world %s\n",
+            (int)gVolume.Supported, sample.ScenePhase, sample.SpaceOpen, (int)status,
+            Translation(originFromDevice).UTF8String, sample.BoundsCenter.x, sample.BoundsCenter.y,
+            sample.BoundsCenter.z, sample.BoundsExtents.x, sample.BoundsExtents.y, sample.BoundsExtents.z,
+            (int)sample.HasImmersiveSpace, Translation(sample.ImmersiveFromQuad).UTF8String,
+            (int)sample.HeadAnchored, Translation(sample.QuadFromHead).UTF8String, (int)sample.WorldAnchored,
+            Translation(sample.QuadFromWorld).UTF8String, arkit.UTF8String, world.UTF8String);
     fflush(stderr);
 }

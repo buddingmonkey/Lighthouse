@@ -18,6 +18,7 @@ typedef struct {
     simd_float3 BoundsCenter;
     simd_float3 BoundsExtents;
     int ScenePhase;
+    int SpaceOpen;
 } LighthouseVolumeSample;
 
 void LighthouseVolumeStart(void);

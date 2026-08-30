@@ -4,6 +4,8 @@ import Spatial
 import SwiftUI
 import UIKit
 
+private let kProbeSpaceId = "LighthouseProbeSpace"
+
 private final class VolumeProbe {
     var subscription: EventSubscription?
     var quad: Entity?
@@ -11,12 +13,18 @@ private final class VolumeProbe {
     var worldAnchor: AnchorEntity?
     var bounds = BoundingBox()
     var phase: Int32 = 2
+    var spaceOpen: Int32 = 0
     let session = SpatialTrackingSession()
+}
+
+private func note(_ text: String) {
+    FileHandle.standardError.write("Lighthouse volume: \(text)\n".data(using: .utf8)!)
 }
 
 private struct LighthouseVolumeView: View {
     let probe: VolumeProbe
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openImmersiveSpace) private var openImmersiveSpace
 
     var body: some View {
         GeometryReader3D { proxy in
@@ -44,8 +52,18 @@ private struct LighthouseVolumeView: View {
         }
         .task {
             let unavailable = await probe.session.run(.init(tracking: [.world]))
-            FileHandle.standardError.write("Lighthouse volume: spatial tracking session unavailable \(String(describing: unavailable))\n".data(using: .utf8)!)
+            note("spatial tracking session unavailable \(String(describing: unavailable))")
             LighthouseVolumeStart()
+
+            // The Shared Space gives no head. Open an empty immersive space beside the volume and
+            // measure whether that alone brings ARKit back.
+            try? await Task.sleep(for: .seconds(12))
+            note("opening the immersive space")
+            let result = await openImmersiveSpace(id: kProbeSpaceId)
+            note("immersive space \(String(describing: result))")
+            if case .opened = result {
+                probe.spaceOpen = 1
+            }
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             switch phase {
@@ -62,18 +80,19 @@ private func report(_ probe: VolumeProbe) {
     guard let quad = probe.quad else { return }
     var sample = LighthouseVolumeSample()
     sample.ScenePhase = probe.phase
+    sample.SpaceOpen = probe.spaceOpen
     sample.BoundsCenter = probe.bounds.center
     sample.BoundsExtents = probe.bounds.extents
     if let immersiveFromQuad = quad.transformMatrix(relativeTo: .immersiveSpace) {
         sample.HasImmersiveSpace = true
         sample.ImmersiveFromQuad = immersiveFromQuad
     }
-    if let head = probe.headAnchor, head.isAnchored {
-        sample.HeadAnchored = true
+    if let head = probe.headAnchor {
+        sample.HeadAnchored = head.isAnchored
         sample.QuadFromHead = head.transformMatrix(relativeTo: quad)
     }
-    if let world = probe.worldAnchor, world.isAnchored {
-        sample.WorldAnchored = true
+    if let world = probe.worldAnchor {
+        sample.WorldAnchored = world.isAnchored
         sample.QuadFromWorld = quad.transformMatrix(relativeTo: world).inverse
     }
     LighthouseVolumeProbe(sample)
@@ -90,5 +109,10 @@ struct LighthouseVolumeApp: App {
         .windowStyle(.volumetric)
         .defaultSize(width: 1.0, height: 0.5625, depth: 0.35, in: .meters)
         .volumeWorldAlignment(.gravityAligned)
+
+        ImmersiveSpace(id: kProbeSpaceId) {
+            RealityView { _ in }
+        }
+        .immersionStyle(selection: .constant(.mixed), in: .mixed)
     }
 }
