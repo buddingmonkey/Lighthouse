@@ -9,9 +9,13 @@
 
 #include <fast/backends/gfx_visionos.h>
 
+#include <spdlog/spdlog.h>
+
 #include <atomic>
 #include <cmath>
 #include <mutex>
+
+#include <SDL_joystick.h>
 
 extern "C" int SDL_main(int argc, char* argv[]);
 extern "C" void SDL_SetMainReady(void);
@@ -61,6 +65,7 @@ struct VolumeState {
     double NextRate = 0.0;
     int Updates = 0;
     int Frames = 0;
+    std::atomic<int> PadEvents{ 0 };
 };
 
 VolumeState gVolume;
@@ -196,6 +201,29 @@ void AttachKeyboard(GCKeyboard* keyboard) {
         };
 }
 
+// The Game Controller framework is where a press arrives before SDL polls for it. Counting here
+// says whether visionOS delivers the press to the app at all, which SDL cannot answer.
+void AttachController(GCController* controller) {
+    if (controller == nil || controller.extendedGamepad == nil) {
+        return;
+    }
+    controller.extendedGamepad.valueChangedHandler = ^(GCExtendedGamepad* pad, GCControllerElement* element) {
+        gVolume.PadEvents.fetch_add(1, std::memory_order_relaxed);
+    };
+}
+
+void StartControllerCount() {
+    for (GCController* controller in GCController.controllers) {
+        AttachController(controller);
+    }
+    [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidConnectNotification
+                                                      object:nil
+                                                       queue:nil
+                                                  usingBlock:^(NSNotification* note) {
+                                                      AttachController(note.object);
+                                                  }];
+}
+
 void StartKeyboard() {
     AttachKeyboard(GCKeyboard.coalescedKeyboard);
     [[NSNotificationCenter defaultCenter] addObserverForName:GCKeyboardDidConnectNotification
@@ -240,6 +268,7 @@ void LighthouseVolumeStart(void* device, void* commandQueue, uint32_t width, uin
     // control deck gets no game controllers.
     SDL_SetMainReady();
     StartKeyboard();
+    StartControllerCount();
 
     NSThread* thread = [[NSThread alloc] initWithBlock:^{
         char program[] = "Lighthouse";
@@ -339,6 +368,10 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
                     gVolume.Updates, gVolume.Frames, 1000.0 * gVolume.DrawTotal / gVolume.Frames,
                     1000.0 * gVolume.WaitTotal / gVolume.Frames, 1000.0 * gVolume.CopyTotal / gVolume.Frames);
             fflush(stderr);
+            // Through spdlog, because only spdlog reaches the log file the device gives back.
+            SPDLOG_INFO("xr input: phase {}, pad events {}/s, gc pads {}, sdl joysticks {}", sample.ScenePhase,
+                        gVolume.PadEvents.exchange(0, std::memory_order_relaxed),
+                        (int)GCController.controllers.count, SDL_NumJoysticks());
         }
         gVolume.NextRate = now + 1.0;
         gVolume.Updates = 0;
