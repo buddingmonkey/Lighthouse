@@ -150,11 +150,14 @@ bool VolumeOpenFrame() {
     // The eyes are always reported. With one view the backend draws from the point between them,
     // which is the head again, so the same two numbers serve mono and stereo.
     Fast::SetVisionOSViewCount(gVolume.Stereo ? 2 : 1);
-    if (sample.HeadValid) {
-        const float half = 0.5f * kNominalIPD;
-        Fast::SetVisionOSEye(0, sample.Head.x - half, sample.Head.y, sample.Head.z);
-        Fast::SetVisionOSEye(1, sample.Head.x + half, sample.Head.y, sample.Head.z);
-    }
+    // With no head there is still a picture to draw, and it is drawn for a head standing square in
+    // front of the window at the range it hangs at. Stereo and the depth of the diorama both live;
+    // only the parallax of leaning is lost. Reporting nothing would leave the eyes invalid and the
+    // camera model would give up, which takes the stereo with it.
+    const float half = 0.5f * kNominalIPD;
+    const simd_float3 head = sample.HeadValid ? sample.Head : simd_make_float3(0.0f, 0.0f, range);
+    Fast::SetVisionOSEye(0, head.x - half, head.y, head.z);
+    Fast::SetVisionOSEye(1, head.x + half, head.y, head.z);
     return true;
 }
 
@@ -363,24 +366,24 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
     }
     dispatch_semaphore_signal(gVolume.Frame);
 
-    // SDL reads the pad by polling its values, so poll them here too and count what changes.
+    // SDL reads the pad by polling the physical input profile, so poll the whole of it here and
+    // count what moves. A count taken from one named profile cannot tell an unchanging pad from a
+    // profile that is not there at all.
     {
-        static float sX = 0.0f;
-        static float sY = 0.0f;
-        static bool sButtons = false;
-        GCExtendedGamepad* pad = GCController.controllers.firstObject.extendedGamepad;
-        if (pad != nil) {
-            const float x = pad.leftThumbstick.xAxis.value;
-            const float y = pad.leftThumbstick.yAxis.value;
-            const bool buttons = pad.buttonA.isPressed || pad.buttonB.isPressed || pad.buttonX.isPressed ||
-                                 pad.buttonY.isPressed || pad.dpad.up.isPressed || pad.dpad.down.isPressed ||
-                                 pad.dpad.left.isPressed || pad.dpad.right.isPressed;
-            if (fabsf(x - sX) > 0.01f || fabsf(y - sY) > 0.01f || buttons != sButtons) {
+        static float sSum = 0.0f;
+        GCPhysicalInputProfile* profile = GCController.controllers.firstObject.physicalInputProfile;
+        if (profile != nil) {
+            float sum = 0.0f;
+            for (NSString* key in profile.axes) {
+                sum += fabsf(profile.axes[key].value);
+            }
+            for (NSString* key in profile.buttons) {
+                sum += profile.buttons[key].value;
+            }
+            if (fabsf(sum - sSum) > 0.01f) {
                 ++gVolume.PadPolls;
             }
-            sX = x;
-            sY = y;
-            sButtons = buttons;
+            sSum = sum;
         }
     }
 
@@ -398,9 +401,13 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
             // Through spdlog, because only spdlog reaches the log file the device gives back.
             // The handler count and the polled count are two independent ways to ask the same
             // question, and SDL reads the pad the polled way.
-            SPDLOG_INFO("xr input: phase {}, pad events {}/s, polled {}/s, gc pads {}, sdl joysticks {}, current {}",
+            GCController* pad = GCController.controllers.firstObject;
+            SPDLOG_INFO("xr input: phase {}, pad events {}/s, polled {}/s, gc pads {}, sdl joysticks {}, current {}, "
+                        "extended {}, elements {}, name {}",
                         sample.ScenePhase, gVolume.PadEvents.exchange(0, std::memory_order_relaxed), gVolume.PadPolls,
-                        (int)GCController.controllers.count, SDL_NumJoysticks(), GCController.current != nil ? 1 : 0);
+                        (int)GCController.controllers.count, SDL_NumJoysticks(), GCController.current != nil ? 1 : 0,
+                        pad.extendedGamepad != nil ? 1 : 0, (int)pad.physicalInputProfile.elements.count,
+                        pad.productCategory != nil ? pad.productCategory.UTF8String : "none");
             gVolume.PadPolls = 0;
         }
         gVolume.NextRate = now + 1.0;

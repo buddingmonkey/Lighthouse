@@ -1,4 +1,5 @@
 import Foundation
+import GameController
 import Metal
 import QuartzCore
 import RealityKit
@@ -238,6 +239,10 @@ private struct LighthouseVolumeView: View {
                     .onEnded { state.point($0, pressed: false) }
             )
         }
+        // A volumetric window keeps the sticks for scrolling and the face buttons for itself, and
+        // an app that says nothing gets the D pad, the stick clicks and Menu and nothing else. This
+        // is what asks for the whole pad.
+        .handlesGameControllerEvents(matching: .gamepad)
         .task {
             await state.loadEyeMaterial()
             _ = await state.session.run(.init(tracking: [.world]))
@@ -248,12 +253,14 @@ private struct LighthouseVolumeView: View {
             gDismissSpace = dismissImmersiveSpace
             LighthouseVolumeSetShutdownHandler({ leave() })
 
-            // A file in Documents turns the immersive space off, so the one unusual thing this app
-            // does can be taken away and put back with no build and no signing.
+            // A file in Documents holds the immersive space back for one run, so the one unusual
+            // thing this app does can be taken away with no build and no signing. It is taken away
+            // as it is read, because devicectl can copy a file to the device and cannot remove one.
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-            let marker = documents?.appendingPathComponent("no_immersive_space")
+            let marker = documents?.appendingPathComponent("no_head_tracking")
             if let marker, FileManager.default.fileExists(atPath: marker.path) {
-                note("the immersive space is turned off by a file, so there is no head pose")
+                try? FileManager.default.removeItem(at: marker)
+                note("head tracking is held back for this run, so the head stands at the design range")
             } else {
                 await holdSpace(true)
             }
