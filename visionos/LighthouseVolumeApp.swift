@@ -42,8 +42,10 @@ private final class VolumeState {
         var material = UnlitMaterial()
         material.color = .init(tint: .white, texture: .init(resource))
         let entity = ModelEntity(mesh: .generatePlane(width: 1.0, height: 0.5625), materials: [material])
+        entity.components.set(InputTargetComponent())
         quad = entity
         quadSize = SIMD2(1.0, 0.5625)
+        collide()
         return entity
     }
 
@@ -62,6 +64,21 @@ private final class VolumeState {
         }
         quadSize = SIMD2(width, height)
         quad?.model?.mesh = .generatePlane(width: width, height: height)
+        collide()
+    }
+
+    // A drag needs something to hit. The box is as thin as the picture it stands for.
+    private func collide() {
+        let shape = ShapeResource.generateBox(width: quadSize.x, height: quadSize.y, depth: 0.01)
+        quad?.components.set(CollisionComponent(shapes: [shape], isStatic: true))
+    }
+
+    func point(_ value: EntityTargetValue<DragGesture.Value>, pressed: Bool) {
+        guard let quad, quadSize.x > 0.0, quadSize.y > 0.0 else { return }
+        let local = value.convert(value.location3D, from: .local, to: quad)
+        let u = min(max(local.x / quadSize.x + 0.5, 0.0), 1.0)
+        let v = min(max(0.5 - local.y / quadSize.y, 0.0), 1.0)
+        LighthouseVolumePoint(u * Float(kTextureWidth), v * Float(kTextureHeight), pressed)
     }
 
     func tick() {
@@ -117,6 +134,12 @@ private struct LighthouseVolumeView: View {
             } update: { content in
                 state.size(to: content.convert(proxy.frame(in: .local), from: .local, to: .scene))
             }
+            .gesture(
+                DragGesture(minimumDistance: 0.0)
+                    .targetedToAnyEntity()
+                    .onChanged { state.point($0, pressed: true) }
+                    .onEnded { state.point($0, pressed: false) }
+            )
         }
         .task {
             _ = await state.session.run(.init(tracking: [.world]))

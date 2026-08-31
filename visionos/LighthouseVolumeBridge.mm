@@ -273,6 +273,10 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
     dispatch_semaphore_signal(gVolume.Frame);
 }
 
+void LighthouseVolumePoint(float x, float y, bool pressed) {
+    Fast::PushVisionOSPointer({ x, y, 0, true, pressed });
+}
+
 void* LighthouseVolumeTakeTexture(int eye) {
     if (!gVolume.TextureReady.exchange(false, std::memory_order_acq_rel)) {
         return nullptr;
