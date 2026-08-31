@@ -1,5 +1,6 @@
 import Foundation
 import Metal
+import QuartzCore
 import RealityKit
 import Spatial
 import SwiftUI
@@ -138,6 +139,7 @@ private final class VolumeState {
         // does not fit the one buffer replace(using:) wants. So the game keeps its own targets and
         // the finished one is copied here, on the same queue, after the game has committed.
         guard LighthouseVolumeTakeFrame(), let buffer = queue.makeCommandBuffer() else { return }
+        let started = CACurrentMediaTime()
         let destination = texture.replace(using: buffer)
         if let blit = buffer.makeBlitCommandEncoder() {
             for eye in 0..<(stereo ? 2 : 1) {
@@ -159,6 +161,7 @@ private final class VolumeState {
             blit.endEncoding()
         }
         buffer.commit()
+        LighthouseVolumeNoteCopy(CACurrentMediaTime() - started)
     }
 }
 

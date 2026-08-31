@@ -32,6 +32,9 @@ float LighthouseVolumeAspect(void);
 // and the release, because a slider needs all three.
 void LighthouseVolumePoint(float x, float y, bool pressed);
 
+// How long the shell spent copying the finished picture, in seconds.
+void LighthouseVolumeNoteCopy(double seconds);
+
 // Whether the shell can show an eye each. Set it before the game starts.
 void LighthouseVolumeSetStereo(bool stereo);
 

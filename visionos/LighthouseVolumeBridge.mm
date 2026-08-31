@@ -51,6 +51,14 @@ struct VolumeState {
     std::atomic<bool> Running{ true };
     bool Started = false;
     bool Stereo = false;
+
+    double FrameOpened = 0.0;
+    double WaitTotal = 0.0;
+    double DrawTotal = 0.0;
+    double CopyTotal = 0.0;
+    double NextRate = 0.0;
+    int Updates = 0;
+    int Frames = 0;
 };
 
 VolumeState gVolume;
@@ -107,9 +115,12 @@ float LatchWindow(const Sample& sample) {
 bool VolumeOpenFrame() {
     // A volume that stops updating must not hold the game thread. It leaves without a frame and
     // comes back on the next update.
+    const double before = CACurrentMediaTime();
     if (dispatch_semaphore_wait(gVolume.Frame, dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC)) != 0) {
         return false;
     }
+    gVolume.FrameOpened = CACurrentMediaTime();
+    gVolume.WaitTotal += gVolume.FrameOpened - before;
 
     Sample sample;
     {
@@ -135,6 +146,8 @@ bool VolumeOpenFrame() {
 }
 
 void VolumeCloseFrame() {
+    gVolume.DrawTotal += CACurrentMediaTime() - gVolume.FrameOpened;
+    ++gVolume.Frames;
     Fast::FlipVisionOSGameTextures();
     gVolume.TextureReady.store(true, std::memory_order_release);
 }
@@ -277,6 +290,26 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
         gVolume.Latest = sample;
     }
     dispatch_semaphore_signal(gVolume.Frame);
+
+    // Nothing else states what the game is really presenting. The update rate is what the volume
+    // offers, the frame rate is what the game takes, and the three times say which of them is the
+    // one that costs.
+    ++gVolume.Updates;
+    if (now >= gVolume.NextRate) {
+        if (gVolume.NextRate > 0.0 && gVolume.Frames > 0) {
+            fprintf(stderr,
+                    "Lighthouse volume: updates %d/s, frames %d/s, draw %.1f ms, wait %.1f ms, copy %.1f ms\n",
+                    gVolume.Updates, gVolume.Frames, 1000.0 * gVolume.DrawTotal / gVolume.Frames,
+                    1000.0 * gVolume.WaitTotal / gVolume.Frames, 1000.0 * gVolume.CopyTotal / gVolume.Frames);
+            fflush(stderr);
+        }
+        gVolume.NextRate = now + 1.0;
+        gVolume.Updates = 0;
+        gVolume.Frames = 0;
+        gVolume.DrawTotal = 0.0;
+        gVolume.WaitTotal = 0.0;
+        gVolume.CopyTotal = 0.0;
+    }
 }
 
 float LighthouseVolumeAspect(void) {
@@ -285,6 +318,10 @@ float LighthouseVolumeAspect(void) {
 
 void LighthouseVolumePoint(float x, float y, bool pressed) {
     Fast::PushVisionOSPointer({ x, y, 0, true, pressed });
+}
+
+void LighthouseVolumeNoteCopy(double seconds) {
+    gVolume.CopyTotal += seconds;
 }
 
 void LighthouseVolumeSetStereo(bool stereo) {

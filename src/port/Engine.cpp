@@ -1086,6 +1086,34 @@ SubframePacing ComputeSubframePacing() {
         subframesPerTick = asked;
     }
 
+#ifdef ENABLE_XR_WINDOW
+    // Nothing states what the pacing settled on. A heavy scene collapses the sub-frame count and
+    // the game presents at the tick rate, which reads as a low frame rate with no other sign.
+    {
+        static double nextReport = 0.0;
+        static int ticks = 0;
+        static int askedTotal = 0;
+        static int deliveredTotal = 0;
+        const double now = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now().time_since_epoch())
+                               .count() /
+                           1000.0;
+        ++ticks;
+        askedTotal += subframesPerTick;
+        deliveredTotal += sDeliveredSubFrames;
+        if (now >= nextReport) {
+            if (nextReport > 0.0 && ticks > 0) {
+                SPDLOG_INFO("xr pacing: target {} Hz, ticks {}/s, asked {:.2f}, delivered {:.2f}", target_fps, ticks,
+                            (double)askedTotal / ticks, (double)deliveredTotal / ticks);
+            }
+            nextReport = now + 1.0;
+            ticks = 0;
+            askedTotal = 0;
+            deliveredTotal = 0;
+        }
+    }
+#endif
+
     // paceFps drives DXGI's per-present wait so that subframes * 1/paceFps =
     // viPerTick/60 wall (= game time per tick). Derived from viPerTick rather than
     // effective_logic_fps: the latter is truncated (VI=7 -> 8, not 8.57), which would
