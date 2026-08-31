@@ -1098,7 +1098,7 @@ SubframePacing ComputeSubframePacing() {
     return { subframesPerTick, fps, viPerTick };
 }
 
-#ifdef ENABLE_XR_WINDOW
+#ifdef ENABLE_OPENXR
 // The menu and the window's own handles write the same number. Push it when the menu moved it since
 // the last frame, and read the window back when the menu did not, so the one that moved last wins
 // and a slider always shows where the hand left the window. Both numbers are themselves, so the
@@ -1137,6 +1137,10 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     SelectDisplayRefreshRate(wnd.get());
 
 #ifdef ENABLE_XR_WINDOW
+    Fast::SetXrDioramaDepth(CVarGetFloat(CVAR_SETTING("XrDioramaDepth"), 2.0f));
+#endif
+
+#ifdef ENABLE_OPENXR
     // The range is meters from the user to the glass, and the size is meters of glass. They are
     // apart: a range that goes out leaves the window the width it had, so it goes small in the eye
     // and takes the diorama into the room with it. The move bar and the corner handles write the
@@ -1149,7 +1153,6 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     const bool scaleMoved =
         SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 8.0f, 2.6f, pushedScale, Fast::GetXrWindowScale(),
                       Fast::SetXrWindowScale, [](float value) { return value; });
-    Fast::SetXrDioramaDepth(CVarGetFloat(CVAR_SETTING("XrDioramaDepth"), 2.0f));
 
     // The menu saves what the menu changes. A hand on the window writes the same numbers with the
     // menu closed, so the save comes when the window stops moving.
