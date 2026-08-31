@@ -1,0 +1,64 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "Root"
+{
+    def Material "GameScreen"
+    {
+        asset inputs:GameTexture = @@
+        token outputs:mtlx:surface.connect = </Root/GameScreen/Unlit.outputs:out>
+        token outputs:realitykit:vertex
+
+        def Shader "Texcoord"
+        {
+            uniform token info:id = "ND_texcoord_vector2"
+            float2 outputs:out
+        }
+
+        def Shader "HalfWidth"
+        {
+            uniform token info:id = "ND_multiply_vector2"
+            float2 inputs:in1.connect = </Root/GameScreen/Texcoord.outputs:out>
+            float2 inputs:in2 = (0.5, 1)
+            float2 outputs:out
+        }
+
+        def Shader "EyeOffset"
+        {
+            uniform token info:id = "ND_realitykit_geometry_switch_cameraindex_vector2"
+            float2 inputs:mono = (0, 0)
+            float2 inputs:left = (0, 0)
+            float2 inputs:right = (0.5, 0)
+            float2 outputs:out
+        }
+
+        def Shader "EyeCoord"
+        {
+            uniform token info:id = "ND_add_vector2"
+            float2 inputs:in1.connect = </Root/GameScreen/HalfWidth.outputs:out>
+            float2 inputs:in2.connect = </Root/GameScreen/EyeOffset.outputs:out>
+            float2 outputs:out
+        }
+
+        def Shader "Picture"
+        {
+            uniform token info:id = "ND_RealityKitTexture2D_color3"
+            asset inputs:file.connect = </Root/GameScreen.inputs:GameTexture>
+            bool inputs:no_flip_v = 1
+            float2 inputs:texcoord.connect = </Root/GameScreen/EyeCoord.outputs:out>
+            color3f outputs:out
+        }
+
+        def Shader "Unlit"
+        {
+            uniform token info:id = "ND_realitykit_unlit_surfaceshader"
+            color3f inputs:color.connect = </Root/GameScreen/Picture.outputs:out>
+            float inputs:opacity = 1
+            token outputs:out
+        }
+    }
+}

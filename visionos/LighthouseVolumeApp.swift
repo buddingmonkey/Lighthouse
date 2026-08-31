@@ -6,8 +6,11 @@ import SwiftUI
 import UIKit
 
 private let kSpaceId = "LighthouseImmersiveSpace"
-private let kTextureWidth = 1280
+private let kEyeWidth = 1280
 private let kTextureHeight = 720
+// The two eyes stand side by side in one picture, and a camera index switch in the material gives
+// each eye its own half. RealityKit has no other way to draw a thing differently for each eye.
+private let kTextureWidth = 2 * kEyeWidth
 
 private func note(_ text: String) {
     FileHandle.standardError.write("Lighthouse volume: \(text)\n".data(using: .utf8)!)
@@ -27,6 +30,9 @@ private final class VolumeState {
     var aspect: Float = 16.0 / 9.0
     var phase: Int32 = 2
 
+    private(set) var stereo = false
+    private var eyeMaterial: (any RealityKit.Material)?
+
     init() {
         device = MTLCreateSystemDefaultDevice()!
         queue = device.makeCommandQueue()!
@@ -41,9 +47,7 @@ private final class VolumeState {
     }
 
     func makeQuad() -> ModelEntity {
-        var material = UnlitMaterial()
-        material.color = .init(tint: .white, texture: .init(resource))
-        let entity = ModelEntity(mesh: .generatePlane(width: 1.0, height: 0.5625), materials: [material])
+        let entity = ModelEntity(mesh: .generatePlane(width: 1.0, height: 0.5625), materials: [eyeMaterial ?? flat()])
         entity.components.set(InputTargetComponent())
         quad = entity
         quadSize = SIMD2(1.0, 0.5625)
@@ -73,6 +77,32 @@ private final class VolumeState {
         collide()
     }
 
+    private func flat() -> any RealityKit.Material {
+        var material = UnlitMaterial()
+        material.color = .init(tint: .white, texture: .init(resource))
+        return material
+    }
+
+    // The camera index switch lives in a material graph, and only a file can hold one. Without it
+    // there is no per eye path at all on visionOS, so one picture for both eyes is the fallback.
+    func loadEyeMaterial() async {
+        guard let url = Bundle.main.url(forResource: "GameScreen", withExtension: "usda") else {
+            note("GameScreen.usda is not in the bundle")
+            return
+        }
+        do {
+            var material = try await ShaderGraphMaterial(named: "/Root/GameScreen", from: url)
+            try material.setParameter(name: "GameTexture", value: .textureResource(resource))
+            eyeMaterial = material
+            stereo = true
+            LighthouseVolumeSetStereo(true)
+            quad?.model?.materials = [material]
+            note("an eye each")
+        } catch {
+            note("the eye material did not load, \(error)")
+        }
+    }
+
     // A drag needs something to hit. The box is as thin as the picture it stands for.
     private func collide() {
         let shape = ShapeResource.generateBox(width: quadSize.x, height: quadSize.y, depth: 0.01)
@@ -84,7 +114,7 @@ private final class VolumeState {
         let local = value.convert(value.location3D, from: .local, to: quad)
         let u = min(max(local.x / quadSize.x + 0.5, 0.0), 1.0)
         let v = min(max(0.5 - local.y / quadSize.y, 0.0), 1.0)
-        LighthouseVolumePoint(u * Float(kTextureWidth), v * Float(kTextureHeight), pressed)
+        LighthouseVolumePoint(u * Float(kEyeWidth), v * Float(kTextureHeight), pressed)
     }
 
     func tick() {
@@ -107,22 +137,25 @@ private final class VolumeState {
         // Fast3D spreads framebuffer zero over several command buffers and commits it last, which
         // does not fit the one buffer replace(using:) wants. So the game keeps its own targets and
         // the finished one is copied here, on the same queue, after the game has committed.
-        guard let raw = LighthouseVolumeTakeTexture(0),
-              let source = Unmanaged<AnyObject>.fromOpaque(raw).takeUnretainedValue() as? any MTLTexture,
-              let buffer = queue.makeCommandBuffer() else {
-            return
-        }
+        guard LighthouseVolumeTakeFrame(), let buffer = queue.makeCommandBuffer() else { return }
         let destination = texture.replace(using: buffer)
         if let blit = buffer.makeBlitCommandEncoder() {
-            blit.copy(from: source,
-                      sourceSlice: 0,
-                      sourceLevel: 0,
-                      sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                      sourceSize: MTLSize(width: kTextureWidth, height: kTextureHeight, depth: 1),
-                      to: destination,
-                      destinationSlice: 0,
-                      destinationLevel: 0,
-                      destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+            for eye in 0..<(stereo ? 2 : 1) {
+                guard let raw = LighthouseVolumeTexture(Int32(eye)),
+                      let source = Unmanaged<AnyObject>.fromOpaque(raw).takeUnretainedValue() as? any MTLTexture
+                else {
+                    continue
+                }
+                blit.copy(from: source,
+                          sourceSlice: 0,
+                          sourceLevel: 0,
+                          sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                          sourceSize: MTLSize(width: kEyeWidth, height: kTextureHeight, depth: 1),
+                          to: destination,
+                          destinationSlice: 0,
+                          destinationLevel: 0,
+                          destinationOrigin: MTLOrigin(x: eye * kEyeWidth, y: 0, z: 0))
+            }
             blit.endEncoding()
         }
         buffer.commit()
@@ -153,6 +186,7 @@ private struct LighthouseVolumeView: View {
             )
         }
         .task {
+            await state.loadEyeMaterial()
             _ = await state.session.run(.init(tracking: [.world]))
 
             // ARKit reports no head in the Shared Space. An empty mixed space beside the volume is
@@ -166,7 +200,7 @@ private struct LighthouseVolumeView: View {
 
             LighthouseVolumeStart(Unmanaged.passUnretained(state.device as AnyObject).toOpaque(),
                                   Unmanaged.passUnretained(state.queue as AnyObject).toOpaque(),
-                                  UInt32(kTextureWidth), UInt32(kTextureHeight))
+                                  UInt32(kEyeWidth), UInt32(kTextureHeight))
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             switch phase {

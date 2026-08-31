@@ -24,6 +24,9 @@ const uint32_t kGameTextureHeight = 720;
 const float kRangeMin = 0.2f;
 const float kRangeMax = 4.0f;
 const float kRangeDefault = 1.3f;
+// Apple keeps the wearer's own distance private, so the eyes are made from the head. The diorama
+// gain compresses every disparity anyway, so a few millimeters of error is a few percent of depth.
+const float kNominalIPD = 0.063f;
 
 struct Sample {
     simd_float3 Head = { 0.0f, 0.0f, kRangeDefault };
@@ -47,6 +50,7 @@ struct VolumeState {
     std::atomic<bool> TextureReady{ false };
     std::atomic<bool> Running{ true };
     bool Started = false;
+    bool Stereo = false;
 };
 
 VolumeState gVolume;
@@ -79,10 +83,10 @@ float Clamp(float value, float low, float high) {
     return value < low ? low : (value > high ? high : value);
 }
 
-// The range is the distance the window hangs at, not where the head is now. Head motion is only
-// worth anything as a departure from a fixed reference, so a range that followed the head would
-// take all the dolly parallax out of the picture.
-float LatchedRange(const Sample& sample) {
+// Head motion is only worth anything as a departure from a fixed reference. The reference is where
+// the head stood when the window was placed, on all three axes, and it is taken again when the
+// system moves the volume or changes its size.
+float LatchWindow(const Sample& sample) {
     static bool sLatched = false;
     static simd_float3 sQuad = { 0.0f, 0.0f, 0.0f };
     static float sHalfWidth = 0.0f;
@@ -95,6 +99,7 @@ float LatchedRange(const Sample& sample) {
         sQuad = quad;
         sHalfWidth = sample.HalfWidth;
         sRange = Clamp(sample.Head.z, kRangeMin, kRangeMax);
+        Fast::SetVisionOSParallaxReference(sample.Head.x, sample.Head.y);
     }
     return sRange;
 }
@@ -115,15 +120,16 @@ bool VolumeOpenFrame() {
         return true;
     }
 
-    const float range = sample.HeadValid ? LatchedRange(sample) : kRangeDefault;
+    const float range = sample.HeadValid ? LatchWindow(sample) : kRangeDefault;
     Fast::SetVisionOSWindow(sample.HalfWidth, sample.HalfHeight, range);
 
-    // One picture for both eyes until the camera index switch lands. The backend takes the point
-    // between the eyes when it has one view, so both report the head.
-    Fast::SetVisionOSViewCount(1);
+    // The eyes are always reported. With one view the backend draws from the point between them,
+    // which is the head again, so the same two numbers serve mono and stereo.
+    Fast::SetVisionOSViewCount(gVolume.Stereo ? 2 : 1);
     if (sample.HeadValid) {
-        Fast::SetVisionOSEye(0, sample.Head.x, sample.Head.y, sample.Head.z);
-        Fast::SetVisionOSEye(1, sample.Head.x, sample.Head.y, sample.Head.z);
+        const float half = 0.5f * kNominalIPD;
+        Fast::SetVisionOSEye(0, sample.Head.x - half, sample.Head.y, sample.Head.z);
+        Fast::SetVisionOSEye(1, sample.Head.x + half, sample.Head.y, sample.Head.z);
     }
     return true;
 }
@@ -281,9 +287,14 @@ void LighthouseVolumePoint(float x, float y, bool pressed) {
     Fast::PushVisionOSPointer({ x, y, 0, true, pressed });
 }
 
-void* LighthouseVolumeTakeTexture(int eye) {
-    if (!gVolume.TextureReady.exchange(false, std::memory_order_acq_rel)) {
-        return nullptr;
-    }
+void LighthouseVolumeSetStereo(bool stereo) {
+    gVolume.Stereo = stereo;
+}
+
+bool LighthouseVolumeTakeFrame(void) {
+    return gVolume.TextureReady.exchange(false, std::memory_order_acq_rel);
+}
+
+void* LighthouseVolumeTexture(int eye) {
     return Fast::GetVisionOSReadyGameTexture(eye);
 }

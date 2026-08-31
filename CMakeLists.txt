@@ -992,6 +992,14 @@ if(LIGHTHOUSE_APPLE_MOBILE)
     target_sources(${PROJECT_NAME} PRIVATE ${APPLE_ASSET_CATALOG})
     set_source_files_properties(${APPLE_ASSET_CATALOG} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
+    if(CMAKE_SYSTEM_NAME STREQUAL "visionOS" AND NOT LIGHTHOUSE_VISIONOS_COMPOSITOR)
+        # A raw .usda, copied and not compiled. It holds the camera index switch that gives each eye
+        # its own half of the picture, which no material the API can build by itself reaches.
+        target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/visionos/GameScreen.usda)
+        set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/visionos/GameScreen.usda
+            PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    endif()
+
     # Shipped read-only data. Context::GetAppBundlePath() resolves to the bundle on iOS, so
     # LocateFileAcrossAppDirs finds these here while user data stays in Documents.
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

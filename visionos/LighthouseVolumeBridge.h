@@ -32,8 +32,12 @@ float LighthouseVolumeAspect(void);
 // and the release, because a slider needs all three.
 void LighthouseVolumePoint(float x, float y, bool pressed);
 
-// The game texture the last finished frame left, or null when there is nothing new to copy.
-void* LighthouseVolumeTakeTexture(int eye);
+// Whether the shell can show an eye each. Set it before the game starts.
+void LighthouseVolumeSetStereo(bool stereo);
+
+// True once for each frame the game finishes, and then the eye textures to copy.
+bool LighthouseVolumeTakeFrame(void);
+void* LighthouseVolumeTexture(int eye);
 
 #ifdef __cplusplus
 }
