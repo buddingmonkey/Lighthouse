@@ -26,6 +26,13 @@
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true/>
+    <!-- Without this the system takes the game controller for its own window navigation, and only
+         a few of the presses reach the app. It does not matter in an immersive space, where there
+         is no system UI to navigate, which is why the compositor shell never needed it. -->
+    <key>GCSupportsControllerUserInteraction</key>
+    <true/>
+    <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
     <key>NSWorldSensingUsageDescription</key>
     <string>Lighthouse places the game window in the room.</string>
     <key>UIApplicationSceneManifest</key>
