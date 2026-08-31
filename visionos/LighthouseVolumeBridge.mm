@@ -119,6 +119,11 @@ bool VolumeOpenFrame() {
     if (dispatch_semaphore_wait(gVolume.Frame, dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC)) != 0) {
         return false;
     }
+    // Take every slot that piled up while the last frame drew, so the game can be at most one frame
+    // behind the volume. A counting semaphore left alone grows without bound whenever the game is
+    // the slower of the two, and the game then never waits and never learns that it is behind.
+    while (dispatch_semaphore_wait(gVolume.Frame, DISPATCH_TIME_NOW) == 0) {
+    }
     gVolume.FrameOpened = CACurrentMediaTime();
     gVolume.WaitTotal += gVolume.FrameOpened - before;
 
