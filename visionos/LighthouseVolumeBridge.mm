@@ -51,6 +51,8 @@ struct VolumeState {
     std::atomic<bool> Running{ true };
     bool Started = false;
     bool Stereo = false;
+    bool Stopped = false;
+    void (*ShutdownHandler)(void) = nullptr;
 
     double FrameOpened = 0.0;
     double WaitTotal = 0.0;
@@ -173,10 +175,9 @@ void VolumePollState() {
         return;
     }
     sPhase = phase;
-    if (phase == 0) {
-        gVolume.Running.store(false, std::memory_order_release);
-        return;
-    }
+    // A volume that goes away parks the game the way an iOS app off screen does. The run ends only
+    // when the game itself is finished, because a process that leaves takes the immersive space
+    // down with it and that is the shell's job to do in order.
     port_setAppOnScreen(phase == 2 ? 1 : 0);
 }
 
@@ -244,11 +245,42 @@ void LighthouseVolumeStart(void* device, void* commandQueue, uint32_t width, uin
         char program[] = "Lighthouse";
         char* argv[] = { program, nullptr };
         SDL_main(1, argv);
-        exit(0);
+
+        // Leaving here would end the process with the immersive space still open, and visionOS
+        // then refuses to open content for any app until the headset is restarted. The shell takes
+        // the space down first.
+        LighthouseVolumeStop();
+        void (*handler)(void) = gVolume.ShutdownHandler;
+        if (handler != nullptr) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                handler();
+            });
+        } else {
+            exit(0);
+        }
     }];
     thread.name = @"Lighthouse Render Thread";
     thread.stackSize = 4 * 1024 * 1024;
     [thread start];
+}
+
+void LighthouseVolumeSetShutdownHandler(void (*handler)(void)) {
+    gVolume.ShutdownHandler = handler;
+}
+
+void LighthouseVolumeStop(void) {
+    if (gVolume.Stopped) {
+        return;
+    }
+    gVolume.Stopped = true;
+    gVolume.Running.store(false, std::memory_order_release);
+    if (gVolume.Session != nullptr) {
+        ar_session_stop(gVolume.Session);
+    }
+    // The game thread may be waiting on a frame that will never come.
+    if (gVolume.Frame != nullptr) {
+        dispatch_semaphore_signal(gVolume.Frame);
+    }
 }
 
 void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {

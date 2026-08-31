@@ -13,6 +13,55 @@ private let kTextureHeight = 720
 // each eye its own half. RealityKit has no other way to draw a thing differently for each eye.
 private let kTextureWidth = 2 * kEyeWidth
 
+// The shutdown handler the bridge calls is a plain C function, so what it needs is here.
+@MainActor private var gOpenSpace: OpenImmersiveSpaceAction?
+@MainActor private var gDismissSpace: DismissImmersiveSpaceAction?
+@MainActor private var gSpaceOpen = false
+@MainActor private var gSpaceBusy = false
+@MainActor private var gLeaving = false
+
+// The immersive space is what makes ARKit answer, and only one app may hold one. Hold it while the
+// volume is in use and give it back the moment it is not, or nothing else on the device can open
+// content of its own.
+@MainActor private func holdSpace(_ wanted: Bool) async {
+    // The scene phase is reported before the actions are in hand, and there is nothing to do yet.
+    if gLeaving || gSpaceBusy || wanted == gSpaceOpen || gOpenSpace == nil {
+        return
+    }
+    gSpaceBusy = true
+    if wanted {
+        if case .opened = await gOpenSpace?(id: kSpaceId) {
+            gSpaceOpen = true
+            note("the immersive space is open")
+        } else {
+            note("the immersive space did not open")
+        }
+    } else {
+        await gDismissSpace?()
+        gSpaceOpen = false
+        note("the immersive space is given back")
+    }
+    gSpaceBusy = false
+}
+
+// Never end the process with the immersive space still open. visionOS then refuses to open content
+// for any app, and the headset has to be restarted.
+@MainActor private func leave() {
+    if gLeaving {
+        return
+    }
+    LighthouseVolumeStop()
+    guard gSpaceOpen, let dismiss = gDismissSpace else {
+        gLeaving = true
+        exit(0)
+    }
+    gLeaving = true
+    Task {
+        await dismiss()
+        exit(0)
+    }
+}
+
 private func note(_ text: String) {
     FileHandle.standardError.write("Lighthouse volume: \(text)\n".data(using: .utf8)!)
 }
@@ -169,6 +218,7 @@ private struct LighthouseVolumeView: View {
     let state: VolumeState
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
+    @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
 
     var body: some View {
         GeometryReader3D { proxy in
@@ -194,12 +244,10 @@ private struct LighthouseVolumeView: View {
 
             // ARKit reports no head in the Shared Space. An empty mixed space beside the volume is
             // what makes the query answer; it draws nothing and hides nothing.
-            let result = await openImmersiveSpace(id: kSpaceId)
-            if case .opened = result {
-                note("the immersive space is open")
-            } else {
-                note("the immersive space did not open, \(String(describing: result))")
-            }
+            gOpenSpace = openImmersiveSpace
+            gDismissSpace = dismissImmersiveSpace
+            LighthouseVolumeSetShutdownHandler({ leave() })
+            await holdSpace(true)
 
             LighthouseVolumeStart(Unmanaged.passUnretained(state.device as AnyObject).toOpaque(),
                                   Unmanaged.passUnretained(state.queue as AnyObject).toOpaque(),
@@ -211,6 +259,7 @@ private struct LighthouseVolumeView: View {
             case .inactive: state.phase = 1
             default: state.phase = 2
             }
+            Task { await holdSpace(phase == .active) }
         }
     }
 }

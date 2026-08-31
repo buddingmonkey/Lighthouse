@@ -21,6 +21,13 @@ typedef struct {
 // Metal headers.
 void LighthouseVolumeStart(void* device, void* commandQueue, uint32_t width, uint32_t height);
 
+// The shell must take the immersive space down before the process leaves, so the handler is what
+// the game calls when it is finished rather than leaving on its own. It arrives on the main queue.
+void LighthouseVolumeSetShutdownHandler(void (*handler)(void));
+
+// Stop world tracking and let the game thread go. Safe to call more than once.
+void LighthouseVolumeStop(void);
+
 // Once per scene update, on the main thread. It asks ARKit where the head is, publishes the pose
 // for the render thread, and lets the game draw one frame.
 void LighthouseVolumeUpdate(LighthouseVolumeFrame frame);
