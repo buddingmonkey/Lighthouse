@@ -201,18 +201,23 @@ void AttachKeyboard(GCKeyboard* keyboard) {
         };
 }
 
-// The Game Controller framework is where a press arrives before SDL polls for it. Counting here
-// says whether visionOS delivers the press to the app at all, which SDL cannot answer.
+// The Game Controller framework refreshes a controller's values on its handler queue, and the
+// default is the main queue. SDL polls those values, so a main thread busy with RealityKit at 90 Hz
+// leaves SDL reading a stale pad. Give every controller a queue of its own, the way the keyboard
+// already has one.
 void AttachController(GCController* controller) {
-    if (controller == nil || controller.extendedGamepad == nil) {
+    if (controller == nil) {
         return;
     }
+    dispatch_queue_t queue = dispatch_queue_create("com.andreweiche.lighthouse.controller", DISPATCH_QUEUE_SERIAL);
+    dispatch_set_target_queue(queue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
+    controller.handlerQueue = queue;
     controller.extendedGamepad.valueChangedHandler = ^(GCExtendedGamepad* pad, GCControllerElement* element) {
         gVolume.PadEvents.fetch_add(1, std::memory_order_relaxed);
     };
 }
 
-void StartControllerCount() {
+void StartControllers() {
     for (GCController* controller in GCController.controllers) {
         AttachController(controller);
     }
@@ -268,7 +273,7 @@ void LighthouseVolumeStart(void* device, void* commandQueue, uint32_t width, uin
     // control deck gets no game controllers.
     SDL_SetMainReady();
     StartKeyboard();
-    StartControllerCount();
+    StartControllers();
 
     NSThread* thread = [[NSThread alloc] initWithBlock:^{
         char program[] = "Lighthouse";
