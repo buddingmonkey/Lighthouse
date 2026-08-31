@@ -23,6 +23,8 @@ private final class VolumeState {
     var quad: ModelEntity?
     var subscription: EventSubscription?
     var quadSize = SIMD2<Float>(0.0, 0.0)
+    var bounds = BoundingBox()
+    var aspect: Float = 16.0 / 9.0
     var phase: Int32 = 2
 
     init() {
@@ -49,17 +51,21 @@ private final class VolumeState {
         return entity
     }
 
-    // The picture keeps the game's shape and the volume keeps its own, so the quad takes the
-    // largest 16 by 9 rectangle the volume holds.
     func size(to bounds: BoundingBox) {
-        let aspect = Float(kTextureWidth) / Float(kTextureHeight)
+        self.bounds = bounds
+        letterbox()
+    }
+
+    // The picture keeps the shape the game's own projection gives it, and the volume keeps the
+    // shape the system gives it, so the quad takes the largest picture the volume holds.
+    private func letterbox() {
         var width = bounds.extents.x
         var height = width / aspect
         if height > bounds.extents.y {
             height = bounds.extents.y
             width = height * aspect
         }
-        if abs(width - quadSize.x) < 0.001 {
+        if abs(width - quadSize.x) < 0.001 && abs(height - quadSize.y) < 0.001 {
             return
         }
         quadSize = SIMD2(width, height)
@@ -83,6 +89,11 @@ private final class VolumeState {
 
     func tick() {
         guard let quad else { return }
+        let shape = LighthouseVolumeAspect()
+        if shape > 0.0, abs(shape - aspect) > 0.001 {
+            aspect = shape
+            letterbox()
+        }
         var frame = LighthouseVolumeFrame()
         frame.ScenePhase = phase
         frame.HalfWidth = 0.5 * quadSize.x

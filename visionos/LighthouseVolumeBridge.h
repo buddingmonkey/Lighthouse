@@ -25,6 +25,9 @@ void LighthouseVolumeStart(void* device, void* commandQueue, uint32_t width, uin
 // for the render thread, and lets the game draw one frame.
 void LighthouseVolumeUpdate(LighthouseVolumeFrame frame);
 
+// The shape of the picture the game draws, width over height.
+float LighthouseVolumeAspect(void);
+
 // Where a drag meets the picture, in game texture pixels. One gesture carries the tap, the drag
 // and the release, because a slider needs all three.
 void LighthouseVolumePoint(float x, float y, bool pressed);

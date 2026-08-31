@@ -273,6 +273,10 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
     dispatch_semaphore_signal(gVolume.Frame);
 }
 
+float LighthouseVolumeAspect(void) {
+    return Fast::GetVisionOSPictureAspect();
+}
+
 void LighthouseVolumePoint(float x, float y, bool pressed) {
     Fast::PushVisionOSPointer({ x, y, 0, true, pressed });
 }
