@@ -9,13 +9,9 @@
 
 #include <fast/backends/gfx_visionos.h>
 
-#include <spdlog/spdlog.h>
-
 #include <atomic>
 #include <cmath>
 #include <mutex>
-
-#include <SDL_joystick.h>
 
 extern "C" int SDL_main(int argc, char* argv[]);
 extern "C" void SDL_SetMainReady(void);
@@ -65,8 +61,6 @@ struct VolumeState {
     double NextRate = 0.0;
     int Updates = 0;
     int Frames = 0;
-    std::atomic<int> PadEvents{ 0 };
-    int PadPolls = 0;
 };
 
 VolumeState gVolume;
@@ -205,34 +199,6 @@ void AttachKeyboard(GCKeyboard* keyboard) {
         };
 }
 
-// The Game Controller framework refreshes a controller's values on its handler queue, and the
-// default is the main queue. SDL polls those values, so a main thread busy with RealityKit at 90 Hz
-// leaves SDL reading a stale pad. Give every controller a queue of its own, the way the keyboard
-// already has one.
-void AttachController(GCController* controller) {
-    if (controller == nil) {
-        return;
-    }
-    dispatch_queue_t queue = dispatch_queue_create("com.andreweiche.lighthouse.controller", DISPATCH_QUEUE_SERIAL);
-    dispatch_set_target_queue(queue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
-    controller.handlerQueue = queue;
-    controller.extendedGamepad.valueChangedHandler = ^(GCExtendedGamepad* pad, GCControllerElement* element) {
-        gVolume.PadEvents.fetch_add(1, std::memory_order_relaxed);
-    };
-}
-
-void StartControllers() {
-    for (GCController* controller in GCController.controllers) {
-        AttachController(controller);
-    }
-    [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidConnectNotification
-                                                      object:nil
-                                                       queue:nil
-                                                  usingBlock:^(NSNotification* note) {
-                                                      AttachController(note.object);
-                                                  }];
-}
-
 void StartKeyboard() {
     AttachKeyboard(GCKeyboard.coalescedKeyboard);
     [[NSNotificationCenter defaultCenter] addObserverForName:GCKeyboardDidConnectNotification
@@ -277,7 +243,6 @@ void LighthouseVolumeStart(void* device, void* commandQueue, uint32_t width, uin
     // control deck gets no game controllers.
     SDL_SetMainReady();
     StartKeyboard();
-    StartControllers();
 
     NSThread* thread = [[NSThread alloc] initWithBlock:^{
         char program[] = "Lighthouse";
@@ -366,27 +331,6 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
     }
     dispatch_semaphore_signal(gVolume.Frame);
 
-    // SDL reads the pad by polling the physical input profile, so poll the whole of it here and
-    // count what moves. A count taken from one named profile cannot tell an unchanging pad from a
-    // profile that is not there at all.
-    {
-        static float sSum = 0.0f;
-        GCPhysicalInputProfile* profile = GCController.controllers.firstObject.physicalInputProfile;
-        if (profile != nil) {
-            float sum = 0.0f;
-            for (NSString* key in profile.axes) {
-                sum += fabsf(profile.axes[key].value);
-            }
-            for (NSString* key in profile.buttons) {
-                sum += profile.buttons[key].value;
-            }
-            if (fabsf(sum - sSum) > 0.01f) {
-                ++gVolume.PadPolls;
-            }
-            sSum = sum;
-        }
-    }
-
     // Nothing else states what the game is really presenting. The update rate is what the volume
     // offers, the frame rate is what the game takes, and the three times say which of them is the
     // one that costs.
@@ -398,17 +342,6 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
                     gVolume.Updates, gVolume.Frames, 1000.0 * gVolume.DrawTotal / gVolume.Frames,
                     1000.0 * gVolume.WaitTotal / gVolume.Frames, 1000.0 * gVolume.CopyTotal / gVolume.Frames);
             fflush(stderr);
-            // Through spdlog, because only spdlog reaches the log file the device gives back.
-            // The handler count and the polled count are two independent ways to ask the same
-            // question, and SDL reads the pad the polled way.
-            GCController* pad = GCController.controllers.firstObject;
-            SPDLOG_INFO("xr input: phase {}, pad events {}/s, polled {}/s, gc pads {}, sdl joysticks {}, current {}, "
-                        "extended {}, elements {}, name {}",
-                        sample.ScenePhase, gVolume.PadEvents.exchange(0, std::memory_order_relaxed), gVolume.PadPolls,
-                        (int)GCController.controllers.count, SDL_NumJoysticks(), GCController.current != nil ? 1 : 0,
-                        pad.extendedGamepad != nil ? 1 : 0, (int)pad.physicalInputProfile.elements.count,
-                        pad.productCategory != nil ? pad.productCategory.UTF8String : "none");
-            gVolume.PadPolls = 0;
         }
         gVolume.NextRate = now + 1.0;
         gVolume.Updates = 0;
