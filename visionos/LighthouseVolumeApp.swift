@@ -247,7 +247,16 @@ private struct LighthouseVolumeView: View {
             gOpenSpace = openImmersiveSpace
             gDismissSpace = dismissImmersiveSpace
             LighthouseVolumeSetShutdownHandler({ leave() })
-            await holdSpace(true)
+
+            // A file in Documents turns the immersive space off, so the one unusual thing this app
+            // does can be taken away and put back with no build and no signing.
+            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            let marker = documents?.appendingPathComponent("no_immersive_space")
+            if let marker, FileManager.default.fileExists(atPath: marker.path) {
+                note("the immersive space is turned off by a file, so there is no head pose")
+            } else {
+                await holdSpace(true)
+            }
 
             LighthouseVolumeStart(Unmanaged.passUnretained(state.device as AnyObject).toOpaque(),
                                   Unmanaged.passUnretained(state.queue as AnyObject).toOpaque(),

@@ -66,6 +66,7 @@ struct VolumeState {
     int Updates = 0;
     int Frames = 0;
     std::atomic<int> PadEvents{ 0 };
+    int PadPolls = 0;
 };
 
 VolumeState gVolume;
@@ -362,6 +363,27 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
     }
     dispatch_semaphore_signal(gVolume.Frame);
 
+    // SDL reads the pad by polling its values, so poll them here too and count what changes.
+    {
+        static float sX = 0.0f;
+        static float sY = 0.0f;
+        static bool sButtons = false;
+        GCExtendedGamepad* pad = GCController.controllers.firstObject.extendedGamepad;
+        if (pad != nil) {
+            const float x = pad.leftThumbstick.xAxis.value;
+            const float y = pad.leftThumbstick.yAxis.value;
+            const bool buttons = pad.buttonA.isPressed || pad.buttonB.isPressed || pad.buttonX.isPressed ||
+                                 pad.buttonY.isPressed || pad.dpad.up.isPressed || pad.dpad.down.isPressed ||
+                                 pad.dpad.left.isPressed || pad.dpad.right.isPressed;
+            if (fabsf(x - sX) > 0.01f || fabsf(y - sY) > 0.01f || buttons != sButtons) {
+                ++gVolume.PadPolls;
+            }
+            sX = x;
+            sY = y;
+            sButtons = buttons;
+        }
+    }
+
     // Nothing else states what the game is really presenting. The update rate is what the volume
     // offers, the frame rate is what the game takes, and the three times say which of them is the
     // one that costs.
@@ -374,9 +396,12 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
                     1000.0 * gVolume.WaitTotal / gVolume.Frames, 1000.0 * gVolume.CopyTotal / gVolume.Frames);
             fflush(stderr);
             // Through spdlog, because only spdlog reaches the log file the device gives back.
-            SPDLOG_INFO("xr input: phase {}, pad events {}/s, gc pads {}, sdl joysticks {}", sample.ScenePhase,
-                        gVolume.PadEvents.exchange(0, std::memory_order_relaxed),
-                        (int)GCController.controllers.count, SDL_NumJoysticks());
+            // The handler count and the polled count are two independent ways to ask the same
+            // question, and SDL reads the pad the polled way.
+            SPDLOG_INFO("xr input: phase {}, pad events {}/s, polled {}/s, gc pads {}, sdl joysticks {}, current {}",
+                        sample.ScenePhase, gVolume.PadEvents.exchange(0, std::memory_order_relaxed), gVolume.PadPolls,
+                        (int)GCController.controllers.count, SDL_NumJoysticks(), GCController.current != nil ? 1 : 0);
+            gVolume.PadPolls = 0;
         }
         gVolume.NextRate = now + 1.0;
         gVolume.Updates = 0;
