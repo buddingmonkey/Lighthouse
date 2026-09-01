@@ -33,7 +33,8 @@ void LighthouseVolumeStop(void);
 // for the render thread, and lets the game draw one frame.
 void LighthouseVolumeUpdate(LighthouseVolumeFrame frame);
 
-// The shape of the picture the game draws, width over height.
+// The shape of the picture the game draws, width over height. Zero until there is a picture, and
+// the shell then keeps the shape it opened with.
 float LighthouseVolumeAspect(void);
 
 // Where a drag meets the picture, in game texture pixels. One gesture carries the tap, the drag

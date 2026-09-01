@@ -16,6 +16,12 @@ private let kTextureHeight = 720
 // The two eyes stand side by side in one picture, and a camera index switch in the material gives
 // each eye its own half. RealityKit has no other way to draw a thing differently for each eye.
 private let kTextureWidth = 2 * kEyeWidth
+// The volume opens at the shape the picture will have, so the window the wearer places at launch is
+// the window the game runs in.
+private let kPictureAspect = Double(kEyeWidth) / Double(kTextureHeight)
+private let kVolumeWidth = 1.0
+private let kVolumeHeight = kVolumeWidth / kPictureAspect
+private let kVolumeDepth = 0.35
 
 // The shutdown handler the bridge calls is a plain C function, so what it needs is here.
 @MainActor private var gOpenSpace: OpenImmersiveSpaceAction?
@@ -155,7 +161,7 @@ private final class VolumeState {
     var subscription: EventSubscription?
     var quadSize = SIMD2<Float>(0.0, 0.0)
     var bounds = BoundingBox()
-    var aspect: Float = 16.0 / 9.0
+    var aspect = Float(kPictureAspect)
     var phase: Int32 = 2
     let hover = HoverPlate()
     var pointsPerMeter: CGFloat = 1360.0
@@ -178,10 +184,11 @@ private final class VolumeState {
     }
 
     func makeQuad() -> ModelEntity {
-        let entity = ModelEntity(mesh: .generatePlane(width: 1.0, height: 0.5625), materials: [eyeMaterial ?? flat()])
+        let size = SIMD2(Float(kVolumeWidth), Float(kVolumeHeight))
+        let entity = ModelEntity(mesh: .generatePlane(width: size.x, height: size.y), materials: [eyeMaterial ?? flat()])
         entity.components.set(InputTargetComponent())
         quad = entity
-        quadSize = SIMD2(1.0, 0.5625)
+        quadSize = size
         collide()
         return entity
     }
@@ -419,7 +426,7 @@ struct LighthouseVolumeApp: App {
             LighthouseVolumeView(state: state)
         }
         .windowStyle(.volumetric)
-        .defaultSize(width: 1.0, height: 0.5625, depth: 0.35, in: .meters)
+        .defaultSize(width: kVolumeWidth, height: kVolumeHeight, depth: kVolumeDepth, in: .meters)
         .volumeWorldAlignment(.gravityAligned)
 
         ImmersiveSpace(id: kSpaceId) {
