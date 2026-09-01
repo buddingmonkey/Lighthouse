@@ -67,9 +67,9 @@ submodule pin; the PR branches keep the upstream pin and near-zero comments.
    correctness on a strict driver (Mali) — bugs Mesa forgives on desktop.
 3. **Android XR / Quest third.** OpenXR on top of the Android build. The engine keeps the
    SDL window and GLES context; OpenXR only replaces presentation.
-4. **visionOS last.** No SDL video at all; a native Compositor Services shell feeds an
-   external Metal target. Hardest, but by then the XR camera model already exists and is
-   backend-independent.
+4. **visionOS last.** No SDL video at all; a native RealityKit shell feeds an external
+   Metal target and shows the result in a volumetric window. Hardest, but by then the XR
+   camera model already exists and is backend-independent.
 
 ---
 
@@ -502,102 +502,187 @@ re-runs the burst on demand — temporary, never committed).
 
 ## Part 7 — visionOS
 
-**Goal:** the game on a room-anchored screen in mixed immersion, no SDL video at all.
+**Goal:** the game in a volumetric window in the Shared Space, in stereo, beside the other
+apps, with no SDL video at all.
+
+**Read this first.** This port was built twice. The first shell held a Compositor Services
+immersive space and placed the screen itself. It worked, and it was the wrong shape: the
+game is a window with depth, so the system must own move, resize and close. The second
+shell is a volumetric `WindowGroup` holding a `RealityView`, and it is what ships. The
+engine seam took that move with no change of contract, which is the one thing to copy from
+this history: keep the shell behind a `void*` seam and either shell can drive it.
 
 ### 7.1 Architecture
 
-- A native SwiftUI + ObjC++ shell owns a Compositor Services immersive space
-  (scene role must be the immersive-space role, or the world fades to black). SDL is
-  built with `SDL_VIDEO=OFF`; the window backend derives directly from the abstract
-  window backend, not from the SDL one (lus `1d7e790c`). `HandleEvents` still pumps SDL
-  for controller add/remove.
-- The room screen is a textured quad whose fragment shader samples a persistent
-  offscreen Metal texture. The engine renders **into an external Metal target**:
-  `MetalInitExternal(device, queue, texture)` — no drawable, framebuffer zero points at
-  the caller's texture, never presents. `nextDrawable` was also the implicit CPU/GPU
-  pacing, so external mode must wait three-deep on frame retirement
-  (lus `53704500`). Everything runs on the compositor's queue: command-buffer creation
-  order is execution order, and that ordering is the only synchronization needed
+- A native SwiftUI + ObjC++ shell owns a volumetric `WindowGroup`
+  (`.windowStyle(.volumetric)`, `.defaultSize(..., in: .meters)`,
+  `.volumeWorldAlignment(.gravityAligned)`) with one quad in a `RealityView`. SDL is built
+  with `SDL_VIDEO=OFF`; the window backend derives directly from the abstract window
+  backend, not from the SDL one (lus `1d7e790c`). `HandleEvents` still pumps SDL for
+  controller add and remove.
+- The engine renders **into an external Metal target**: `MetalInitExternal(device, queue,
+  texture)` — no drawable, framebuffer zero points at the caller's texture, never presents.
+  `nextDrawable` was also the implicit CPU/GPU pacing, so external mode must wait three deep
+  on frame retirement (lus `53704500`). Everything runs on the shell's queue: command-buffer
+  creation order is execution order, and that order is the only synchronization needed
   (lh `a8cfc534`).
+- The picture reaches RealityKit through a `LowLevelTexture` on the quad's material.
+  **Do not point the external target at the `LowLevelTexture`.** Fast3D spreads framebuffer
+  zero over several command buffers and commits it last, which does not fit the one command
+  buffer `replace(using:)` gives. Keep private Metal textures as the render targets, and
+  blit into the `LowLevelTexture` in one command buffer when the frame closes
+  (lh `87e1e0ff`). Double-buffer those textures so a copy never meets a draw
+  (lus `ae58dfda`). `replace(using:)` is happy in the `SceneEvents.Update` handler.
+- The `LowLevelTexture` is `bgra8Unorm_srgb`, so the sampler decodes once and Metal copies
+  between it and a plain `bgra8Unorm` game texture. The immersive shell needed a decode in
+  the screen shader instead (lh `98c42fdf`); a volume needs none.
+- **ARKit answers nothing in the Shared Space.** `queryDeviceAnchor` returns failure and an
+  identity pose while only a volume is open. An **empty mixed `ImmersiveSpace` open beside
+  the volume** brings the head back. It draws nothing, and both the other apps and the
+  volume's own window bar stay where they are (lh `2ca1f72e`). Two other routes stay dead:
+  `AnchorEntity(.head)` never anchors, and `AnchorEntity(world:)` does anchor but reports a
+  frame that is neither the quad's nor ARKit's. The route to the quad is
+  `Entity.transformMatrix(relativeTo: .immersiveSpace)`.
+- **Only one app on the device may hold an immersive space.** Hold it while the volume is in
+  use and give it back at once (lh `9f20b37c`). An app that keeps it for the life of the
+  process wedges the whole headset: nothing else can open content, the app cannot be torn
+  down, and `devicectl device process launch` then hangs after the first launch. That last
+  symptom reads as a tooling fault and is not one.
+- The user can close that space with the Digital Crown while the volume keeps drawing.
+  Watch the query status and fall back to a fixed head in front of the window. Leaving the
+  eyes unreported is worse than a wrong head, because the camera model gives up without them
+  and **that takes the stereo with it** (lh `0a82326c`).
 - Shell and engine talk through `void*` seams so neither needs the other's headers.
 
-Bring-up traps:
+Bring-up traps, all found under the first shell and all still true:
 
 - **`SDL_SetMainReady` must be called by hand** — normally `SDL_UIKitRunApp` does it;
   without it `SDL_Init` refuses every subsystem and the symptom is "no controllers"
   (lh `9c19cbb8`).
-- ImGui needs explicit bring-up (context, DisplaySize = game texture, scale 1) because
-  only the SDL/DX11 paths did it before; the same silent size-mismatch drop from the
-  iOS black-screen bug applies (lus `62b30c31`).
-- The compositor drawable is sRGB and the engine already emits sRGB — decode where the
-  screen samples or midtones lift (lh `98c42fdf`).
-- Lifecycle: no SDL app events exist. The compositor layer state carries the same news
-  (paused = off screen; invalidated = exit); poll it **from the event pump**, not from
-  the frame-open on the render thread — waiting there blocks the thread that must act
-  on the pause. Route into the same off-screen park iOS built (lus `ff93a054`,
-  lh `57357774`).
-- Keyboard: SDL's keyboard lives in the UIKit video driver, which is off. The
-  GameController framework reports keys; its keycode is the HID usage, which *is* an
-  SDL scancode. Trap: `GCDevice` handlers default to the main queue, and a compositor
-  app's main thread has nothing turning it — keys queue forever until you give the
-  keyboard its own serial handler queue (lus `e86c05b5`, `df18850d` in lh).
-- Only the app's stderr is reachable; print Metal failures once (lh `2ee15cb4`).
+- ImGui needs explicit bring-up (context, DisplaySize = game texture, scale 1) because only
+  the SDL/DX11 paths did it before; the same silent size-mismatch drop from the iOS
+  black-screen bug applies (lus `62b30c31`).
+- Lifecycle: no SDL app events exist. `scenePhase` carries the same news, and it must be
+  read even while the app is off screen, when no frame is opened at all. Route it into the
+  same off-screen park iOS built (lus `ff93a054`, lh `57357774`).
+- Keyboard: SDL's keyboard lives in the UIKit video driver, which is off. The GameController
+  framework reports keys; its keycode is the HID usage, which *is* an SDL scancode. Trap:
+  `GCDevice` handlers default to the main queue and can queue forever — give the keyboard
+  its own serial handler queue (lus `e86c05b5`, lh `df18850d`).
+- Nothing else empties the SDL event queue. The control deck polls the pad rather than
+  taking its events, so every axis motion of a session stays in the queue and the two peeks
+  the device handler makes each frame walk all of it, under the event lock. The desktop
+  window backend has always dropped these; a backend with no window must too
+  (lus `ad37113d`, lh `32e7a8ed`).
+- Only the app's stderr reaches a `--console` session. Anything to read after the fact goes
+  through spdlog to a file in the app container (lh `2ee15cb4`).
 
-### 7.2 Gaze-and-pinch input (tracking areas)
+### 7.2 Input in a volume
 
-The system draws the gaze highlight out of process and never reveals gaze; the app
-supplies tracking-area rectangles and receives spatial events naming the hit area.
+The immersive shell used Compositor Services **tracking areas**: the app supplied rectangles
+and the system drew the gaze highlight out of process and named the hit area in the event.
+A volume has no such API. Do not look for one.
 
-- Feed ImGui's own item rectangles via the test-engine `ItemAdd` hook; skip
-  identifier-less and disabled items (lus `41eb9160`).
-- **Order the mask the way ImGui hovers**, don't patch symptom by symptom: windows
-  back-to-front, each first blanking its own rectangle; within a window, largest item
-  first so the smallest wins a point. Order after the frame ends, when window order has
-  settled (lus `4d5fb1fc`). Two masking special cases: near-display-size items are
-  windows (lus `8e813525`); `EndChild` reports the whole child as one item *after* its
-  rows and must be skipped or every list press hits the same row (lus `cd543b3d`).
-- Pointer faults found in order: press and position arrive together (step the reader
-  once per frame); the queue replayed stale samples (coalesce non-button changes); the
-  app's own ray disagreed with the system highlight by pixels (take the tracking area
-  the event names and press its center) (lus `6befa86b`).
-- The debugging method that found every pointer fault: print on one line the tracking
-  area the mask names *and* the item ImGui hovers, and compare.
-- Because gaze cannot be scripted, add a scripted-tap environment variable that
-  exercises the full path (rectangle list → hovered item) with taps at
-  `x,y@seconds` — this is the automation channel for CI-less UI testing
-  (lh `0d3cde79`). Remove it before release.
-- A menu button drawn via the foreground draw list adds no ImGui item, so it has no
-  tracking area — give it an invisible button over the same rectangle. If the mask
-  names a press but nothing happens, look at **window order** (a window behind the
-  game's fullscreen windows refuses hover), not at the mask (lh `f607bfcf`).
+- Input is one RealityKit gesture on the quad:
+  `DragGesture(minimumDistance: 0).targetedToEntity(quad)`, not `SpatialTapGesture`, because
+  one gesture must carry tap, drag and release for the sliders. The quad needs an
+  `InputTargetComponent` and a `CollisionComponent`. Quad-local x and y become a UV, then
+  game texture pixels, then the existing pointer queue (lh `d4f9c668`).
+- Keep a two-frame position-then-press step, with one rule: a press **that arrives at a new
+  place** waits one frame, and a press already held moves at once. ImGui takes the item it
+  hovers from the position it held at `NewFrame`, so a press delivered with its own first
+  position lands on whatever was under the position before it. The naive version, which
+  waits whenever the place moves, means a slider never sees the button go down
+  (lus `36c8eec5`).
+- **The gaze highlight is not lost, but it is rebuilt.** visionOS never tells an app where
+  the wearer looks, so only the system can draw one. Feed ImGui's own item rectangles out
+  through the test-engine `ItemAdd` hook (lus `41eb9160`), publish the finished set for
+  another thread (lus `dc32901d`), and put one SwiftUI plate per rectangle over the picture
+  (lh `cc23dec8`). Three things had to be measured, because nothing states them:
+  - A volume puts a flat view at its **front face** and clips whatever stands in front of
+    that. The picture hangs in the middle, so the plate has to be carried back to it.
+  - **A plate at zero opacity is not hit-testable**, so it can never become active. A clear
+    plate, and a plate that waits at zero for the gaze, both stay dark for ever. Use a black
+    anchor at 0.02 alpha, which is twice the hit-test floor and adds no luminance, and a
+    white flash that waits at zero, both in one `hoverEffectGroup()`.
+  - The layers composite in **linear light**. A white trace of two percent on each window
+    took the menu background from 10/255 to 95/255.
+- **Order the rectangles the way ImGui hovers**, don't patch symptom by symptom: windows
+  back-to-front, each first blanking its own rectangle; within a window, largest item first
+  so the smallest wins a point. Order after the frame ends, when window order has settled
+  (lus `4d5fb1fc`). Two special cases: near-display-size items are windows (lus `8e813525`);
+  `EndChild` reports the whole child as one item *after* its rows and must be skipped, or
+  every list press hits the same row (lus `cd543b3d`).
+- A menu button drawn via the foreground draw list adds no ImGui item, so it gets no
+  rectangle — give it an invisible button over the same place. If a press names something
+  and nothing happens, look at **window order** first (lh `f607bfcf`).
+- **The system keeps most of the game controller in the Shared Space, and this is not
+  obvious.** `GCSupportsControllerUserInteraction` in the plist is needed and is not enough
+  (lh `76970d3f`): a volumetric window still takes the thumbsticks for scrolling and the
+  face buttons, the shoulders and the triggers for itself. What is left is the D pad, the
+  two stick clicks, Menu and Options. Neither the window style nor the way the app reads the
+  pad changes it. `.handlesGameControllerEvents(matching: .gamepad)` on the root view is
+  what asks for the rest (lh `b04a68d1`). The shape of the fault misleads: the first Start
+  press lands, everything after seems to fall away, and the sticks are worst, which reads as
+  a leak or a queue filling up. It is a fixed list of buttons that never worked. An
+  immersive space has no interface of its own to drive, which is why the first shell never
+  showed it.
 
-### 7.3 Stereo and cadence on visionOS
+### 7.3 Stereo, cadence and window geometry
 
-- The window camera model is backend-independent by design: widen the engine's
-  "headset window" guards from the OpenXR define to a shared `ENABLE_XR_WINDOW`, then
-  audit **every** caller — some answers flip per platform (density scale is
-  Android-only; refresh-rate selection finds no rates because the compositor owns
-  cadence) (lus `a6514d14`, lh `4d2f164f`). Keep "is a headset window" (rendering
-  model) distinct from "headset controls active" (touchscreen/menu policy): visionOS
-  answers yes to the first and no to the second.
-- Per-eye textures: the external target moves between passes (choose the eye in the
-  per-view hook); one compositor frame spans both eyes. The display list runs once per
-  eye, so **any per-frame state stepped inside it now steps twice** — step pointers
-  and similar state on the first eye only (lus `b425713a`, `9bb6f2b2`).
-- The simulator hands out one view: all stereo checks need hardware. Start off-axis
-  tangents from a default — the projection reports tangents only once it has a window,
-  and a zero tangent deadlocks the pair.
-- Cadence: Compositor Services neither reports nor accepts a panel rate. Measure it
-  from presentation times — the shortest gap over a window of frames is the cadence
-  (per-frame tracking oscillates at rounding boundaries; use a ~120-frame window).
-  Log the rate once and again only on change (lh `3d3998b3`, `ae6e2d92`,
-  lus `f99b0987`).
+- The window camera model is backend-independent by design: widen the engine's "headset
+  window" guards from the OpenXR define to a shared `ENABLE_XR_WINDOW`, then audit **every**
+  caller — some answers flip per platform (lus `a6514d14`, lh `4d2f164f`). Keep "is a headset
+  window" (rendering model) distinct from "headset controls active" (touchscreen and menu
+  policy): visionOS answers yes to the first and no to the second.
+- Per-eye textures: the external target moves between passes (choose the eye in the per-view
+  hook); one shell frame spans both eyes. The display list runs once per eye, so **any
+  per-frame state stepped inside it now steps twice** — step pointers and similar state on
+  the first eye only (lus `b425713a`, `9bb6f2b2`).
+- **RealityKit's only public per-eye path is a `ShaderGraphMaterial` with a Camera Index
+  Switch node.** There is no per-eye entity visibility and no camera transform. Widen the
+  texture to two eyes side by side and switch on `UV.x` (lh `0a8887f3`). It works inside a
+  volume, which the documentation only ever discusses for immersive content. RealityKit
+  loads a raw `.usda` copied into the bundle, with no `realitytool` step, so the build system
+  needs one `target_sources` line with `MACOSX_PACKAGE_LOCATION Resources`. Two names are not
+  guessable and are in the Xcode SDK, under
+  `USDLib_FormatLoaderProxy_Xcode.framework/.../libraries/realitykit/`: the node is
+  `ND_realitykit_geometry_switch_cameraindex_vector2` with ports `mono`, `left` and `right`,
+  and `ND_RealityKitTexture2D` **flips the vertical coordinate** unless `no_flip_v` is `1`.
+  Read them; do not guess. `mono` is the default output, which is what the simulator takes.
+- Apple keeps the user's IPD private and there are no per-eye transforms, so make the eyes
+  head plus and minus a nominal 63 mm along the device x axis. The diorama gain compresses
+  disparity, so a few millimeters of error is a few percent of depth scale.
+- **The volume owns its size, so the shell tells the backend** with a
+  `SetVisionOSWindow(halfWidth, halfHeight, range)` and the getter becomes a read-back
+  (lus `becaf36c`, `efe64716`). Letterbox the quad to the shape of the picture, which only
+  the backend knows, and remake the quad when it moves (lh `11cb0010`). Report **zero**, not
+  a fallback, before the game has a picture to measure: a shell that letterboxes to a
+  self-derived 1.0 draws a square (lus `ef7fac32`, lh `9796d1f6`). The camera model needs no
+  change for any of this, because it works in game units and never sees meters.
+- **The range must be a latched reference, never the live head distance.** The eye offset
+  reads `eyeZ - range`; if the range follows the head that term is always zero and all dolly
+  parallax dies, which is most of what makes a diorama read (lus `983656b7`).
+- Move, resize, placement and recenter all leave the app. The system window bar does them,
+  so the matching menu sliders go under the OpenXR guard and only the depth control stays
+  (lh `cbee98da`).
+- Cadence: nothing on visionOS reports the panel rate and nothing can ask for one. Measure it
+  from the frame times — the shortest gap over a window of about 120 frames — and follow it
+  (lh `3d3998b3`, `ae6e2d92`, lus `f99b0987`). `SceneEvents.Update` is a true 90 Hz clock on
+  the device. It is **not** one in the simulator, which reports 120 to 190 Hz.
+- **A counting semaphore between shell and game needs back pressure.** The volume signalled
+  once per update and the game took one signal per frame, so a game that fell behind left a
+  signal behind every frame, the count grew without bound and the game never waited. The tick
+  stretched to 20 Hz, which made the pacing ask for four sub-frames instead of three, which
+  kept it stretched. Drain the queue each frame (lh `cccae954`). The measurement that finds
+  this is two lines a second, one from the shell and one from the engine, because **30 is the
+  logic tick rate**: a sub-frame count that collapses to one and a game that cannot draw look
+  identical from outside.
 
-Known open items in the reference implementation, so you do not re-diagnose them as
-new: the first menu frame hitches on hardware (leading hypothesis: per-item
-tracking-area registration cost — rebuild the area list only when rectangles change);
-and the host-side `ExtractAssets` target writes an archive the app rejects (`version`
-vs `portVersion` key mismatch — the in-app extractor writes the right key).
+Known open items in the reference implementation, so you do not re-diagnose them as new: the
+first menu frame hitches on hardware; and the host-side `ExtractAssets` target writes an
+archive the app rejects (`version` vs `portVersion` key mismatch — the in-app extractor
+writes the right key).
 
 ---
 
@@ -677,7 +762,7 @@ The port only counts when it lands upstream. The process that worked:
 | iOS device | SSH build to a Mac (compile+link only; codesign always fails headless — a human presses Run) | `devicectl` launch with `--console`; app stderr only | none — instrument the app | no system log, no screenshot, locked device refuses launch, the console session owns the process |
 | Android phone | Gradle on Linux | adb install/launch/screencap; spdlog goes to a file in app storage, not logcat | `input keyevent`; file-driven debug pad | emulator renders via host Mesa |
 | Android XR / Quest | same APK | per-eye raw captures via file-request hook (screencap is black); logcat with a huge ring buffer captured *before* the repro | debug-pad file; pointer file; `prox_close` fakes head presence for desk testing; emulator head via gRPC | headset presents nothing off-head; stereo only provable on device |
-| visionOS | Mac build, simulator first | simulator screenshots work; hardware via app logging | scripted taps env var; `simctl` ROM injection | simulator is mono and runs at the Mac's cadence; gaze cannot be scripted; Metal shader validation crashes the simulator compiler service |
+| visionOS | Mac build, simulator first | simulator screenshots work and show the room, so placement is checkable with no human; hardware via spdlog to the app container | mouse click in the simulator is a press and the mouse is the gaze; `simctl` ROM injection | simulator reports one view, so stereo needs hardware, and it is no display clock; posting mouse events over SSH needs Accessibility trust; Metal shader validation crashes the simulator compiler service |
 
 Universal rules: never pipe an Xcode build through `tail`/`head` (the pipe status hides
 `BUILD FAILED` — redirect to a file); kill local GUI runs with SIGKILL or self-exit
