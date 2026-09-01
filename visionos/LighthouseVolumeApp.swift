@@ -22,6 +22,8 @@ private let kPictureAspect = Double(kEyeWidth) / Double(kTextureHeight)
 private let kVolumeWidth = 1.0
 private let kVolumeHeight = kVolumeWidth / kPictureAspect
 private let kVolumeDepth = 0.35
+// The ornament's own top edge meets the bottom of the volume, so the gap is padding above it.
+private let kMenuGap = 14.0
 
 // The shutdown handler the bridge calls is a plain C function, so what it needs is here.
 @MainActor private var gOpenSpace: OpenImmersiveSpaceAction?
@@ -380,6 +382,16 @@ private struct LighthouseVolumeView: View {
         // an app that says nothing gets the D pad, the stick clicks and Menu and nothing else. This
         // is what asks for the whole pad.
         .handlesGameControllerEvents(matching: .gamepad)
+        // The menu button belongs where every other visionOS app keeps its controls, under the
+        // window, and not on the glass in front of a scene that has depth. The system draws the
+        // ornament, so it gets the gaze highlight and the pinch of its own.
+        .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .top) {
+            Button("Menu") {
+                LighthouseVolumeOpenMenu()
+            }
+            .glassBackgroundEffect()
+            .padding(.top, kMenuGap)
+        }
         .task {
             await state.loadEyeMaterial()
             _ = await state.session.run(.init(tracking: [.world]))

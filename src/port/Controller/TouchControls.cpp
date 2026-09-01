@@ -10,6 +10,8 @@ extern "C" void TouchControls_Poll(void) {
 }
 extern "C" void TouchControls_MergeInto(void*) {
 }
+extern "C" void TouchControls_OpenMenu(void) {
+}
 
 namespace Lighthouse {
 void TouchControls_Draw() {
@@ -229,13 +231,16 @@ bool MenuVisible() {
     return ctx->GetWindow()->GetGui()->GetMenuOrMenubarVisible();
 }
 
-// A headset has no touchscreen, so the pad is unreachable there.
+// A headset has no touchscreen, so the pad is unreachable there, and both headsets carry their own
+// way into the menu: a wrist button on OpenXR and a system ornament on visionOS.
 bool HeadsetActive() {
     auto ctx = Ship::Context::GetRawInstance();
     if (ctx == nullptr || ctx->GetWindow() == nullptr) {
         return false;
     }
-    return ctx->GetWindow()->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+    const int32_t backend = ctx->GetWindow()->GetWindowBackend();
+    return backend == Fast::WindowBackend::FAST3D_OPENXR_OPENGL ||
+           backend == Fast::WindowBackend::FAST3D_VISIONOS_METAL;
 }
 
 // True when the pad itself should be drawn and polled. The menu button outlives it so
@@ -950,6 +955,10 @@ extern "C" void TouchControls_Poll(void) {
     sState = next;
 }
 
+extern "C" void TouchControls_OpenMenu(void) {
+    OpenMenu();
+}
+
 extern "C" void TouchControls_MergeInto(void* contPad) {
     if (contPad == nullptr || !PadActive()) {
         return;
@@ -1050,26 +1059,6 @@ void TouchControls_Draw() {
             dl->AddRectFilled(ImVec2(center.x - barHalfW, y - barHalfH), ImVec2(center.x + barHalfW, y + barHalfH),
                               barShade, barHalfH);
         }
-
-#ifdef PLATFORM_VISIONOS
-        // A foreground draw list adds no ImGui item, so the visionOS hover mask has nothing here
-        // for the gaze to land on and no pinch can reach the button. One invisible button over the
-        // same rectangle puts it in the mask, and the press then arrives like any other.
-        const ImVec2 menuSize(menuMax.x - menuMin.x, menuMax.y - menuMin.y);
-        ImGui::SetNextWindowPos(menuMin);
-        ImGui::SetNextWindowSize(menuSize);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        if (ImGui::Begin("##TouchMenuButtonArea", nullptr,
-                         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground |
-                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
-                             ImGuiWindowFlags_NoFocusOnAppearing)) {
-            if (ImGui::InvisibleButton("##TouchMenuButton", menuSize)) {
-                OpenMenu();
-            }
-        }
-        ImGui::End();
-        ImGui::PopStyleVar();
-#endif
     }
 
     if (!PadActive()) {

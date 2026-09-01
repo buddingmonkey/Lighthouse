@@ -37,6 +37,10 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame);
 // the shell then keeps the shape it opened with.
 float LighthouseVolumeAspect(void);
 
+// Opens or closes the menu. The ornament under the volume is where the menu button lives, so the
+// picture carries nothing but the game. It arrives on the main thread.
+void LighthouseVolumeOpenMenu(void);
+
 // Where a drag meets the picture, in game texture pixels. One gesture carries the tap, the drag
 // and the release, because a slider needs all three.
 void LighthouseVolumePoint(float x, float y, bool pressed);

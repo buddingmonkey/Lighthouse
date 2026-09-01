@@ -17,6 +17,7 @@
 extern "C" int SDL_main(int argc, char* argv[]);
 extern "C" void SDL_SetMainReady(void);
 extern "C" void port_setAppOnScreen(int onScreen);
+extern "C" void TouchControls_OpenMenu(void);
 
 namespace {
 
@@ -355,6 +356,10 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
 
 float LighthouseVolumeAspect(void) {
     return Fast::GetVisionOSPictureAspect();
+}
+
+void LighthouseVolumeOpenMenu(void) {
+    TouchControls_OpenMenu();
 }
 
 void LighthouseVolumePoint(float x, float y, bool pressed) {
