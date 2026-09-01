@@ -999,7 +999,9 @@ endif()
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY APPIMAGE_DESKTOP_FILE_TERMINAL YES)
 set_property(TARGET ${PROJECT_NAME} PROPERTY APPIMAGE_DESKTOP_FILE "${CMAKE_SOURCE_DIR}/Lighthouse.desktop")
-set_property(TARGET ${PROJECT_NAME} PROPERTY APPIMAGE_ICON_FILE "${CMAKE_SOURCE_DIR}/logo.png")
+# linuxdeploy rejects any icon above 512x512, and the basename has to stay "logo" to match
+# Icon=logo in Lighthouse.desktop. logo.png is the 1024 master the macOS iconset needs.
+set_property(TARGET ${PROJECT_NAME} PROPERTY APPIMAGE_ICON_FILE "${CMAKE_SOURCE_DIR}/linux/logo.png")
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
