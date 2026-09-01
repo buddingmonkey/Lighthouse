@@ -2,6 +2,7 @@
 
 #include <simd/simd.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -38,6 +39,20 @@ float LighthouseVolumeAspect(void);
 // Where a drag meets the picture, in game texture pixels. One gesture carries the tap, the drag
 // and the release, because a slider needs all three.
 void LighthouseVolumePoint(float x, float y, bool pressed);
+
+// One rectangle the system can highlight, in game texture pixels. An identifier of zero is a
+// window, which takes no highlight of its own and only hides what is behind it.
+typedef struct {
+    float MinX;
+    float MinY;
+    float MaxX;
+    float MaxY;
+    uint64_t Identifier;
+} LighthouseVolumeHoverRect;
+
+// The menu rectangles of the last finished frame, back to front. visionOS never says where the
+// wearer looks, so the shell offers these to the system and the system draws the highlight itself.
+size_t LighthouseVolumeHoverRects(LighthouseVolumeHoverRect* out, size_t max);
 
 // How long the shell spent copying the finished picture, in seconds.
 void LighthouseVolumeNoteCopy(double seconds);

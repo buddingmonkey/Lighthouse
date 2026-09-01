@@ -8,6 +8,9 @@ import SwiftUI
 import UIKit
 
 private let kSpaceId = "LighthouseImmersiveSpace"
+// More items than a menu ever has on screen at once.
+private let kHoverRectMax = 256
+private let kPlateSpace = "LighthousePlate"
 private let kEyeWidth = 1280
 private let kTextureHeight = 720
 // The two eyes stand side by side in one picture, and a camera index switch in the material gives
@@ -67,6 +70,80 @@ private func note(_ text: String) {
     FileHandle.standardError.write("Lighthouse volume: \(text)\n".data(using: .utf8)!)
 }
 
+// One place the wearer may look. The game texture pixels it covers, and whether it is an item or
+// the window that hides the items behind it.
+private struct HoverRect: Identifiable, Equatable {
+    let id: Int
+    let frame: CGRect
+    let item: Bool
+}
+
+@MainActor @Observable private final class HoverPlate {
+    var rects: [HoverRect] = []
+    var size = SIMD2<Float>(0.0, 0.0)
+}
+
+// visionOS gives no app the gaze, so a highlight can only be drawn by the system. A clear view for
+// each menu item, in front of the picture and the size of the item, is what the system needs to
+// draw one. The views take no press, so the drag on the quad still carries every click.
+private struct HoverPlateView: View {
+    let plate: HoverPlate
+    let press: (CGPoint, Bool) -> Void
+    @PhysicalMetric(from: .meters) private var meter: CGFloat = 1.0
+
+    var body: some View {
+        let width = CGFloat(plate.size.x) * meter
+        let height = CGFloat(plate.size.y) * meter
+        // The whole game texture spans the whole quad, which is what the drag on the quad assumes
+        // as well, so the two axes take their own scale.
+        let across = width / CGFloat(kEyeWidth)
+        let down = height / CGFloat(kTextureHeight)
+        ZStack(alignment: .topLeading) {
+            Color.clear
+                .frame(width: max(width, 0.0), height: max(height, 0.0))
+                .contentShape(Rectangle())
+            ForEach(plate.rects) { rect in
+                HoverPlace(item: rect.item)
+                    .frame(width: rect.frame.width * across, height: rect.frame.height * down)
+                    .offset(x: rect.frame.minX * across, y: rect.frame.minY * down)
+            }
+        }
+        .frame(width: max(width, 0.0), height: max(height, 0.0), alignment: .topLeading)
+        .coordinateSpace(name: kPlateSpace)
+        .gesture(
+            DragGesture(minimumDistance: 0.0, coordinateSpace: .named(kPlateSpace))
+                .onChanged { press($0.location, true) }
+                .onEnded { press($0.location, false) }
+        )
+    }
+}
+
+// Measured: a plate at opacity zero is not hit-testable, so it can never become active. The black
+// anchor carries the alpha the gaze needs, and the group gives the gaze to the white flash.
+private struct HoverPlace: View {
+    let item: Bool
+
+    var body: some View {
+        ZStack {
+            if item {
+                RoundedRectangle(cornerRadius: 6.0, style: .continuous)
+                    .fill(Color.white.opacity(0.25))
+                    .contentShape(.hoverEffect, .rect(cornerRadius: 6.0))
+                    .hoverEffect { effect, isActive, _ in
+                        effect.opacity(isActive ? 1.0 : 0.0)
+                    }
+            }
+            RoundedRectangle(cornerRadius: 6.0, style: .continuous)
+                .fill(Color.black.opacity(0.25))
+                .contentShape(.hoverEffect, .rect(cornerRadius: 6.0))
+                .hoverEffect { effect, _, _ in
+                    effect.opacity(0.08)
+                }
+        }
+        .hoverEffectGroup()
+    }
+}
+
 @MainActor
 private final class VolumeState {
     let device: any MTLDevice
@@ -80,6 +157,9 @@ private final class VolumeState {
     var bounds = BoundingBox()
     var aspect: Float = 16.0 / 9.0
     var phase: Int32 = 2
+    let hover = HoverPlate()
+    var pointsPerMeter: CGFloat = 1360.0
+    private var rawHover = [LighthouseVolumeHoverRect](repeating: LighthouseVolumeHoverRect(), count: kHoverRectMax)
 
     private(set) var stereo = false
     private var eyeMaterial: (any RealityKit.Material)?
@@ -156,8 +236,46 @@ private final class VolumeState {
 
     // A drag needs something to hit. The box is as thin as the picture it stands for.
     private func collide() {
-        let shape = ShapeResource.generateBox(width: quadSize.x, height: quadSize.y, depth: 0.01)
+        let shape = ShapeResource.generateBox(width: quadSize.x, height: quadSize.y, depth: 0.002)
         quad?.components.set(CollisionComponent(shapes: [shape], isStatic: true))
+    }
+
+    // The game thread publishes the rectangles as it ends a frame. A menu that stands still gives
+    // the same set every update, and SwiftUI is only asked to do the work when the set changes.
+    private func readHover() {
+        let count = rawHover.withUnsafeMutableBufferPointer { buffer in
+            LighthouseVolumeHoverRects(buffer.baseAddress, kHoverRectMax)
+        }
+        var next: [HoverRect] = []
+        next.reserveCapacity(count)
+        for index in 0..<count {
+            let rect = rawHover[index]
+            next.append(HoverRect(id: index,
+                                  frame: CGRect(x: CGFloat(rect.MinX),
+                                                y: CGFloat(rect.MinY),
+                                                width: CGFloat(rect.MaxX - rect.MinX),
+                                                height: CGFloat(rect.MaxY - rect.MinY)),
+                                  item: rect.Identifier != 0))
+        }
+        if hover.rects != next {
+            hover.rects = next
+        }
+        if hover.size != quadSize {
+            hover.size = quadSize
+        }
+    }
+
+    // The plate stands in front of the quad, so the pinch lands there and not on the quad. It
+    // reports the place in its own points, which is the picture itself, so the game texture pixel
+    // is a scale away.
+    func plate(_ location: CGPoint, pressed: Bool) {
+        guard hover.size.x > 0.0, hover.size.y > 0.0 else { return }
+        let width = CGFloat(hover.size.x) * CGFloat(pointsPerMeter)
+        let height = CGFloat(hover.size.y) * CGFloat(pointsPerMeter)
+        guard width > 0.0, height > 0.0 else { return }
+        let x = min(max(location.x / width, 0.0), 1.0) * CGFloat(kEyeWidth)
+        let y = min(max(location.y / height, 0.0), 1.0) * CGFloat(kTextureHeight)
+        LighthouseVolumePoint(Float(x), Float(y), pressed)
     }
 
     func point(_ value: EntityTargetValue<DragGesture.Value>, pressed: Bool) {
@@ -170,6 +288,7 @@ private final class VolumeState {
 
     func tick() {
         guard let quad else { return }
+        readHover()
         let shape = LighthouseVolumeAspect()
         if shape > 0.0, abs(shape - aspect) > 0.001 {
             aspect = shape
@@ -217,27 +336,38 @@ private final class VolumeState {
 
 private struct LighthouseVolumeView: View {
     let state: VolumeState
+    @PhysicalMetric(from: .meters) private var meter: CGFloat = 1.0
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
 
     var body: some View {
         GeometryReader3D { proxy in
-            RealityView { content in
-                content.add(state.makeQuad())
-                state.size(to: content.convert(proxy.frame(in: .local), from: .local, to: .scene))
-                state.subscription = content.subscribe(to: SceneEvents.Update.self) { _ in
-                    state.tick()
+            ZStack {
+                RealityView { content in
+                    content.add(state.makeQuad())
+                    state.size(to: content.convert(proxy.frame(in: .local), from: .local, to: .scene))
+                    state.subscription = content.subscribe(to: SceneEvents.Update.self) { _ in
+                        state.tick()
+                    }
+                } update: { content in
+                    state.size(to: content.convert(proxy.frame(in: .local), from: .local, to: .scene))
                 }
-            } update: { content in
-                state.size(to: content.convert(proxy.frame(in: .local), from: .local, to: .scene))
+                .gesture(
+                    DragGesture(minimumDistance: 0.0)
+                        .targetedToAnyEntity()
+                        .onChanged { state.point($0, pressed: true) }
+                        .onEnded { state.point($0, pressed: false) }
+                )
+
+                // Measured: a volume puts a flat view at its front face and clips whatever stands in
+                // front of that, and the picture hangs in the middle, so the plate is carried back.
+                HoverPlateView(plate: state.hover) { location, pressed in
+                    state.plate(location, pressed: pressed)
+                }
+                .offset(z: 0.004 * meter - proxy.size.depth * 0.5)
+                .onAppear { state.pointsPerMeter = meter }
             }
-            .gesture(
-                DragGesture(minimumDistance: 0.0)
-                    .targetedToAnyEntity()
-                    .onChanged { state.point($0, pressed: true) }
-                    .onEnded { state.point($0, pressed: false) }
-            )
         }
         // A volumetric window keeps the sticks for scrolling and the face buttons for itself, and
         // an app that says nothing gets the D pad, the stick clicks and Menu and nothing else. This

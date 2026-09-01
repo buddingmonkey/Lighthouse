@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cmath>
 #include <mutex>
+#include <vector>
 
 extern "C" int SDL_main(int argc, char* argv[]);
 extern "C" void SDL_SetMainReady(void);
@@ -358,6 +359,15 @@ float LighthouseVolumeAspect(void) {
 
 void LighthouseVolumePoint(float x, float y, bool pressed) {
     Fast::PushVisionOSPointer({ x, y, 0, true, pressed });
+}
+
+size_t LighthouseVolumeHoverRects(LighthouseVolumeHoverRect* out, size_t max) {
+    std::vector<Fast::VisionOSTrackingRect> rects(max);
+    const size_t count = Fast::CopyVisionOSTrackingRects(rects.data(), max);
+    for (size_t i = 0; i < count; ++i) {
+        out[i] = { rects[i].MinX, rects[i].MinY, rects[i].MaxX, rects[i].MaxY, rects[i].Identifier };
+    }
+    return count;
 }
 
 void LighthouseVolumeNoteCopy(double seconds) {
