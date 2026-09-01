@@ -1052,9 +1052,9 @@ void TouchControls_Draw() {
         }
 
 #ifdef PLATFORM_VISIONOS
-        // A foreground draw list adds no ImGui item, so the visionOS tracking mask has nothing here
+        // A foreground draw list adds no ImGui item, so the visionOS hover mask has nothing here
         // for the gaze to land on and no pinch can reach the button. One invisible button over the
-        // same rectangle gives it a tracking area, and the press then arrives like any other.
+        // same rectangle puts it in the mask, and the press then arrives like any other.
         const ImVec2 menuSize(menuMax.x - menuMin.x, menuMax.y - menuMin.y);
         ImGui::SetNextWindowPos(menuMin);
         ImGui::SetNextWindowSize(menuSize);
