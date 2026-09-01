@@ -26,22 +26,20 @@
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true/>
+    <!-- Without this the system takes the game controller for its own window navigation, and only
+         a few of the presses reach the app. -->
+    <key>GCSupportsControllerUserInteraction</key>
+    <true/>
+    <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
+    <key>NSWorldSensingUsageDescription</key>
+    <string>Lighthouse places the game window in the room.</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
         <true/>
         <key>UIApplicationPreferredDefaultSceneSessionRole</key>
-        <string>CPSceneSessionRoleImmersiveSpaceApplication</string>
-        <key>UISceneConfigurations</key>
-        <dict>
-            <key>CPSceneSessionRoleImmersiveSpaceApplication</key>
-            <array>
-                <dict>
-                    <key>UISceneInitialImmersionStyle</key>
-                    <string>UIImmersionStyleMixed</string>
-                </dict>
-            </array>
-        </dict>
+        <string>UIWindowSceneSessionRoleVolumetricApplication</string>
     </dict>
 </dict>
 </plist>

@@ -358,7 +358,7 @@ float LighthouseVolumeAspect(void) {
 }
 
 void LighthouseVolumePoint(float x, float y, bool pressed) {
-    Fast::PushVisionOSPointer({ x, y, 0, true, pressed });
+    Fast::PushVisionOSPointer({ x, y, true, pressed });
 }
 
 size_t LighthouseVolumeHoverRects(LighthouseVolumeHoverRect* out, size_t max) {

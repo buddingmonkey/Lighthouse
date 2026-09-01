@@ -138,10 +138,11 @@ if(LIGHTHOUSE_APPLE_MOBILE)
     set(BUNDLE_ID "${PROJECT_ID}" CACHE STRING "Bundle ID libultraship signs its targets with")
     # The minimum version comes from the toolchain's DEPLOYMENT_TARGET; mirror it into the plist.
     set(IOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
-    if(CMAKE_SYSTEM_NAME STREQUAL "visionOS" AND IOS_DEPLOYMENT_TARGET VERSION_LESS 26.0)
-        # Tracking areas, the hover effect and cp_frame_query_drawables all start at visionOS 26.
+    if(CMAKE_SYSTEM_NAME STREQUAL "visionOS" AND IOS_DEPLOYMENT_TARGET VERSION_LESS 2.0)
+        # LowLevelTexture, a volume the system moves and resizes, and the custom hover effect the
+        # gaze highlight is drawn with, all start at visionOS 2.
         message(FATAL_ERROR "visionOS deployment target is ${IOS_DEPLOYMENT_TARGET}; pass "
-                            "-DDEPLOYMENT_TARGET=26.0 to the toolchain.")
+                            "-DDEPLOYMENT_TARGET=2.0 to the toolchain.")
     endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND IOS_DEPLOYMENT_TARGET VERSION_LESS 14.0)
         # The plist uses UILaunchScreen (iOS 14+) and libultraship pulls in iOS 16 metal-cpp headers.
@@ -261,22 +262,12 @@ file(GLOB_RECURSE ALL_FILES CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DI
 
 list(FILTER ALL_FILES EXCLUDE REGEX "src/unused/")
 
-option(LIGHTHOUSE_VISIONOS_COMPOSITOR "Build the visionOS app on Compositor Services, not on a volume" OFF)
-
 if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
-    if(LIGHTHOUSE_VISIONOS_COMPOSITOR)
-        list(APPEND ALL_FILES
-            visionos/LighthouseVisionApp.swift
-            visionos/LighthouseVisionBridge.h
-            visionos/LighthouseVisionBridge.mm
-        )
-    else()
-        list(APPEND ALL_FILES
-            visionos/LighthouseVolumeApp.swift
-            visionos/LighthouseVolumeBridge.h
-            visionos/LighthouseVolumeBridge.mm
-        )
-    endif()
+    list(APPEND ALL_FILES
+        visionos/LighthouseVolumeApp.swift
+        visionos/LighthouseVolumeBridge.h
+        visionos/LighthouseVolumeBridge.mm
+    )
 endif()
 
 if (NOT LIGHTHOUSE_APPLE_MOBILE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
@@ -294,13 +285,8 @@ endforeach()
 if (LIGHTHOUSE_APPLE_MOBILE)
     set(IOS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ios)
     if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
-        if(LIGHTHOUSE_VISIONOS_COMPOSITOR)
-            set(APPLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Info.plist.in)
-            set(VISIONOS_BRIDGING_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/visionos/LighthouseVisionBridge.h)
-        else()
-            set(APPLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Info.volume.plist.in)
-            set(VISIONOS_BRIDGING_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/visionos/LighthouseVolumeBridge.h)
-        endif()
+        set(APPLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Info.plist.in)
+        set(VISIONOS_BRIDGING_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/visionos/LighthouseVolumeBridge.h)
         set(APPLE_ASSET_CATALOG ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Assets.xcassets)
     else()
         set(APPLE_INFO_PLIST ${IOS_DIR}/Info.plist.in)
@@ -617,9 +603,8 @@ elseif(LIGHTHOUSE_APPLE_MOBILE)
     endforeach()
     if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
         find_library(IOS_FW_ARKit ARKit REQUIRED)
-        find_library(IOS_FW_CompositorServices CompositorServices REQUIRED)
         find_library(IOS_FW_Metal Metal REQUIRED)
-        list(APPEND ADDITIONAL_LIBRARY_DEPENDENCIES ${IOS_FW_ARKit} ${IOS_FW_CompositorServices} ${IOS_FW_Metal})
+        list(APPEND ADDITIONAL_LIBRARY_DEPENDENCIES ${IOS_FW_ARKit} ${IOS_FW_Metal})
     endif()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
     set(ADDITIONAL_LIBRARY_DEPENDENCIES log android EGL GLESv3)
@@ -992,7 +977,7 @@ if(LIGHTHOUSE_APPLE_MOBILE)
     target_sources(${PROJECT_NAME} PRIVATE ${APPLE_ASSET_CATALOG})
     set_source_files_properties(${APPLE_ASSET_CATALOG} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
-    if(CMAKE_SYSTEM_NAME STREQUAL "visionOS" AND NOT LIGHTHOUSE_VISIONOS_COMPOSITOR)
+    if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
         # A raw .usda, copied and not compiled. It holds the camera index switch that gives each eye
         # its own half of the picture, which no material the API can build by itself reaches.
         target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/visionos/GameScreen.usda)
