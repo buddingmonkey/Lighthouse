@@ -30,6 +30,10 @@ const float kRangeDefault = 1.3f;
 // Apple keeps the wearer's own distance private, so the eyes are made from the head. The diorama
 // gain compresses every disparity anyway, so a few millimeters of error is a few percent of depth.
 const float kNominalIPD = 0.063f;
+// The head states that are not an ARKit query status, which starts at zero.
+const int kHeadUnreported = -3;
+const int kHeadNoTracking = -2;
+const int kHeadNoQuad = -1;
 
 struct Sample {
     simd_float3 Head = { 0.0f, 0.0f, kRangeDefault };
@@ -299,26 +303,43 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
     sample.ScenePhase = frame.ScenePhase;
     sample.QuadValid = frame.HasQuad;
 
-    if (frame.HasQuad && gVolume.TrackingProvider != nullptr) {
-        static bool sReported = false;
-        static ar_device_anchor_query_status_t sStatus = ar_device_anchor_query_status_failure;
+    // Nothing else states whether there is a head. Without the quad's place in the immersive space
+    // there is no pose to ask for, and when the anchor stops answering the picture keeps drawing
+    // and only the parallax dies. Both are the kind of fault that is found late, so the state is
+    // reported once and again only when it changes. A run of 7 minutes on 2026-09-02 reported it
+    // for the first time as it ended, which is what a state that is never reported looks like.
+    int headState;
+    if (gVolume.TrackingProvider == nullptr) {
+        headState = kHeadNoTracking;
+    } else if (!frame.HasQuad) {
+        headState = kHeadNoQuad;
+    } else {
         const ar_device_anchor_query_status_t status = ar_world_tracking_provider_query_device_anchor_at_timestamp(
             gVolume.TrackingProvider, now, gVolume.DeviceAnchor);
-        if (status != sStatus || !sReported) {
-            // Nothing else states this. When the anchor stops answering the picture keeps drawing
-            // and only the parallax dies, which is the kind of fault that is found late.
-            sReported = true;
-            sStatus = status;
-            char line[64];
-            snprintf(line, sizeof(line), "the device anchor query says %d", (int)status);
-            Fast::ReportVisionOS(line);
-        }
+        headState = (int)status;
         if (status == ar_device_anchor_query_status_success) {
             const simd_float4x4 originFromDevice =
                 ar_device_anchor_get_origin_from_anchor_transform(gVolume.DeviceAnchor);
             const simd_float4 head = simd_mul(simd_inverse(frame.ImmersiveFromQuad), originFromDevice.columns[3]);
             sample.Head = head.xyz;
             sample.HeadValid = true;
+        }
+    }
+    {
+        // A state reported once can be reported before the log file exists, which is how the run
+        // of 2026-09-02 said nothing at all. So it is said again: every ten seconds while the head
+        // is not answering, and once a minute while it is, which is cheap and leaves no run unable
+        // to say whether it had a head.
+        static int sHeadState = kHeadUnreported;
+        static double sHeadSaid = 0.0;
+        const bool healthy = headState == (int)ar_device_anchor_query_status_success;
+        if (headState != sHeadState || now - sHeadSaid > (healthy ? 60.0 : 10.0)) {
+            sHeadState = headState;
+            sHeadSaid = now;
+            char line[96];
+            snprintf(line, sizeof(line), "the head says %d, where %d is no world tracking and %d is no quad",
+                     headState, kHeadNoTracking, kHeadNoQuad);
+            Fast::ReportVisionOS(line);
         }
     }
 
