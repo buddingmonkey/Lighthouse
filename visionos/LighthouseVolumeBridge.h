@@ -37,6 +37,10 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame);
 // the shell then keeps the shape it opened with.
 float LighthouseVolumeAspect(void);
 
+// One line the shell must be able to say after a run. Only what goes through the game's own logger
+// reaches the log file on the device; stderr reaches a console session and nowhere else.
+void LighthouseVolumeNote(const char* text);
+
 // Opens or closes the menu. The ornament under the volume is where the menu button lives, so the
 // picture carries nothing but the game. It arrives on the main thread.
 void LighthouseVolumeOpenMenu(void);
@@ -59,8 +63,10 @@ typedef struct {
 // wearer looks, so the shell offers these to the system and the system draws the highlight itself.
 size_t LighthouseVolumeHoverRects(LighthouseVolumeHoverRect* out, size_t max);
 
-// How long the shell spent copying the finished picture, in seconds.
+// How long the shell spent copying the finished picture, in seconds: the encoding, and then what
+// the GPU took over it. The second one arrives a frame or more later, when the blit retires.
 void LighthouseVolumeNoteCopy(double seconds);
+void LighthouseVolumeNoteCopyGpu(double seconds);
 
 // Whether the shell can show an eye each. Set it before the game starts.
 void LighthouseVolumeSetStereo(bool stereo);

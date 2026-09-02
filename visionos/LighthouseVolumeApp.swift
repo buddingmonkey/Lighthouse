@@ -75,7 +75,7 @@ private let kMenuGap = 14.0
 }
 
 private func note(_ text: String) {
-    FileHandle.standardError.write("Lighthouse volume: \(text)\n".data(using: .utf8)!)
+    LighthouseVolumeNote(text)
 }
 
 // One place the wearer may look. The game texture pixels it covers, and whether it is an item or
@@ -337,6 +337,9 @@ private final class VolumeState {
                           destinationOrigin: MTLOrigin(x: eye * kEyeWidth, y: 0, z: 0))
             }
             blit.endEncoding()
+        }
+        buffer.addCompletedHandler { done in
+            LighthouseVolumeNoteCopyGpu(done.gpuEndTime - done.gpuStartTime)
         }
         buffer.commit()
         LighthouseVolumeNoteCopy(CACurrentMediaTime() - started)

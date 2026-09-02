@@ -535,11 +535,6 @@ endif()
 if (LIGHTHOUSE_APPLE_MOBILE)
     # libultraship defines __IOS__ only for its own target; the game needs it too.
     target_compile_definitions(${PROJECT_NAME} PRIVATE __IOS__)
-    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-        target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_IOS=1)
-    else()
-        target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_VISIONOS=1)
-    endif()
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Android")
     # The decompiled game code assumes a signed char; AArch64 Linux does not.
     target_compile_options(${PROJECT_NAME} PRIVATE -fsigned-char)

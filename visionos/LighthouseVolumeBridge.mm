@@ -8,6 +8,7 @@
 #import <simd/simd.h>
 
 #include <fast/backends/gfx_visionos.h>
+#include <fast/backends/gfx_xr_view.h>
 
 #include <atomic>
 #include <cmath>
@@ -56,13 +57,6 @@ struct VolumeState {
     bool Stopped = false;
     void (*ShutdownHandler)(void) = nullptr;
 
-    double FrameOpened = 0.0;
-    double WaitTotal = 0.0;
-    double DrawTotal = 0.0;
-    double CopyTotal = 0.0;
-    double NextRate = 0.0;
-    int Updates = 0;
-    int Frames = 0;
 };
 
 VolumeState gVolume;
@@ -121,6 +115,8 @@ bool VolumeOpenFrame() {
     // comes back on the next update.
     const double before = CACurrentMediaTime();
     if (dispatch_semaphore_wait(gVolume.Frame, dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC)) != 0) {
+        // The wait that found nothing is the one worth reporting, so it is counted here as well.
+        Fast::AddXrCost(Fast::XrCost::Wait, CACurrentMediaTime() - before);
         return false;
     }
     // Take every slot that piled up while the last frame drew, so the game can be at most one frame
@@ -128,8 +124,7 @@ bool VolumeOpenFrame() {
     // the slower of the two, and the game then never waits and never learns that it is behind.
     while (dispatch_semaphore_wait(gVolume.Frame, DISPATCH_TIME_NOW) == 0) {
     }
-    gVolume.FrameOpened = CACurrentMediaTime();
-    gVolume.WaitTotal += gVolume.FrameOpened - before;
+    Fast::AddXrCost(Fast::XrCost::Wait, CACurrentMediaTime() - before);
 
     Sample sample;
     {
@@ -158,8 +153,7 @@ bool VolumeOpenFrame() {
 }
 
 void VolumeCloseFrame() {
-    gVolume.DrawTotal += CACurrentMediaTime() - gVolume.FrameOpened;
-    ++gVolume.Frames;
+    Fast::CountXrFrame();
     Fast::FlipVisionOSGameTextures();
     gVolume.TextureReady.store(true, std::memory_order_release);
 }
@@ -213,7 +207,7 @@ void StartKeyboard() {
 
 void StartTracking() {
     if (!ar_world_tracking_provider_is_supported()) {
-        NSLog(@"Lighthouse volume: world tracking is not supported");
+        Fast::ReportVisionOS("world tracking is not supported");
         return;
     }
     ar_world_tracking_configuration_t configuration = ar_world_tracking_configuration_create();
@@ -315,8 +309,9 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
             // and only the parallax dies, which is the kind of fault that is found late.
             sReported = true;
             sStatus = status;
-            fprintf(stderr, "Lighthouse volume: the device anchor query says %d\n", (int)status);
-            fflush(stderr);
+            char line[64];
+            snprintf(line, sizeof(line), "the device anchor query says %d", (int)status);
+            Fast::ReportVisionOS(line);
         }
         if (status == ar_device_anchor_query_status_success) {
             const simd_float4x4 originFromDevice =
@@ -333,29 +328,18 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
     }
     dispatch_semaphore_signal(gVolume.Frame);
 
-    // Nothing else states what the game is really presenting. The update rate is what the volume
-    // offers, the frame rate is what the game takes, and the three times say which of them is the
-    // one that costs.
-    ++gVolume.Updates;
-    if (now >= gVolume.NextRate) {
-        if (gVolume.NextRate > 0.0 && gVolume.Frames > 0) {
-            fprintf(stderr,
-                    "Lighthouse volume: updates %d/s, frames %d/s, draw %.1f ms, wait %.1f ms, copy %.1f ms\n",
-                    gVolume.Updates, gVolume.Frames, 1000.0 * gVolume.DrawTotal / gVolume.Frames,
-                    1000.0 * gVolume.WaitTotal / gVolume.Frames, 1000.0 * gVolume.CopyTotal / gVolume.Frames);
-            fflush(stderr);
-        }
-        gVolume.NextRate = now + 1.0;
-        gVolume.Updates = 0;
-        gVolume.Frames = 0;
-        gVolume.DrawTotal = 0.0;
-        gVolume.WaitTotal = 0.0;
-        gVolume.CopyTotal = 0.0;
-    }
+    // Nothing else states what the game is really presenting. The volume offers the updates, the
+    // game takes what it can of them, and the report says which of the two is the slower one.
+    Fast::CountXrPresent();
+    Fast::ReportXrCost();
 }
 
 float LighthouseVolumeAspect(void) {
     return Fast::GetVisionOSPictureAspect();
+}
+
+void LighthouseVolumeNote(const char* text) {
+    Fast::ReportVisionOS(text);
 }
 
 void LighthouseVolumeOpenMenu(void) {
@@ -376,7 +360,11 @@ size_t LighthouseVolumeHoverRects(LighthouseVolumeHoverRect* out, size_t max) {
 }
 
 void LighthouseVolumeNoteCopy(double seconds) {
-    gVolume.CopyTotal += seconds;
+    Fast::AddXrCost(Fast::XrCost::Copy, seconds);
+}
+
+void LighthouseVolumeNoteCopyGpu(double seconds) {
+    Fast::AddXrCost(Fast::XrCost::CopyGpu, seconds);
 }
 
 void LighthouseVolumeSetStereo(bool stereo) {
