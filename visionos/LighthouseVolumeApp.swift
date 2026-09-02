@@ -24,6 +24,9 @@ private let kVolumeHeight = kVolumeWidth / kPictureAspect
 private let kVolumeDepth = 0.35
 // The ornament's own top edge meets the bottom of the volume, so the gap is padding above it.
 private let kMenuGap = 14.0
+// How far in front of the picture the gaze plate stands, in meters. Above the 27 mm the sorting
+// needs, and small enough that each eye sees the plate within about one game pixel of its item.
+private let kPlateLift = 0.04
 
 // The shutdown handler the bridge calls is a plain C function, so what it needs is here.
 @MainActor private var gOpenSpace: OpenImmersiveSpaceAction?
@@ -96,7 +99,7 @@ private struct HoverRect: Identifiable, Equatable {
 // draw one. The views take no press, so the drag on the quad still carries every click.
 private struct HoverPlateView: View {
     let plate: HoverPlate
-    let press: (CGPoint, Bool) -> Void
+    let press: (CGPoint, CGSize, Bool) -> Void
     @PhysicalMetric(from: .meters) private var meter: CGFloat = 1.0
 
     var body: some View {
@@ -120,8 +123,8 @@ private struct HoverPlateView: View {
         .coordinateSpace(name: kPlateSpace)
         .gesture(
             DragGesture(minimumDistance: 0.0, coordinateSpace: .named(kPlateSpace))
-                .onChanged { press($0.location, true) }
-                .onEnded { press($0.location, false) }
+                .onChanged { press($0.location, CGSize(width: width, height: height), true) }
+                .onEnded { press($0.location, CGSize(width: width, height: height), false) }
         )
     }
 }
@@ -166,7 +169,6 @@ private final class VolumeState {
     var aspect = Float(kPictureAspect)
     var phase: Int32 = 2
     let hover = HoverPlate()
-    var pointsPerMeter: CGFloat = 1360.0
     private var rawHover = [LighthouseVolumeHoverRect](repeating: LighthouseVolumeHoverRect(), count: kHoverRectMax)
 
     private(set) var stereo = false
@@ -274,16 +276,13 @@ private final class VolumeState {
         }
     }
 
-    // The plate stands in front of the quad, so the pinch lands there and not on the quad. It
-    // reports the place in its own points, which is the picture itself, so the game texture pixel
-    // is a scale away.
-    func plate(_ location: CGPoint, pressed: Bool) {
-        guard hover.size.x > 0.0, hover.size.y > 0.0 else { return }
-        let width = CGFloat(hover.size.x) * CGFloat(pointsPerMeter)
-        let height = CGFloat(hover.size.y) * CGFloat(pointsPerMeter)
-        guard width > 0.0, height > 0.0 else { return }
-        let x = min(max(location.x / width, 0.0), 1.0) * CGFloat(kEyeWidth)
-        let y = min(max(location.y / height, 0.0), 1.0) * CGFloat(kTextureHeight)
+    // The plate stands in front of the quad, so the pinch lands there and not on the quad. The
+    // plate reports both the place and the rectangle it measured it in, so the two cannot disagree
+    // about how many points a meter is.
+    func plate(_ location: CGPoint, in size: CGSize, pressed: Bool) {
+        guard size.width > 0.0, size.height > 0.0 else { return }
+        let x = min(max(location.x / size.width, 0.0), 1.0) * CGFloat(kEyeWidth)
+        let y = min(max(location.y / size.height, 0.0), 1.0) * CGFloat(kTextureHeight)
         LighthouseVolumePoint(Float(x), Float(y), pressed)
     }
 
@@ -374,11 +373,14 @@ private struct LighthouseVolumeView: View {
 
                 // Measured: a volume puts a flat view at its front face and clips whatever stands in
                 // front of that, and the picture hangs in the middle, so the plate is carried back.
-                HoverPlateView(plate: state.hover) { location, pressed in
-                    state.plate(location, pressed: pressed)
+                // It must stop short of the picture. A flat view and a model entity that stand
+                // within about 27 mm of each other do not sort, and the picture wins: at 25 mm the
+                // plate is gone and only the sliver its perspective leaves outside the picture is
+                // drawn. Measured in the simulator between 4 and 50 mm.
+                HoverPlateView(plate: state.hover) { location, size, pressed in
+                    state.plate(location, in: size, pressed: pressed)
                 }
-                .offset(z: 0.004 * meter - proxy.size.depth * 0.5)
-                .onAppear { state.pointsPerMeter = meter }
+                .offset(z: kPlateLift * meter - proxy.size.depth * 0.5)
             }
         }
         // A volumetric window keeps the sticks for scrolling and the face buttons for itself, and
