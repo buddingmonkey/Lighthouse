@@ -1173,6 +1173,7 @@ SubframePacing ComputeSubframePacing() {
     // the game presents at the tick rate, which reads as a low frame rate with no other sign.
     {
         static double nextReport = 0.0;
+        static double windowStart = 0.0;
         static int ticks = 0;
         static int askedTotal = 0;
         static int deliveredTotal = 0;
@@ -1186,13 +1187,17 @@ SubframePacing ComputeSubframePacing() {
         deliveredTotal += sDeliveredSubFrames;
         viTotal += viPerTick;
         if (now >= nextReport) {
-            if (nextReport > 0.0 && ticks > 0) {
-                SPDLOG_INFO(
-                    "xr pacing: target {} Hz, ticks {}/s, vi {:.2f}, asked {:.2f}, delivered {:.2f}, work {:.2f} ms",
-                    target_fps, ticks, (double)viTotal / ticks, (double)askedTotal / ticks,
-                    (double)deliveredTotal / ticks, (double)sFilteredSubFrameNs / 1e6);
+            // The window is a second only if a tick arrived to close it. A parked app closes it
+            // late, so the rate comes from the wall time the ticks really took.
+            const double window = now - windowStart;
+            if (nextReport > 0.0 && ticks > 0 && window > 0.0) {
+                SPDLOG_INFO("xr pacing: target {} Hz, ticks {:.1f}/s, vi {:.2f}, asked {:.2f}, delivered {:.2f}, "
+                            "work {:.2f} ms",
+                            target_fps, (double)ticks / window, (double)viTotal / ticks, (double)askedTotal / ticks,
+                            (double)deliveredTotal / ticks, (double)sFilteredSubFrameNs / 1e6);
             }
             nextReport = now + 1.0;
+            windowStart = now;
             ticks = 0;
             askedTotal = 0;
             deliveredTotal = 0;
