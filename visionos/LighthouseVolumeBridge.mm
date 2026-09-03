@@ -20,6 +20,7 @@ extern "C" int SDL_main(int argc, char* argv[]);
 extern "C" void SDL_SetMainReady(void);
 extern "C" void port_setAppOnScreen(int onScreen);
 extern "C" void TouchControls_OpenMenu(void);
+extern "C" void LighthouseVolumeEncodeCopy(void);
 
 namespace {
 
@@ -55,7 +56,6 @@ struct VolumeState {
     dispatch_semaphore_t Frame = nullptr;
     std::mutex Mutex;
     Sample Latest;
-    std::atomic<bool> TextureReady{ false };
     std::atomic<bool> Running{ true };
     bool Started = false;
     bool Stereo = false;
@@ -167,7 +167,9 @@ bool VolumeOpenFrame() {
 void VolumeCloseFrame() {
     Fast::CountXrFrame();
     Fast::FlipVisionOSGameTextures();
-    gVolume.TextureReady.store(true, std::memory_order_release);
+    // Fast3D has committed by here, on this thread and this queue, so the shell's blit follows the
+    // game's own buffers and the picture cannot tear.
+    LighthouseVolumeEncodeCopy();
 }
 
 bool VolumeIsRunning() {
@@ -392,16 +394,16 @@ void LighthouseVolumeNoteCopy(double seconds) {
     Fast::AddXrCost(Fast::XrCost::Copy, seconds);
 }
 
+void LighthouseVolumeNotePrepare(double seconds) {
+    Fast::AddXrCost(Fast::XrCost::Prepare, seconds);
+}
+
 void LighthouseVolumeNoteCopyGpu(double seconds) {
     Fast::AddXrCost(Fast::XrCost::CopyGpu, seconds);
 }
 
 void LighthouseVolumeSetStereo(bool stereo) {
     gVolume.Stereo = stereo;
-}
-
-bool LighthouseVolumeTakeFrame(void) {
-    return gVolume.TextureReady.exchange(false, std::memory_order_acq_rel);
 }
 
 void* LighthouseVolumeTexture(int eye) {

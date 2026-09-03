@@ -82,6 +82,102 @@ private func note(_ text: String) {
     LighthouseVolumeNote(text)
 }
 
+// The encode and the commit of the picture copy are plain Metal work, but on the main thread they
+// stood between the volume and its next update. Only replace(using:) is bound to the main actor,
+// so the pair it makes crosses here to the game thread, which encodes the blit right after its own
+// commits on the same queue. One pair at a time, and a new replace only after the last commit, so
+// the handshake keeps the strict turn order it had when one thread did it all.
+private final class CopyHandoff: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pair: (any MTLCommandBuffer, any MTLTexture)?
+    private var busy = false
+    private var stereo = false
+    private var done = false
+
+    func setStereo() {
+        lock.lock()
+        stereo = true
+        lock.unlock()
+    }
+
+    var eyes: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return stereo ? 2 : 1
+    }
+
+    var hasRoom: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return pair == nil && !busy
+    }
+
+    func stash(_ buffer: any MTLCommandBuffer, _ destination: any MTLTexture) {
+        lock.lock()
+        pair = (buffer, destination)
+        lock.unlock()
+    }
+
+    func take() -> (any MTLCommandBuffer, any MTLTexture)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let taken = pair else { return nil }
+        pair = nil
+        busy = true
+        return taken
+    }
+
+    func finish() {
+        lock.lock()
+        busy = false
+        done = true
+        lock.unlock()
+    }
+
+    // True once a picture has been copied, which is the point where the game is up and its log
+    // file exists.
+    var copied: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return done
+    }
+}
+
+private let gCopyHandoff = CopyHandoff()
+
+// The game thread calls this as it closes a frame, after Fast3D has committed on the same queue,
+// so the blit follows the game's own buffers and the picture cannot tear.
+@_cdecl("LighthouseVolumeEncodeCopy")
+func lighthouseVolumeEncodeCopy() {
+    guard let (buffer, destination) = gCopyHandoff.take() else { return }
+    let started = CACurrentMediaTime()
+    if let blit = buffer.makeBlitCommandEncoder() {
+        for eye in 0..<gCopyHandoff.eyes {
+            guard let raw = LighthouseVolumeTexture(Int32(eye)),
+                  let source = Unmanaged<AnyObject>.fromOpaque(raw).takeUnretainedValue() as? any MTLTexture
+            else {
+                continue
+            }
+            blit.copy(from: source,
+                      sourceSlice: 0,
+                      sourceLevel: 0,
+                      sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                      sourceSize: MTLSize(width: kEyeWidth, height: kTextureHeight, depth: 1),
+                      to: destination,
+                      destinationSlice: 0,
+                      destinationLevel: 0,
+                      destinationOrigin: MTLOrigin(x: eye * kEyeWidth, y: 0, z: 0))
+        }
+        blit.endEncoding()
+    }
+    buffer.addCompletedHandler { done in
+        LighthouseVolumeNoteCopyGpu(done.gpuEndTime - done.gpuStartTime)
+    }
+    buffer.commit()
+    gCopyHandoff.finish()
+    LighthouseVolumeNoteCopy(CACurrentMediaTime() - started)
+}
+
 // One place the wearer may look. The game texture pixels it covers, and whether it is an item or
 // the window that hides the items behind it.
 private struct HoverRect: Identifiable, Equatable {
@@ -110,7 +206,6 @@ private final class VolumeState {
     private var hoverMaterial: ShaderGraphMaterial?
     private var hoverNote: String?
 
-    private(set) var stereo = false
     private var eyeMaterial: (any RealityKit.Material)?
 
     init() {
@@ -175,7 +270,7 @@ private final class VolumeState {
             var material = try await ShaderGraphMaterial(named: "/Root/GameScreen", from: url)
             try material.setParameter(name: "GameTexture", value: .textureResource(resource))
             eyeMaterial = material
-            stereo = true
+            gCopyHandoff.setStereo()
             LighthouseVolumeSetStereo(true)
             quad?.model?.materials = [material]
             note("an eye each")
@@ -301,42 +396,24 @@ private final class VolumeState {
         }
         LighthouseVolumeUpdate(frame)
 
-        // Fast3D spreads framebuffer zero over several command buffers and commits it last, which
-        // does not fit the one buffer replace(using:) wants. So the game keeps its own targets and
-        // the finished one is copied here, on the same queue, after the game has committed.
-        guard LighthouseVolumeTakeFrame(), let buffer = queue.makeCommandBuffer() else { return }
         // A note before the first finished frame lands before the log exists, so the one line that
         // says whether the highlight can work at all waits here.
-        if let line = hoverNote {
+        if let line = hoverNote, gCopyHandoff.copied {
             hoverNote = nil
             note(line)
         }
+
+        // Fast3D spreads framebuffer zero over several command buffers and commits it last, which
+        // does not fit the one buffer replace(using:) wants. So the game keeps its own targets and
+        // the finished one is copied on its own queue, after it has committed. Only the replace
+        // handshake is bound to the main actor, so only that part is made here; the game thread
+        // encodes the blit and commits, and the encode no longer stands between the volume and its
+        // next update.
+        guard gCopyHandoff.hasRoom else { return }
         let started = CACurrentMediaTime()
-        let destination = texture.replace(using: buffer)
-        if let blit = buffer.makeBlitCommandEncoder() {
-            for eye in 0..<(stereo ? 2 : 1) {
-                guard let raw = LighthouseVolumeTexture(Int32(eye)),
-                      let source = Unmanaged<AnyObject>.fromOpaque(raw).takeUnretainedValue() as? any MTLTexture
-                else {
-                    continue
-                }
-                blit.copy(from: source,
-                          sourceSlice: 0,
-                          sourceLevel: 0,
-                          sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                          sourceSize: MTLSize(width: kEyeWidth, height: kTextureHeight, depth: 1),
-                          to: destination,
-                          destinationSlice: 0,
-                          destinationLevel: 0,
-                          destinationOrigin: MTLOrigin(x: eye * kEyeWidth, y: 0, z: 0))
-            }
-            blit.endEncoding()
-        }
-        buffer.addCompletedHandler { done in
-            LighthouseVolumeNoteCopyGpu(done.gpuEndTime - done.gpuStartTime)
-        }
-        buffer.commit()
-        LighthouseVolumeNoteCopy(CACurrentMediaTime() - started)
+        guard let buffer = queue.makeCommandBuffer() else { return }
+        gCopyHandoff.stash(buffer, texture.replace(using: buffer))
+        LighthouseVolumeNotePrepare(CACurrentMediaTime() - started)
     }
 }
 

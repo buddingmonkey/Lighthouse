@@ -63,16 +63,17 @@ typedef struct {
 // wearer looks, so the shell offers these to the system and the system draws the highlight itself.
 size_t LighthouseVolumeHoverRects(LighthouseVolumeHoverRect* out, size_t max);
 
-// How long the shell spent copying the finished picture, in seconds: the encoding, and then what
-// the GPU took over it. The second one arrives a frame or more later, when the blit retires.
+// How long the shell spent on the finished picture, in seconds: the main thread's replace
+// handshake, the game thread's encode and commit, and then what the GPU took over the blit. The
+// last one arrives a frame or more later, when the blit retires.
+void LighthouseVolumeNotePrepare(double seconds);
 void LighthouseVolumeNoteCopy(double seconds);
 void LighthouseVolumeNoteCopyGpu(double seconds);
 
 // Whether the shell can show an eye each. Set it before the game starts.
 void LighthouseVolumeSetStereo(bool stereo);
 
-// True once for each frame the game finishes, and then the eye textures to copy.
-bool LighthouseVolumeTakeFrame(void);
+// The eye textures the game thread blits from as it closes a frame.
 void* LighthouseVolumeTexture(int eye);
 
 #ifdef __cplusplus
