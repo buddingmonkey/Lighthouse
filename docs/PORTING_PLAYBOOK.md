@@ -470,6 +470,12 @@ Order of operations (each step's tool found the next step's problem):
      copy on each side, the wait for the shell and the wait for the GPU **apart**. Two waits,
      not one: one says the game is faster than the shell, the other that it is faster than
      the GPU, and only apart do they tell them apart.
+   - **Divide a rate by the window it really covered, not by the one you meant.** A report that
+     adds up ticks until one arrives after the one-second mark prints a variable window as "/s".
+     A parked app closes the window late: a 60 s pause produced a line reading `ticks 17/s` for
+     17 ticks that ran in 0.7 s before the park. It read as the worst second of the run and was
+     not a second at all, and every field divided by that count was wrong with it. This cost a
+     round of diagnosis aimed at the wrong target.
    - **Count what the shell offers, not only what the game finishes.** The volume on a Vision
      Pro offers about 89.3 scene updates a second and never 90.0, so a criterion of "90 fps"
      judges the game against a rate the platform does not deliver. The number that matters is
@@ -490,10 +496,19 @@ Order of operations (each step's tool found the next step's problem):
      also fills the tick, and it comes down one step. Without it, a 66 ms hiccup cost 1 to
      2 seconds at 60 fps on a 90 Hz panel. Also scale the learned count when `viPerTick`
      steps, or a cutscene strands it for 2 s a step.
-   - **Not platform-neutral as written.** The shape is general, but the work margin was
-     measured on a headset, and the gate is not behind a guard, so it runs on desktop, iOS
-     and Android too. See step 11 of the visionOS progress notes: decide per hunk whether a
-     change is a gain everywhere or must be gated.
+   - **Clear the learned state across a suspend.** Adaptive pacing keeps a filtered cost, a
+     delivered count and a short flag between ticks, and nothing clears them when *no tick runs
+     at all*. An immersive space given back for 59 s left a cost of 8.89 ms measured at teardown;
+     the first tick back read it, opened the drop gate honestly, and cost 40 frames of a 90 Hz
+     panel and two seconds of recovery. **The pause boundary was the fault, not the gate.**
+     Measure the gap where the pacing already runs, in tick budgets rather than milliseconds, and
+     it needs no shell hook and names no platform: a backgrounded phone, a lost desktop window and
+     a long map load are the same event.
+   - **The shape is platform-neutral and the constants are not.** The work margin was measured on
+     a headset. Before shipping any of this to a repository that serves desktop players, decide
+     per hunk whether a change is a gain everywhere or must be gated — see step 11 of the visionOS
+     progress notes. In the event the drop gate needed no guard, because the one time it fired was
+     the pause above.
 3. **Texture-binding early-out** (lus `90ef840c`): N64 lists re-load the bound texture
    per object; the interpreter flushed the batch each time for zero work. Compare cache
    keys before flushing; only in the plain case (not masked/blended/framebuffer).
