@@ -179,16 +179,19 @@ void viMgr_func_8024BFD8(s32 arg0){
     static s32 D_80280E90;
     s32 viBudget = (demoVi > 2) ? demoVi : 2;
 
+    port_tickPhaseEnter(arg0);
     osSetThreadPri(NULL, 0x7f);
     defragManager_setPriority(DEFRAGMANAGER_THREAD_PRIORITY_HIGH);
     defragManager_resume();
     if(arg0){
         osRecvMesg(&sMesgQueue2, NULL, OS_MESG_BLOCK);
     }
+    port_tickPhaseToken();
 
     while(D_802808D8 < viBudget - D_80280E90){
         osRecvMesg(&sMesgQueue3, NULL, OS_MESG_BLOCK);
     }
+    port_tickPhaseRetrace();
 
     while(sMesgQueue3.validCount){
         osRecvMesg(&sMesgQueue3, NULL, OS_MESG_NOBLOCK);
@@ -205,6 +208,7 @@ void viMgr_func_8024BFD8(s32 arg0){
     defragManager_pause();
     osSetThreadPri(NULL, 0x14);
     defragManager_setPriority(DEFRAGMANAGER_THREAD_PRIORITY);
+    port_tickPhaseExit();
 }
 
 void viMgr_func_8024C1B4(void){
