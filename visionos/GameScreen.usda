@@ -61,4 +61,77 @@ def Xform "Root"
             token outputs:out
         }
     }
+
+    def Material "HoverPlate"
+    {
+        asset inputs:GameTexture = @@
+        float2 inputs:UVOffset = (0, 0)
+        float2 inputs:UVScale = (1, 1)
+        token outputs:mtlx:surface.connect = </Root/HoverPlate/Unlit.outputs:out>
+        token outputs:realitykit:vertex
+
+        def Shader "Texcoord"
+        {
+            uniform token info:id = "ND_texcoord_vector2"
+            float2 outputs:out
+        }
+
+        def Shader "Scaled"
+        {
+            uniform token info:id = "ND_multiply_vector2"
+            float2 inputs:in1.connect = </Root/HoverPlate/Texcoord.outputs:out>
+            float2 inputs:in2.connect = </Root/HoverPlate.inputs:UVScale>
+            float2 outputs:out
+        }
+
+        def Shader "Placed"
+        {
+            uniform token info:id = "ND_add_vector2"
+            float2 inputs:in1.connect = </Root/HoverPlate/Scaled.outputs:out>
+            float2 inputs:in2.connect = </Root/HoverPlate.inputs:UVOffset>
+            float2 outputs:out
+        }
+
+        def Shader "HalfWidth"
+        {
+            uniform token info:id = "ND_multiply_vector2"
+            float2 inputs:in1.connect = </Root/HoverPlate/Placed.outputs:out>
+            float2 inputs:in2 = (0.5, 1)
+            float2 outputs:out
+        }
+
+        def Shader "EyeOffset"
+        {
+            uniform token info:id = "ND_realitykit_geometry_switch_cameraindex_vector2"
+            float2 inputs:mono = (0, 0)
+            float2 inputs:left = (0, 0)
+            float2 inputs:right = (0.5, 0)
+            float2 outputs:out
+        }
+
+        def Shader "EyeCoord"
+        {
+            uniform token info:id = "ND_add_vector2"
+            float2 inputs:in1.connect = </Root/HoverPlate/HalfWidth.outputs:out>
+            float2 inputs:in2.connect = </Root/HoverPlate/EyeOffset.outputs:out>
+            float2 outputs:out
+        }
+
+        def Shader "Picture"
+        {
+            uniform token info:id = "ND_RealityKitTexture2D_color3"
+            asset inputs:file.connect = </Root/HoverPlate.inputs:GameTexture>
+            bool inputs:no_flip_v = 1
+            float2 inputs:texcoord.connect = </Root/HoverPlate/EyeCoord.outputs:out>
+            color3f outputs:out
+        }
+
+        def Shader "Unlit"
+        {
+            uniform token info:id = "ND_realitykit_unlit_surfaceshader"
+            color3f inputs:color.connect = </Root/HoverPlate/Picture.outputs:out>
+            float inputs:opacity = 1
+            token outputs:out
+        }
+    }
 }
