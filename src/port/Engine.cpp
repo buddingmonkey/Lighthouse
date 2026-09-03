@@ -999,6 +999,10 @@ void ReportTickRate(int subframes, int delivered) {
 // finding out that a scene got cheaper, so pay it about once a second, not every tick.
 constexpr int PACING_PROBE_TICKS = 30;
 
+// What a sub-frame costs over its draw time. The blit to the swapchain and the frame submission sit
+// outside the draw, and on a headset they measure about as much again as the draw.
+constexpr int PACING_WORK_MARGIN = 2;
+
 // Game-logic VI per tick: gVIsPerFrame (=2 -> 30 Hz) normally; demo
 // replay and cutscene stutter raise it for slow N64 frames.
 int CurrentViPerTick() {
@@ -1040,11 +1044,13 @@ SubframePacing ComputeSubframePacing() {
     // delivers instead, so a heavy scene settles on a steady count rather than asking for six and
     // putting three on the screen.
     //
-    // The measurement is the delivered count, not the draw time. Draw time is only the part of a
-    // sub-frame between StartDraw and EndDraw: it leaves out the frame submission and the wait for
-    // the display, which on a headset is most of the cost. The delivered count already holds all
-    // of it. Pacing on the wall time of a sub-frame would not do, because the pacing itself puts
-    // the wait there, so the number would chase its own tail down to one.
+    // The delivered count says that a tick ran short. It does not say why, and a display path that
+    // holds one present too long makes the same number as a heavy scene. So the draw time gets a
+    // veto: the count only comes down when the work of the sub-frames also fills the tick. Draw
+    // time cannot set the count on its own, because it is only the part of a sub-frame between
+    // StartDraw and EndDraw and leaves out the submission and the wait for the display. Pacing on
+    // the wall time of a sub-frame would not do either, because the pacing itself puts the wait
+    // there, so the number would chase its own tail down to one.
     //
     // A cutscene, a dialog and a demo each change the VI count, and with it both the length of a
     // tick and the count of sub-frames that fits in one. So the learned count is measured against
@@ -1061,11 +1067,14 @@ SubframePacing ComputeSubframePacing() {
         }
 
         const bool isShort = asked > 0 && sDeliveredSubFrames > 0 && sDeliveredSubFrames < asked;
-        if (isShort && wasShort) {
-            // Two ticks in a row ran out of time, so the scene is heavy. One tick on its own is a
-            // hitch - a map load, a first texture upload - and it must not cost seconds of a lower
-            // rate, which is what the transitions into and out of a cutscene showed.
-            allowed = sDeliveredSubFrames;
+        const bool fitsTick = sFilteredSubFrameNs <= 0 || sPassBudgetNs <= 0 ||
+                              sFilteredSubFrameNs * PACING_WORK_MARGIN * asked < sPassBudgetNs;
+        if (isShort && wasShort && !fitsTick) {
+            // Two ticks in a row ran out of time and the work of those ticks explains it, so the
+            // scene is heavy. One step down, because two short ticks measure that the last count
+            // was too high and nothing more. A hitch - a map load, a first texture upload - must
+            // not cost seconds of a lower rate, which is what a cutscene showed.
+            allowed = asked - 1;
             probeCountdown = PACING_PROBE_TICKS;
         } else if (!isShort && --probeCountdown <= 0) {
             // Ask for one more now and then, or a scene that gets cheaper never gets it back.
