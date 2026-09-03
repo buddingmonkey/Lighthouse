@@ -58,7 +58,7 @@ public:
     }
     static void RelaunchIfRequested(int argc, char* argv[]);
     static void RunCommands(Gfx* Commands, const std::vector<std::unordered_map<Mtx*, MtxF>>& mtx_replacements,
-                            size_t frameCount);
+                            size_t frameCount, float blendBase = 0.0f, float blendStep = 0.0f);
     static void Destroy();
     static uint32_t GetInterpolationFPS();
     static uint32_t GetInterpolationFrameCount();
