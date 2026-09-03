@@ -10,6 +10,7 @@
 #include <fast/backends/gfx_visionos.h>
 #include <fast/backends/gfx_xr_view.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <mutex>
@@ -65,23 +66,30 @@ struct VolumeState {
 
 VolumeState gVolume;
 
-// Nothing states the panel rate, so it is measured from the update times. A dropped frame only ever
-// makes the gap longer, so the shortest gap in a window is the cadence.
+// Nothing states the panel rate, so it is measured from the update times. The middle gap of a
+// window is the cadence: a frame the volume drops makes one gap longer and two updates that come
+// together make one shorter, and a median holds against both. A burst of updates can fill half a
+// window, so a window only sets the rate when the window before it read almost the same.
 void NoteCadence(double now) {
-    static const int kWindow = 120;
+    constexpr int kWindow = 120;
+    constexpr uint32_t kAgreeHz = 3;
     static double sLast = 0.0;
-    static double sShortest = 0.0;
+    static double sGaps[kWindow] = {};
     static int sCount = 0;
+    static uint32_t sPrior = 0;
 
     if (sLast > 0.0) {
         const double delta = now - sLast;
         if (delta > 0.002 && delta < 0.2) {
-            if (sShortest <= 0.0 || delta < sShortest) {
-                sShortest = delta;
-            }
-            if (++sCount >= kWindow) {
-                Fast::SetVisionOSRefreshRate((uint32_t)llround(1.0 / sShortest));
-                sShortest = 0.0;
+            sGaps[sCount++] = delta;
+            if (sCount >= kWindow) {
+                std::sort(std::begin(sGaps), std::end(sGaps));
+                const uint32_t hz = (uint32_t)llround(1.0 / sGaps[kWindow / 2]);
+                const uint32_t moved = hz > sPrior ? hz - sPrior : sPrior - hz;
+                if (sPrior != 0 && moved <= kAgreeHz) {
+                    Fast::SetVisionOSRefreshRate(hz);
+                }
+                sPrior = hz;
                 sCount = 0;
             }
         }
