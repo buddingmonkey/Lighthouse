@@ -1005,6 +1005,10 @@ void ReportTickRate(int subframes, int delivered) {
 // finding out that a scene got cheaper, so pay it about once a second, not every tick.
 constexpr int PACING_PROBE_TICKS = 30;
 
+// Ticks of wall time with no tick at all, after which the pacing forgets what it measured. The app
+// was parked, and the cost, the short count and the filter all describe a scene that is gone.
+constexpr int PACING_GAP_TICKS = 8;
+
 // What a sub-frame costs over its measured draw time. The measurement leaves out the submission
 // and the blit, and it is a filtered median, not a peak; on device the whole sub-frame runs about
 // a third over the interpreter walk, so two keeps the drop gate shut for every steady second and
@@ -1110,6 +1114,20 @@ SubframePacing ComputeSubframePacing() {
             allowed = (allowed * viPerTick + scaledVi - 1) / scaledVi;
         }
         scaledVi = viPerTick;
+
+        // Nothing drew between the last tick and this one, so the app was parked: an immersive
+        // space given back, a background, a lock, a long load. The measured cost and the delivered
+        // count belong to the scene and the display path of before, and the first tick back must
+        // not be judged by them. The learned count stays: it is the scene the app comes back to.
+        static Clock::time_point lastTick;
+        const bool resumed = lastTick.time_since_epoch().count() != 0 && sPassBudgetNs > 0 &&
+                             NsSince(lastTick) > sPassBudgetNs * PACING_GAP_TICKS;
+        lastTick = Clock::now();
+        if (resumed) {
+            sFilteredSubFrameNs = 0;
+            sDeliveredSubFrames = 0;
+            wasShort = false;
+        }
 
         const bool isShort = asked > 0 && sDeliveredSubFrames > 0 && sDeliveredSubFrames < asked;
         const bool fitsTick = sFilteredSubFrameNs <= 0 || sPassBudgetNs <= 0 ||
