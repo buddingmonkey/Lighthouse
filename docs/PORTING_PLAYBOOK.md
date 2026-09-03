@@ -463,14 +463,37 @@ Order of operations (each step's tool found the next step's problem):
    pass (lus `487e828b`); worst-sub-frame (not average) reporting — the average hid the
    burst (lh `85565f90`). All behind a debug-tools build flag, all stripped or silenced
    once the fault is fixed.
+   - **On a headset, name every part of the frame apart and keep it in the shipping build**
+     (lh `30dde5c9`, lus `eb552eda`, `708a4a51`). A device run gives no frame debugger and
+     no system log, so the app is the only thing that can say where the time went. Two lines
+     a second, through the logger and not stderr, naming the interpreter walk, the GPU, the
+     copy on each side, the wait for the shell and the wait for the GPU **apart**. Two waits,
+     not one: one says the game is faster than the shell, the other that it is faster than
+     the GPU, and only apart do they tell them apart.
+   - **Count what the shell offers, not only what the game finishes.** The volume on a Vision
+     Pro offers about 89.3 scene updates a second and never 90.0, so a criterion of "90 fps"
+     judges the game against a rate the platform does not deliver. The number that matters is
+     `frames` against `presents`: once they agree, the ceiling is the platform's, and any
+     further gain has to come from giving the shell back its main thread (lh `028ec6a4`
+     moved the picture copy off it and bought 1.4 updates a second).
 2. **Sub-frame pacing on delivered work** (lh `3d2cc35c`, `3c052baa`): cap the sub-frame
    count at what the last tick actually delivered, not what CVars ask. Pace on the
    delivered *count*, never on draw time — the present wait dominates a headset
    sub-frame and pacing on time chases its own tail. Require two consecutive short
    ticks before lowering; probe upward every ~30 ticks; bound at target+1; clamp a
    hitch's cost sample to the pass budget; measure against what the tick *asked* so
-   cutscene VI-rate changes do not strand the learned count. Platform-neutral: this is
-   an upstreamable superproject change.
+   cutscene VI-rate changes do not strand the learned count.
+   - **Refined (lh `ea905a98`, `b060c947`).** The delivered count says a tick ran short.
+     It does not say *why*, and a display path that holds one present too long makes the
+     same number as a heavy scene. So the draw time cannot **set** the count, but it does
+     get a **veto**: the count only comes down when the measured work of the sub-frames
+     also fills the tick, and it comes down one step. Without it, a 66 ms hiccup cost 1 to
+     2 seconds at 60 fps on a 90 Hz panel. Also scale the learned count when `viPerTick`
+     steps, or a cutscene strands it for 2 s a step.
+   - **Not platform-neutral as written.** The shape is general, but the work margin was
+     measured on a headset, and the gate is not behind a guard, so it runs on desktop, iOS
+     and Android too. See step 11 of the visionOS progress notes: decide per hunk whether a
+     change is a gain everywhere or must be gated.
 3. **Texture-binding early-out** (lus `90ef840c`): N64 lists re-load the bound texture
    per object; the interpreter flushed the batch each time for zero work. Compare cache
    keys before flushing; only in the plain case (not masked/blended/framebuffer).
@@ -596,17 +619,31 @@ A volume has no such API. Do not look for one.
   (lus `36c8eec5`).
 - **The gaze highlight is not lost, but it is rebuilt.** visionOS never tells an app where
   the wearer looks, so only the system can draw one. Feed ImGui's own item rectangles out
-  through the test-engine `ItemAdd` hook (lus `41eb9160`), publish the finished set for
-  another thread (lus `dc32901d`), and put one SwiftUI plate per rectangle over the picture
-  (lh `cc23dec8`). Three things had to be measured, because nothing states them:
-  - A volume puts a flat view at its **front face** and clips whatever stands in front of
-    that. The picture hangs in the middle, so the plate has to be carried back to it.
-  - **A plate at zero opacity is not hit-testable**, so it can never become active. A clear
-    plate, and a plate that waits at zero for the gaze, both stay dark for ever. Use a black
-    anchor at 0.02 alpha, which is twice the hit-test floor and adds no luminance, and a
-    white flash that waits at zero, both in one `hoverEffectGroup()`.
-  - The layers composite in **linear light**. A white trace of two percent on each window
-    took the menu background from 10/255 to 95/255.
+  through the test-engine `ItemAdd` hook (lus `41eb9160`) and publish the finished set for
+  another thread (lus `dc32901d`). **Then make each rectangle a model entity on the quad,
+  not a SwiftUI view over it** (lh `b7713532`).
+  - **A flat SwiftUI view and a model entity within about 27 mm of each other do not sort,
+    and the model wins.** Measured as a step and not a fade: hidden at 4, 8, 12, 20 and
+    25 mm, drawn at 30, 35 and 50 mm. It is absolute, not a fraction of the volume depth,
+    and a `RealityView` attachment behaves the same. So a SwiftUI plate has to stand far
+    enough in front of the picture to be **seen floating off it**, which is what the first
+    build did at 40 mm (lh `195b4c9e`). A model entity sorts per pixel and 2 mm is enough.
+  - **Make the rectangle an opaque window into the game texture.** A `ShaderGraphMaterial`
+    samples the same texture with a per-rectangle UV offset and scale, and the same camera
+    index switch the picture uses, so at rest each one draws exactly the pixels it covers.
+    It is invisible **by construction**, and unlike an alpha anchor it can be checked in a
+    screenshot. `HoverEffectComponent(.highlight(...))` then draws the flash out of process.
+  - Two traps, and each draws the same gray rectangle so neither names itself:
+    `HoverEffectComponent(.shader(...))` makes the entity **ignore its own material**; and a
+    surface whose opacity is near zero **punches a hole through the picture** and shows the
+    room behind the volume, measured at (141,139,133) — at 0.02 and 0.05 the hole is there,
+    at 0.25 it blends.
+  - A rectangle the mask marked as a window draws nothing and keeps only its collision. It
+    takes the gaze from the items behind it, which is the mask order rule below.
+  - ~~Use a black anchor at 0.02 alpha and a white flash in one `hoverEffectGroup()`.~~
+    **Superseded**, and it cannot be carried to RealityKit: that is the hole above. The
+    linear-light warning stands for any SwiftUI layer over the picture — a white trace of
+    two percent on each window took the menu background from 10/255 to 95/255.
 - **Order the rectangles the way ImGui hovers**, don't patch symptom by symptom: windows
   back-to-front, each first blanking its own rectangle; within a window, largest item first
   so the smallest wins a point. Order after the frame ends, when window order has settled
@@ -667,9 +704,16 @@ A volume has no such API. Do not look for one.
   so the matching menu sliders go under the OpenXR guard and only the depth control stays
   (lh `cbee98da`).
 - Cadence: nothing on visionOS reports the panel rate and nothing can ask for one. Measure it
-  from the frame times — the shortest gap over a window of about 120 frames — and follow it
-  (lh `3d3998b3`, `ae6e2d92`, lus `f99b0987`). `SceneEvents.Update` is a true 90 Hz clock on
-  the device. It is **not** one in the simulator, which reports 120 to 190 Hz.
+  from the frame times and follow it (lh `3d3998b3`, `ae6e2d92`, lus `f99b0987`).
+  `SceneEvents.Update` is a true 90 Hz clock on the device. It is **not** one in the
+  simulator, which reports 120 to 190 Hz.
+  - **Take the median gap of the window, not the shortest, and make two windows agree
+    before you move the rate** (lh `231d690f`). The shortest gap has no upper bound in
+    hertz: one bunched pair of updates sets the whole window, and it read **174 Hz on a
+    90 Hz panel**. That is not cosmetic. A reading of 120 or more makes the sub-frame count
+    4, and the worst second of a device run followed one: target 135 Hz, 61 frames. After
+    the median and a 3 Hz agreement gate over two windows, the measured rate never left 90
+    across a whole session.
 - **A counting semaphore between shell and game needs back pressure.** The volume signalled
   once per update and the game took one signal per frame, so a game that fell behind left a
   signal behind every frame, the count grew without bound and the game never waited. The tick
