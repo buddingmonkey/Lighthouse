@@ -1061,10 +1061,18 @@ SubframePacing ComputeSubframePacing() {
         static int probeCountdown = 0;
         static int asked = 0;
         static bool wasShort = false;
+        static int scaledVi = 0;
 
         if (allowed < 1) {
             allowed = subframesPerTick;
         }
+
+        // The learned count is sub-frames in one tick, and a tick is viPerTick VIs long. When the
+        // VI count steps, the count follows at once; the probe would need 30 ticks for each step.
+        if (scaledVi > 0 && viPerTick != scaledVi) {
+            allowed = (allowed * viPerTick + scaledVi - 1) / scaledVi;
+        }
+        scaledVi = viPerTick;
 
         const bool isShort = asked > 0 && sDeliveredSubFrames > 0 && sDeliveredSubFrames < asked;
         const bool fitsTick = sFilteredSubFrameNs <= 0 || sPassBudgetNs <= 0 ||
@@ -1110,8 +1118,9 @@ SubframePacing ComputeSubframePacing() {
         deliveredTotal += sDeliveredSubFrames;
         if (now >= nextReport) {
             if (nextReport > 0.0 && ticks > 0) {
-                SPDLOG_INFO("xr pacing: target {} Hz, ticks {}/s, asked {:.2f}, delivered {:.2f}", target_fps, ticks,
-                            (double)askedTotal / ticks, (double)deliveredTotal / ticks);
+                SPDLOG_INFO("xr pacing: target {} Hz, ticks {}/s, asked {:.2f}, delivered {:.2f}, work {:.2f} ms",
+                            target_fps, ticks, (double)askedTotal / ticks, (double)deliveredTotal / ticks,
+                            (double)sFilteredSubFrameNs / 1e6);
             }
             nextReport = now + 1.0;
             ticks = 0;
