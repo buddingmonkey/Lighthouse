@@ -1205,6 +1205,14 @@ SubframePacing ComputeSubframePacing() {
                                 "latch {:.2f} ms, handoff {:.2f} ms",
                                 phase[0], phase[1], phase[2], phase[3], phase[4], phase[5]);
                 }
+                // 9.8. The worst tick of the second, and what it was parked in. rest is the game's
+                // own work with every park the port can name taken out of it.
+                double stall[5] = {};
+                if (port_tickStallTake(stall) != 0) {
+                    SPDLOG_INFO("xr stall: logic max {:.2f} ms = idle {:.2f} ({:.0f}) + service {:.2f} ({:.0f}) + "
+                                "rest {:.2f} ms",
+                                stall[0], stall[3], stall[4], stall[1], stall[2], stall[0] - stall[3] - stall[1]);
+                }
             }
             nextReport = now + 1.0;
             windowStart = now;

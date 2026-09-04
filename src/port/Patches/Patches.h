@@ -37,6 +37,15 @@ void port_tickPhaseDrawEnd(void);
 // mean logic, max logic, mean token, mean retrace, mean latch, mean handoff, in milliseconds.
 // Clears the window. False when no tick closed in it.
 int port_tickPhaseTake(double out[6]);
+// 9.8. What the game thread was parked in inside that span: slot 0 the render service handshake,
+// slot 1 the no-draw delay. Both are in Game.cpp and both are the game thread's alone.
+#define PORT_TICK_PARK_SERVICE 0
+#define PORT_TICK_PARK_IDLE 1
+void port_tickPhaseParkBegin(int slot);
+void port_tickPhaseParkEnd(int slot);
+// The tick of the second with the largest logic: logic, service ms, service count, idle ms, idle
+// count. Clears the window. False when no tick closed in it.
+int port_tickStallTake(double out[5]);
 
 // Localization (Localization.cpp)
 
