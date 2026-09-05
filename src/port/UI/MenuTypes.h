@@ -273,10 +273,8 @@ static const std::unordered_map<Ship::AudioBackend, const char*> audioBackendsMa
 };
 
 static const std::unordered_map<Fast::WindowBackend, const char*> windowBackendsMap = {
-    { Fast::WindowBackend::FAST3D_DXGI_DX11, "DirectX" },
-    { Fast::WindowBackend::FAST3D_SDL_OPENGL, "OpenGL" },
-    { Fast::WindowBackend::FAST3D_SDL_METAL, "Metal" },
-    { Fast::WindowBackend::FAST3D_OPENXR_OPENGL, "OpenXR" },
+    { Fast::WindowBackend::FAST3D_DXGI_DX11, "DirectX" },    { Fast::WindowBackend::FAST3D_SDL_OPENGL, "OpenGL" },
+    { Fast::WindowBackend::FAST3D_SDL_METAL, "Metal" },      { Fast::WindowBackend::FAST3D_OPENXR_OPENGL, "OpenXR" },
     { Fast::WindowBackend::FAST3D_VISIONOS_METAL, "Metal" },
 };
 

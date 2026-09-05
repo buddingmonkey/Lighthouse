@@ -4,8 +4,8 @@
 #include "port/UI/Notification.h"
 
 extern void RandoSaveCheck_to_json(nlohmann::json& j, const RandoSaveCheck& randoSaveCheck);
-extern RandoSaveCheck RandoSaveCheck_from_json(const nlohmann::json& j, RandoSaveCheck& randoSaveCheck, int schemaVersion,
-                                               const std::string& checkName);
+extern RandoSaveCheck RandoSaveCheck_from_json(const nlohmann::json& j, RandoSaveCheck& randoSaveCheck,
+                                               int schemaVersion, const std::string& checkName);
 
 namespace Rando {
 
@@ -73,7 +73,8 @@ void GenerateFromSpoiler(nlohmann::json spoiler) {
             try {
                 RandoSaveCheck_from_json(data.value(), checkEntry, schemaVersion, data.key());
             } catch (const std::exception& e) {
-                Notification::Emit({ .message = "Error: Malformed Spoiler Log entry.", .messageColor = ImVec4(0.85f, 0.3f, 0, 1) });
+                Notification::Emit(
+                    { .message = "Error: Malformed Spoiler Log entry.", .messageColor = ImVec4(0.85f, 0.3f, 0, 1) });
                 continue;
             }
             if (checkEntry.randoCheckId <= RC_UNKNOWN || checkEntry.randoCheckId >= RC_MAX) {

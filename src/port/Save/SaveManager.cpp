@@ -177,11 +177,12 @@ static RandoItemId TranslateLegacyItemId(int value, RandoCheckId checkId) {
 }
 
 void RandoSaveCheck_to_json(nlohmann::json& j, const RandoSaveCheck& c) {
-    j = nlohmann::json::array({ c.randoCheckId, c.randoItemId, c.shuffledCheckId, c.randoCollectionId,
-                                c.isShuffled, c.eligible, c.received, c.obtained, c.skipped });
+    j = nlohmann::json::array({ c.randoCheckId, c.randoItemId, c.shuffledCheckId, c.randoCollectionId, c.isShuffled,
+                                c.eligible, c.received, c.obtained, c.skipped });
 }
 
-RandoSaveCheck RandoSaveCheck_from_json(const nlohmann::json& j, RandoSaveCheck& c, int schemaVersion = RANDO_SAVE_SCHEMA_VERSION,
+RandoSaveCheck RandoSaveCheck_from_json(const nlohmann::json& j, RandoSaveCheck& c,
+                                        int schemaVersion = RANDO_SAVE_SCHEMA_VERSION,
                                         const std::string& checkName = "") {
     if (!j.is_array() || (schemaVersion == 2 && j.size() < 9) || (schemaVersion != 2 && j.size() < 7)) {
         throw std::runtime_error("Malformed randomizer check record");
@@ -756,8 +757,8 @@ SaveData* Convert_JSONToSaveData(int32_t fileNum) {
                     // Before the discriminator was added, the fork layout can
                     // be identified by its check ID matching the object key.
                     // Otherwise read the upstream layout first.
-                    recordSchema = (it.value().is_array() && !it.value().empty() &&
-                                    it.value().at(0).get<int>() == i) ? 0 : 1;
+                    recordSchema =
+                        (it.value().is_array() && !it.value().empty() && it.value().at(0).get<int>() == i) ? 0 : 1;
                 }
                 RandoSaveCheck_from_json(it.value(), check, recordSchema, staticCheck.name);
                 if (check.randoCheckId == RC_UNKNOWN) {
