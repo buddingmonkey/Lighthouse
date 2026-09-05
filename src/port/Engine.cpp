@@ -190,6 +190,8 @@ long long sPassBudgetNs = 0;
 // delivered.
 long long sFilteredSubFrameNs = 0;
 int sDeliveredSubFrames = 0;
+// Sub-frames in a row that each took longer than a whole tick. One is a hitch; two is the scene.
+int sOverBudgetRun = 0;
 } // namespace
 
 bool portArchiveVersionMatch = false;
@@ -837,14 +839,28 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
                 interpreter->EndFrame();
             }
             // Believe a rise at once, so a scene that gets heavy does not overrun even one tick.
-            // Ease a fall in, so one cheap sub-frame does not ask for the full count again. A
-            // sub-frame longer than the whole tick is a hitch and not the price of the next one,
-            // so let it raise the estimate to the budget and no further.
-            const long long sample = (sPassBudgetNs > 0 && drawNs > sPassBudgetNs) ? sPassBudgetNs : drawNs;
-            if (sample > sFilteredSubFrameNs) {
-                sFilteredSubFrameNs = sample;
+            // Ease a fall in, so one cheap sub-frame does not ask for the full count again.
+            //
+            // A sub-frame longer than the whole tick is a hitch and not the price of the next one.
+            // The budget is the one value the estimate must never take from it: at the budget no
+            // count at all fits the tick, so the gate opens, the tick delivers one sub-frame, and
+            // the count falls to one and needs seconds to climb back. One hitch cost 111 frames
+            // that way. So drop the first such sample. A scene that is really this heavy sends
+            // another one on the next sub-frame, and that one is believed.
+            long long sample = drawNs;
+            bool believe = true;
+            if (sPassBudgetNs > 0 && drawNs > sPassBudgetNs) {
+                sample = sPassBudgetNs;
+                believe = ++sOverBudgetRun > 1;
             } else {
-                sFilteredSubFrameNs += (sample - sFilteredSubFrameNs) / 8;
+                sOverBudgetRun = 0;
+            }
+            if (believe) {
+                if (sample > sFilteredSubFrameNs) {
+                    sFilteredSubFrameNs = sample;
+                } else {
+                    sFilteredSubFrameNs += (sample - sFilteredSubFrameNs) / 8;
+                }
             }
             sDeliveredSubFrames++;
 #ifdef ENABLE_DEBUG_TOOLS
@@ -1126,6 +1142,7 @@ SubframePacing ComputeSubframePacing() {
         if (resumed) {
             sFilteredSubFrameNs = 0;
             sDeliveredSubFrames = 0;
+            sOverBudgetRun = 0;
             wasShort = false;
         }
 
