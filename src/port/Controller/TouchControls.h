@@ -15,6 +15,9 @@ void TouchControls_Poll(void);
 // ORs the virtual pad into an OSContPad. Call after the control deck has written it.
 void TouchControls_MergeInto(void* contPad);
 
+// Opens or closes the menu. A platform with no pad, such as visionOS, still needs the same route.
+void TouchControls_OpenMenu(void);
+
 #ifdef __cplusplus
 }
 

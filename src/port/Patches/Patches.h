@@ -139,6 +139,9 @@ int port_appIsOnScreen(void);
 // Starts watching for the app-state events port_appIsOnScreen reports
 void port_installLifecycleWatch(void);
 
+// Reports the same state from a platform that has no SDL app delegate to post it
+void port_setAppOnScreen(int onScreen);
+
 // One-shot cues when a teammate's file-progress flag arrives
 void port_progressFlag_remoteCue(int32_t progressFlag);
 void port_notedoor_remoteOpen(int32_t progressFlag);
