@@ -303,6 +303,9 @@ extern "C" void port_pipelineSyncPoint(void) {
 // BK's gameloop conditionally skips game_draw during scene transitions.
 static bool sFrameRendered = false;
 
+// A 30 Hz tick, which is how long an iteration that drew nothing has to last.
+constexpr long long kNoDrawTickMs = 33;
+
 // The list itself reaches the renderer through thread5's task queue, submitted
 // by core1_15B30_addF3DEXTaskData right after this call; all that is left here
 // is noting that the tick drew.
@@ -313,6 +316,7 @@ extern "C" void Graphics_PushFrame(Gfx* data) {
 
 void push_frame() {
     static int sTitleCounter = 0;
+    const auto iterationStart = std::chrono::steady_clock::now();
     sFrameRendered = false;
 
     // The window thread keeps the progress modal alive while an inline mod
@@ -345,8 +349,16 @@ void push_frame() {
         port_runOnRenderThread([](void*) { port_setWindowTitle(sTitleMap); }, nullptr);
     }
 
+    // The tick built no display list, so the frame pacing never held it and the loop would run
+    // free. Hold it here instead - but only for what is left of a tick, not for a whole one on
+    // top of the work already done.
     if (!sFrameRendered) {
-        SDL_Delay(33);
+        const auto spentMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - iterationStart)
+                .count();
+        if (spentMs < kNoDrawTickMs) {
+            SDL_Delay((Uint32)(kNoDrawTickMs - spentMs));
+        }
     }
 }
 
