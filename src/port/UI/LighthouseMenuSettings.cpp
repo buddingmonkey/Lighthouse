@@ -25,7 +25,12 @@ using namespace UIWidgets;
 
 static bool HeadsetWindow() {
     auto window = Ship::Context::GetRawInstance()->GetWindow();
-    return window != nullptr && window->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+    if (window == nullptr) {
+        return false;
+    }
+    const auto backend = window->GetWindowBackend();
+    return backend == Fast::WindowBackend::FAST3D_OPENXR_OPENGL ||
+           backend == Fast::WindowBackend::FAST3D_VISIONOS_METAL;
 }
 
 static std::unordered_map<int32_t, const char*> imguiScaleOptions = {
@@ -472,6 +477,21 @@ void LighthouseMenu::AddMenuSettings() {
         .Options(CheckboxOptions()
                      .Tooltip("Matches interpolation value to the refresh rate of your display.")
                      .DefaultValue(HeadsetWindow()));
+#ifdef ENABLE_XR_WINDOW
+    AddWidget(path, "Diorama Depth", WIDGET_CVAR_SLIDER_FLOAT)
+        .CVar(CVAR_SETTING("XrDioramaDepth"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .Options(FloatSliderOptions()
+                     .Tooltip("How deep the world reaches behind the glass. The farthest thing the game draws sits "
+                              "this far behind the window, and everything nearer sorts itself in between, whatever "
+                              "the range and size of the window.\n\nA small depth keeps the whole world near the "
+                              "glass, which is the easiest to look at for a long session. No depth can make the "
+                              "eyes diverge.")
+                     .Min(0.5f)
+                     .Max(4.0f)
+                     .DefaultValue(2.0f)
+                     .Format("%.2f m"));
 #ifdef ENABLE_OPENXR
     AddWidget(path, "Window Range", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrWindowRange"))
@@ -498,20 +518,6 @@ void LighthouseMenu::AddMenuSettings() {
                      .Max(8.0f)
                      .DefaultValue(2.6f)
                      .Format("%.2f"));
-    AddWidget(path, "Diorama Depth", WIDGET_CVAR_SLIDER_FLOAT)
-        .CVar(CVAR_SETTING("XrDioramaDepth"))
-        .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
-        .Options(FloatSliderOptions()
-                     .Tooltip("How deep the world reaches behind the glass. The farthest thing the game draws sits "
-                              "this far behind the window, and everything nearer sorts itself in between, whatever "
-                              "the range and size of the window.\n\nA small depth keeps the whole world near the "
-                              "glass, which is the easiest to look at for a long session. No depth can make the "
-                              "eyes diverge.")
-                     .Min(0.5f)
-                     .Max(4.0f)
-                     .DefaultValue(2.0f)
-                     .Format("%.2f m"));
     AddWidget(path, "Edge Float", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrEdgeFloat"))
         .RaceDisable(false)
@@ -565,6 +571,7 @@ void LighthouseMenu::AddMenuSettings() {
                      .Tooltip("Draws the frame once per eye so the world has depth. Turn it off to draw one image "
                               "for both eyes, which costs half as much and sends one layer to the compositor.")
                      .DefaultValue(true));
+#endif
 #endif
     AddWidget(path, "Renderer API (Needs reload)", WIDGET_VIDEO_BACKEND).RaceDisable(false);
     AddWidget(path, "Enable Vsync", WIDGET_CVAR_CHECKBOX)

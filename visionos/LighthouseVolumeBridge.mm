@@ -1,0 +1,411 @@
+#import "LighthouseVolumeBridge.h"
+
+#import <ARKit/ARKit.h>
+#import <Foundation/Foundation.h>
+#import <GameController/GameController.h>
+#import <Metal/Metal.h>
+#import <QuartzCore/QuartzCore.h>
+#import <simd/simd.h>
+
+#include <fast/backends/gfx_visionos.h>
+#include <fast/backends/gfx_xr_view.h>
+
+#include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <mutex>
+#include <vector>
+
+extern "C" int SDL_main(int argc, char* argv[]);
+extern "C" void SDL_SetMainReady(void);
+extern "C" void port_setAppOnScreen(int onScreen);
+extern "C" void TouchControls_OpenMenu(void);
+extern "C" void LighthouseVolumeEncodeCopy(void);
+
+namespace {
+
+const uint32_t kGameTextureWidth = 1280;
+const uint32_t kGameTextureHeight = 720;
+const float kRangeMin = 0.2f;
+const float kRangeMax = 4.0f;
+const float kRangeDefault = 1.3f;
+// Apple keeps the wearer's own distance private, so the eyes are made from the head. The diorama
+// gain compresses every disparity anyway, so a few millimeters of error is a few percent of depth.
+const float kNominalIPD = 0.063f;
+// The head states that are not an ARKit query status, which starts at zero.
+const int kHeadUnreported = -3;
+const int kHeadNoTracking = -2;
+const int kHeadNoQuad = -1;
+
+struct Sample {
+    simd_float3 Head = { 0.0f, 0.0f, kRangeDefault };
+    simd_float4x4 ImmersiveFromQuad = matrix_identity_float4x4;
+    float HalfWidth = 0.0f;
+    float HalfHeight = 0.0f;
+    int ScenePhase = 2;
+    bool HeadValid = false;
+    bool QuadValid = false;
+};
+
+struct VolumeState {
+    id<MTLDevice> Device = nil;
+    id<MTLCommandQueue> Queue = nil;
+    ar_session_t Session = nullptr;
+    ar_world_tracking_provider_t TrackingProvider = nullptr;
+    ar_device_anchor_t DeviceAnchor = nullptr;
+    dispatch_semaphore_t Frame = nullptr;
+    std::mutex Mutex;
+    Sample Latest;
+    std::atomic<bool> Running{ true };
+    bool Started = false;
+    bool Stereo = false;
+    bool Stopped = false;
+    void (*ShutdownHandler)(void) = nullptr;
+
+};
+
+VolumeState gVolume;
+
+// Nothing states the panel rate, so it is measured from the update times. The middle gap of a
+// window is the cadence: a frame the volume drops makes one gap longer and two updates that come
+// together make one shorter, and a median holds against both. A burst of updates can fill half a
+// window, so a window only sets the rate when the window before it read almost the same.
+void NoteCadence(double now) {
+    constexpr int kWindow = 120;
+    constexpr uint32_t kAgreeHz = 3;
+    static double sLast = 0.0;
+    static double sGaps[kWindow] = {};
+    static int sCount = 0;
+    static uint32_t sPrior = 0;
+
+    if (sLast > 0.0) {
+        const double delta = now - sLast;
+        if (delta > 0.002 && delta < 0.2) {
+            sGaps[sCount++] = delta;
+            if (sCount >= kWindow) {
+                std::sort(std::begin(sGaps), std::end(sGaps));
+                const uint32_t hz = (uint32_t)llround(1.0 / sGaps[kWindow / 2]);
+                const uint32_t moved = hz > sPrior ? hz - sPrior : sPrior - hz;
+                if (sPrior != 0 && moved <= kAgreeHz) {
+                    Fast::SetVisionOSRefreshRate(hz);
+                }
+                sPrior = hz;
+                sCount = 0;
+            }
+        }
+    }
+    sLast = now;
+}
+
+float Clamp(float value, float low, float high) {
+    return value < low ? low : (value > high ? high : value);
+}
+
+// Head motion is only worth anything as a departure from a fixed reference. The reference is where
+// the head stood when the window was placed, on all three axes, and it is taken again when the
+// system moves the volume or changes its size.
+float LatchWindow(const Sample& sample) {
+    static bool sLatched = false;
+    static simd_float3 sQuad = { 0.0f, 0.0f, 0.0f };
+    static float sHalfWidth = 0.0f;
+    static float sRange = kRangeDefault;
+
+    const simd_float3 quad = sample.ImmersiveFromQuad.columns[3].xyz;
+    const bool moved = simd_distance(quad, sQuad) > 0.01f || fabsf(sample.HalfWidth - sHalfWidth) > 0.001f;
+    if (!sLatched || moved) {
+        sLatched = true;
+        sQuad = quad;
+        sHalfWidth = sample.HalfWidth;
+        sRange = Clamp(sample.Head.z, kRangeMin, kRangeMax);
+        Fast::SetVisionOSParallaxReference(sample.Head.x, sample.Head.y);
+    }
+    return sRange;
+}
+
+bool VolumeOpenFrame() {
+    // A volume that stops updating must not hold the game thread. It leaves without a frame and
+    // comes back on the next update.
+    const double before = CACurrentMediaTime();
+    if (dispatch_semaphore_wait(gVolume.Frame, dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC)) != 0) {
+        // The wait that found nothing is the one worth reporting, so it is counted here as well.
+        Fast::AddXrCost(Fast::XrCost::Wait, CACurrentMediaTime() - before);
+        return false;
+    }
+    // Take every slot that piled up while the last frame drew, so the game can be at most one frame
+    // behind the volume. A counting semaphore left alone grows without bound whenever the game is
+    // the slower of the two, and the game then never waits and never learns that it is behind.
+    while (dispatch_semaphore_wait(gVolume.Frame, DISPATCH_TIME_NOW) == 0) {
+    }
+    Fast::AddXrCost(Fast::XrCost::Wait, CACurrentMediaTime() - before);
+
+    Sample sample;
+    {
+        std::lock_guard<std::mutex> lock(gVolume.Mutex);
+        sample = gVolume.Latest;
+    }
+    if (sample.HalfWidth <= 0.0f || sample.HalfHeight <= 0.0f) {
+        return true;
+    }
+
+    const float range = sample.HeadValid ? LatchWindow(sample) : kRangeDefault;
+    Fast::SetVisionOSWindow(sample.HalfWidth, sample.HalfHeight, range);
+
+    // The eyes are always reported. With one view the backend draws from the point between them,
+    // which is the head again, so the same two numbers serve mono and stereo.
+    Fast::SetVisionOSViewCount(gVolume.Stereo ? 2 : 1);
+    // With no head there is still a picture to draw, and it is drawn for a head standing square in
+    // front of the window at the range it hangs at. Stereo and the depth of the diorama both live;
+    // only the parallax of leaning is lost. Reporting nothing would leave the eyes invalid and the
+    // camera model would give up, which takes the stereo with it.
+    const float half = 0.5f * kNominalIPD;
+    const simd_float3 head = sample.HeadValid ? sample.Head : simd_make_float3(0.0f, 0.0f, range);
+    Fast::SetVisionOSEye(0, head.x - half, head.y, head.z);
+    Fast::SetVisionOSEye(1, head.x + half, head.y, head.z);
+    return true;
+}
+
+void VolumeCloseFrame() {
+    Fast::CountXrFrame();
+    Fast::FlipVisionOSGameTextures();
+    // Fast3D has committed by here, on this thread and this queue, so the shell's blit follows the
+    // game's own buffers and the picture cannot tear.
+    LighthouseVolumeEncodeCopy();
+}
+
+bool VolumeIsRunning() {
+    return gVolume.Running.load(std::memory_order_acquire);
+}
+
+void VolumePollState() {
+    static int sPhase = 2;
+
+    int phase;
+    {
+        std::lock_guard<std::mutex> lock(gVolume.Mutex);
+        phase = gVolume.Latest.ScenePhase;
+    }
+    if (phase == sPhase) {
+        return;
+    }
+    sPhase = phase;
+    // A volume that goes away parks the game the way an iOS app off screen does. The run ends only
+    // when the game itself is finished, because a process that leaves takes the immersive space
+    // down with it and that is the shell's job to do in order.
+    port_setAppOnScreen(phase == 2 ? 1 : 0);
+}
+
+// SDL keeps its keyboard inside the UIKit video driver, which visionos.cmake turns off, so SDL
+// never sees a paired keyboard. Read it from the Game Controller framework instead.
+void AttachKeyboard(GCKeyboard* keyboard) {
+    if (keyboard == nil || keyboard.keyboardInput == nil) {
+        return;
+    }
+    dispatch_queue_t queue = dispatch_queue_create("com.andreweiche.lighthouse.keyboard", DISPATCH_QUEUE_SERIAL);
+    dispatch_set_target_queue(queue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
+    keyboard.handlerQueue = queue;
+    keyboard.keyboardInput.keyChangedHandler =
+        ^(GCKeyboardInput* input, GCDeviceButtonInput* key, GCKeyCode keyCode, BOOL pressed) {
+            Fast::PushVisionOSKey((int)keyCode, pressed != NO);
+        };
+}
+
+void StartKeyboard() {
+    AttachKeyboard(GCKeyboard.coalescedKeyboard);
+    [[NSNotificationCenter defaultCenter] addObserverForName:GCKeyboardDidConnectNotification
+                                                      object:nil
+                                                       queue:nil
+                                                  usingBlock:^(NSNotification* note) {
+                                                      AttachKeyboard(note.object);
+                                                  }];
+}
+
+void StartTracking() {
+    if (!ar_world_tracking_provider_is_supported()) {
+        Fast::ReportVisionOS("world tracking is not supported");
+        return;
+    }
+    ar_world_tracking_configuration_t configuration = ar_world_tracking_configuration_create();
+    gVolume.TrackingProvider = ar_world_tracking_provider_create(configuration);
+    ar_data_providers_t providers = ar_data_providers_create();
+    ar_data_providers_add_data_provider(providers, gVolume.TrackingProvider);
+    gVolume.Session = ar_session_create();
+    ar_session_run(gVolume.Session, providers);
+    gVolume.DeviceAnchor = ar_device_anchor_create();
+}
+
+} // namespace
+
+void LighthouseVolumeStart(void* device, void* commandQueue, uint32_t width, uint32_t height) {
+    if (gVolume.Started) {
+        return;
+    }
+    gVolume.Started = true;
+    gVolume.Device = (__bridge id<MTLDevice>)device;
+    gVolume.Queue = (__bridge id<MTLCommandQueue>)commandQueue;
+    gVolume.Frame = dispatch_semaphore_create(0);
+
+    StartTracking();
+
+    Fast::SetVisionOSRenderTarget(device, commandQueue, width, height);
+    Fast::SetVisionOSFrameHooks({ VolumeOpenFrame, VolumeCloseFrame, VolumeIsRunning, VolumePollState });
+
+    // SDL_UIKitRunApp usually does this. Without it SDL_Init refuses every subsystem, and the
+    // control deck gets no game controllers.
+    SDL_SetMainReady();
+    StartKeyboard();
+
+    NSThread* thread = [[NSThread alloc] initWithBlock:^{
+        char program[] = "Lighthouse";
+        char* argv[] = { program, nullptr };
+        SDL_main(1, argv);
+
+        // Leaving here would end the process with the immersive space still open, and visionOS
+        // then refuses to open content for any app until the headset is restarted. The shell takes
+        // the space down first.
+        LighthouseVolumeStop();
+        void (*handler)(void) = gVolume.ShutdownHandler;
+        if (handler != nullptr) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                handler();
+            });
+        } else {
+            exit(0);
+        }
+    }];
+    thread.name = @"Lighthouse Render Thread";
+    thread.stackSize = 4 * 1024 * 1024;
+    [thread start];
+}
+
+void LighthouseVolumeSetShutdownHandler(void (*handler)(void)) {
+    gVolume.ShutdownHandler = handler;
+}
+
+void LighthouseVolumeStop(void) {
+    if (gVolume.Stopped) {
+        return;
+    }
+    gVolume.Stopped = true;
+    gVolume.Running.store(false, std::memory_order_release);
+    if (gVolume.Session != nullptr) {
+        ar_session_stop(gVolume.Session);
+    }
+    // The game thread may be waiting on a frame that will never come.
+    if (gVolume.Frame != nullptr) {
+        dispatch_semaphore_signal(gVolume.Frame);
+    }
+}
+
+void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
+    // The scene updates before the game is started, and there is nothing yet to tell.
+    if (!gVolume.Started) {
+        return;
+    }
+
+    const double now = CACurrentMediaTime();
+    NoteCadence(now);
+
+    // ARKit is not thread safe, so the query lives here and nowhere else.
+    Sample sample;
+    sample.ImmersiveFromQuad = frame.ImmersiveFromQuad;
+    sample.HalfWidth = frame.HalfWidth;
+    sample.HalfHeight = frame.HalfHeight;
+    sample.ScenePhase = frame.ScenePhase;
+    sample.QuadValid = frame.HasQuad;
+
+    // Nothing else states whether there is a head. Without the quad's place in the immersive space
+    // there is no pose to ask for, and when the anchor stops answering the picture keeps drawing
+    // and only the parallax dies. Both are the kind of fault that is found late, so the state is
+    // reported once and again only when it changes. A run of 7 minutes on 2026-09-02 reported it
+    // for the first time as it ended, which is what a state that is never reported looks like.
+    int headState;
+    if (gVolume.TrackingProvider == nullptr) {
+        headState = kHeadNoTracking;
+    } else if (!frame.HasQuad) {
+        headState = kHeadNoQuad;
+    } else {
+        const ar_device_anchor_query_status_t status = ar_world_tracking_provider_query_device_anchor_at_timestamp(
+            gVolume.TrackingProvider, now, gVolume.DeviceAnchor);
+        headState = (int)status;
+        if (status == ar_device_anchor_query_status_success) {
+            const simd_float4x4 originFromDevice =
+                ar_device_anchor_get_origin_from_anchor_transform(gVolume.DeviceAnchor);
+            const simd_float4 head = simd_mul(simd_inverse(frame.ImmersiveFromQuad), originFromDevice.columns[3]);
+            sample.Head = head.xyz;
+            sample.HeadValid = true;
+        }
+    }
+    {
+        // A state reported once can be reported before the log file exists, which is how the run
+        // of 2026-09-02 said nothing at all. So it is said again: every ten seconds while the head
+        // is not answering, and once a minute while it is, which is cheap and leaves no run unable
+        // to say whether it had a head.
+        static int sHeadState = kHeadUnreported;
+        static double sHeadSaid = 0.0;
+        const bool healthy = headState == (int)ar_device_anchor_query_status_success;
+        if (headState != sHeadState || now - sHeadSaid > (healthy ? 60.0 : 10.0)) {
+            sHeadState = headState;
+            sHeadSaid = now;
+            char line[96];
+            snprintf(line, sizeof(line), "the head says %d, where %d is no world tracking and %d is no quad",
+                     headState, kHeadNoTracking, kHeadNoQuad);
+            Fast::ReportVisionOS(line);
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(gVolume.Mutex);
+        gVolume.Latest = sample;
+    }
+    dispatch_semaphore_signal(gVolume.Frame);
+
+    // Nothing else states what the game is really presenting. The volume offers the updates, the
+    // game takes what it can of them, and the report says which of the two is the slower one.
+    Fast::CountXrPresent();
+    Fast::ReportXrCost();
+}
+
+float LighthouseVolumeAspect(void) {
+    return Fast::GetVisionOSPictureAspect();
+}
+
+void LighthouseVolumeNote(const char* text) {
+    Fast::ReportVisionOS(text);
+}
+
+void LighthouseVolumeOpenMenu(void) {
+    TouchControls_OpenMenu();
+}
+
+void LighthouseVolumePoint(float x, float y, bool pressed) {
+    Fast::PushVisionOSPointer({ x, y, true, pressed });
+}
+
+size_t LighthouseVolumeHoverRects(LighthouseVolumeHoverRect* out, size_t max) {
+    std::vector<Fast::VisionOSHoverRect> rects(max);
+    const size_t count = Fast::CopyVisionOSHoverRects(rects.data(), max);
+    for (size_t i = 0; i < count; ++i) {
+        out[i] = { rects[i].MinX, rects[i].MinY, rects[i].MaxX, rects[i].MaxY, rects[i].Identifier };
+    }
+    return count;
+}
+
+void LighthouseVolumeNoteCopy(double seconds) {
+    Fast::AddXrCost(Fast::XrCost::Copy, seconds);
+}
+
+void LighthouseVolumeNotePrepare(double seconds) {
+    Fast::AddXrCost(Fast::XrCost::Prepare, seconds);
+}
+
+void LighthouseVolumeNoteCopyGpu(double seconds) {
+    Fast::AddXrCost(Fast::XrCost::CopyGpu, seconds);
+}
+
+void LighthouseVolumeSetStereo(bool stereo) {
+    gVolume.Stereo = stereo;
+}
+
+void* LighthouseVolumeTexture(int eye) {
+    return Fast::GetVisionOSReadyGameTexture(eye);
+}

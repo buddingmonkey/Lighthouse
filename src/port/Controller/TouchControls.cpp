@@ -10,6 +10,8 @@ extern "C" void TouchControls_Poll(void) {
 }
 extern "C" void TouchControls_MergeInto(void*) {
 }
+extern "C" void TouchControls_OpenMenu(void) {
+}
 
 namespace Lighthouse {
 void TouchControls_Draw() {
@@ -229,13 +231,16 @@ bool MenuVisible() {
     return ctx->GetWindow()->GetGui()->GetMenuOrMenubarVisible();
 }
 
-// A headset has no touchscreen, so the pad is unreachable there.
+// A headset has no touchscreen, so the pad is unreachable there, and both headsets carry their own
+// way into the menu: a wrist button on OpenXR and a system ornament on visionOS.
 bool HeadsetActive() {
     auto ctx = Ship::Context::GetRawInstance();
     if (ctx == nullptr || ctx->GetWindow() == nullptr) {
         return false;
     }
-    return ctx->GetWindow()->GetWindowBackend() == Fast::WindowBackend::FAST3D_OPENXR_OPENGL;
+    const int32_t backend = ctx->GetWindow()->GetWindowBackend();
+    return backend == Fast::WindowBackend::FAST3D_OPENXR_OPENGL ||
+           backend == Fast::WindowBackend::FAST3D_VISIONOS_METAL;
 }
 
 // True when the pad itself should be drawn and polled. The menu button outlives it so
@@ -948,6 +953,10 @@ extern "C" void TouchControls_Poll(void) {
     sMenuLatch = menuHeld;
 
     sState = next;
+}
+
+extern "C" void TouchControls_OpenMenu(void) {
+    OpenMenu();
 }
 
 extern "C" void TouchControls_MergeInto(void* contPad) {

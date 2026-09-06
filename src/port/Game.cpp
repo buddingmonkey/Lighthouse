@@ -160,6 +160,16 @@ extern "C" int port_appIsOnScreen(void) {
 #endif
 }
 
+// visionOS has no SDL app delegate to post the events LifecycleWatch reads, so its compositor
+// shell reports the same state from the layer instead.
+extern "C" void port_setAppOnScreen(int onScreen) {
+#ifdef LIGHTHOUSE_MOBILE
+    sAppOnScreen.store(onScreen != 0, std::memory_order_release);
+#else
+    (void)onScreen;
+#endif
+}
+
 // Called once the window exists, which is both the earliest SDL will accept a watch and
 // early enough to cover RunExtract's loop.
 extern "C" void port_installLifecycleWatch(void) {
