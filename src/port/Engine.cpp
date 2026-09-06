@@ -1208,28 +1208,10 @@ SubframePacing ComputeSubframePacing() {
             // late, so the rate comes from the wall time the ticks really took.
             const double window = now - windowStart;
             if (nextReport > 0.0 && ticks > 0 && window > 0.0) {
-                // 9.7. The four parts of a tick on the game thread, which nothing else measures.
-                // logic is the mean and then the largest one of the window, because the hitch this
-                // hunts is one tick in a second and a mean hides it.
-                double phase[6] = {};
-                const bool phased = port_tickPhaseTake(phase) != 0;
                 SPDLOG_INFO("xr pacing: target {} Hz, ticks {:.1f}/s, vi {:.2f}, asked {:.2f}, delivered {:.2f}, "
                             "work {:.2f} ms",
                             target_fps, (double)ticks / window, (double)viTotal / ticks, (double)askedTotal / ticks,
                             (double)deliveredTotal / ticks, (double)sFilteredSubFrameNs / 1e6);
-                if (phased) {
-                    SPDLOG_INFO("xr tick: logic {:.2f} ms, logic max {:.2f} ms, token {:.2f} ms, retrace {:.2f} ms, "
-                                "latch {:.2f} ms, handoff {:.2f} ms",
-                                phase[0], phase[1], phase[2], phase[3], phase[4], phase[5]);
-                }
-                // 9.8. The worst tick of the second, and what it was parked in. rest is the game's
-                // own work with every park the port can name taken out of it.
-                double stall[5] = {};
-                if (port_tickStallTake(stall) != 0) {
-                    SPDLOG_INFO("xr stall: logic max {:.2f} ms = idle {:.2f} ({:.0f}) + service {:.2f} ({:.0f}) + "
-                                "rest {:.2f} ms",
-                                stall[0], stall[3], stall[4], stall[1], stall[2], stall[0] - stall[3] - stall[1]);
-                }
             }
             nextReport = now + 1.0;
             windowStart = now;
@@ -1384,7 +1366,6 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
     }
 
     RunCommands(commands, mtx_replacements, activeFrames, pacing.blendBase, pacing.blendStep);
-    port_tickPhaseDrawEnd();
     ReportTickRate(pacing.subframes, sDeliveredSubFrames);
 
     for (auto& f : sMapBuildFutures) {

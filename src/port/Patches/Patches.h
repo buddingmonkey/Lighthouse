@@ -24,29 +24,6 @@ int port_getDemoDisplayViCount(int rawViCount);
 void port_tickCutsceneStutter(void);
 int port_getCutsceneExtraVis(void);
 
-// Tick phase measurement (TickPhase.cpp) - 9.7, removed again under 9.6
-
-// Stamps the four points of viMgr_func_8024BFD8. The exit of one tick to the entry of the next is
-// the game's own work: the logic, the display list build and the interpolation record.
-void port_tickPhaseEnter(int waitsForToken);
-void port_tickPhaseToken(void);
-void port_tickPhaseRetrace(void);
-void port_tickPhaseExit(void);
-// The render thread finished a frame, which is what the token that ends the entry wait follows.
-void port_tickPhaseDrawEnd(void);
-// mean logic, max logic, mean token, mean retrace, mean latch, mean handoff, in milliseconds.
-// Clears the window. False when no tick closed in it.
-int port_tickPhaseTake(double out[6]);
-// 9.8. What the game thread was parked in inside that span: slot 0 the render service handshake,
-// slot 1 the no-draw delay. Both are in Game.cpp and both are the game thread's alone.
-#define PORT_TICK_PARK_SERVICE 0
-#define PORT_TICK_PARK_IDLE 1
-void port_tickPhaseParkBegin(int slot);
-void port_tickPhaseParkEnd(int slot);
-// The tick of the second with the largest logic: logic, service ms, service count, idle ms, idle
-// count. Clears the window. False when no tick closed in it.
-int port_tickStallTake(double out[5]);
-
 // Localization (Localization.cpp)
 
 int port_pauseMenuNeedsRefresh(void); // language or Return-to-Lair CVar changed while menu open

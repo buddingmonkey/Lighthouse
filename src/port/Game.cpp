@@ -292,16 +292,13 @@ extern "C" void port_runOnRenderThread(void (*fn)(void*), void* arg) {
     if (sShutdownRequested.load(std::memory_order_acquire)) {
         return;
     }
-    port_tickPhaseParkBegin(PORT_TICK_PARK_SERVICE);
     sSvcCv.wait(lock, done);
     if (sShutdownRequested.load(std::memory_order_acquire)) {
-        port_tickPhaseParkEnd(PORT_TICK_PARK_SERVICE);
         return;
     }
     sSvcFn = fn;
     sSvcArg = arg;
     sSvcCv.wait(lock, done);
-    port_tickPhaseParkEnd(PORT_TICK_PARK_SERVICE);
 }
 
 // Barrier before the tick frees or reads memory an in-flight list references.
@@ -335,9 +332,7 @@ void push_frame() {
     // The window thread keeps the progress modal alive while an inline mod
     // extraction runs; the tick just idles so the extractor gets the machine.
     if (IsInlineModExtractionBusy()) {
-        port_tickPhaseParkBegin(PORT_TICK_PARK_IDLE);
         SDL_Delay(16);
-        port_tickPhaseParkEnd(PORT_TICK_PARK_IDLE);
         return;
     }
 
@@ -372,9 +367,7 @@ void push_frame() {
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - iterationStart)
                 .count();
         if (spentMs < kNoDrawTickMs) {
-            port_tickPhaseParkBegin(PORT_TICK_PARK_IDLE);
             SDL_Delay((Uint32)(kNoDrawTickMs - spentMs));
-            port_tickPhaseParkEnd(PORT_TICK_PARK_IDLE);
         }
     }
 }
