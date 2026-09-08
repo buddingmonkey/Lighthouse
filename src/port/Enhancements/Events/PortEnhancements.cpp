@@ -32,6 +32,7 @@ void PortEnhancements_Register() {
     REGISTER_EVENT(OnTransitionModelScale);
     REGISTER_EVENT(OnTransitionStateUpdate);
     REGISTER_EVENT(DrawDistanceCubeWidth);
+    REGISTER_EVENT(MapUnderwaterTint);
     REGISTER_EVENT(OnActorTick);
     REGISTER_EVENT(OnPropTick);
     REGISTER_EVENT(OnSpritePropTick);
@@ -83,6 +84,7 @@ void PortEnhancements_Register() {
     REGISTER_EVENT(OnGameFlagSet);
     REGISTER_EVENT(OnItemCountChanged);
     REGISTER_EVENT(OnCollectibleCollected);
+    REGISTER_EVENT(OnCarryThrow);
     REGISTER_EVENT(OnAbilityLearned);
     REGISTER_EVENT(OnJiggySpawned);
     REGISTER_EVENT(OnHoneycombDropSpawn);

@@ -214,7 +214,7 @@ int sFiring = 0;
 int sOverlayShown = 0;
 
 bool canAimEggs() {
-    return can_egg() && player_getTransformation() == TRANSFORM_1_BANJO;
+    return can_egg() && player_getTransformation() == TRANSFORM_1_BANJO && !player_inWater();
 }
 
 } // namespace
