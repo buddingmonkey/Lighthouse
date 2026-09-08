@@ -192,6 +192,10 @@ void VolumePollState() {
     // when the game itself is finished, because a process that leaves takes the immersive space
     // down with it and that is the shell's job to do in order.
     port_setAppOnScreen(phase == 2 ? 1 : 0);
+    // Nothing else marks a pause in the log, and the cost lines only stop, which a stall does too.
+    char line[80];
+    snprintf(line, sizeof(line), "the scene phase is %d, where 2 is active and 0 is background", phase);
+    Fast::ReportVisionOS(line);
 }
 
 // SDL keeps its keyboard inside the UIKit video driver, which visionos.cmake turns off, so SDL

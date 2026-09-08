@@ -199,6 +199,8 @@ private final class VolumeState {
     var bounds = BoundingBox()
     var aspect = Float(kPictureAspect)
     var phase: Int32 = 2
+    private var quadLostAt = 0.0
+    private var lastQuadTransform: float4x4?
     private var rawHover = [LighthouseVolumeHoverRect](repeating: LighthouseVolumeHoverRect(), count: kHoverRectMax)
     private var hoverEntities: [ModelEntity] = []
     private var hoverShown: [HoverRect] = []
@@ -378,6 +380,25 @@ private final class VolumeState {
         LighthouseVolumePoint(u * Float(kEyeWidth), v * Float(kTextureHeight), pressed)
     }
 
+    // 9.5, 2026-09-07. The conversion to the immersive space stops answering while another app
+    // holds the wearer's attention, and it answers again when the game has it back. The entity is
+    // in the scene and active throughout, so nothing here is broken and there is nothing to repair.
+    // Opening the space again does make it answer, but only because opening a space takes the
+    // wearer back to this app, which is not a repair, it is a theft.
+    private func quadLost(_ quad: ModelEntity) {
+        guard phase == 2, quadLostAt == 0.0 else { return }
+        quadLostAt = CACurrentMediaTime()
+        note("the quad transform is gone: scene \(quad.scene != nil), "
+             + "active \(quad.isActive), parent \(quad.parent != nil)")
+    }
+
+    private func quadFound() {
+        guard quadLostAt != 0.0 else { return }
+        let gone = CACurrentMediaTime() - quadLostAt
+        quadLostAt = 0.0
+        note("the quad transform is back after \(String(format: "%.1f", gone)) s")
+    }
+
     func tick() {
         guard let quad else { return }
         readHover()
@@ -393,6 +414,17 @@ private final class VolumeState {
         if let immersiveFromQuad = quad.transformMatrix(relativeTo: .immersiveSpace) {
             frame.HasQuad = true
             frame.ImmersiveFromQuad = immersiveFromQuad
+            lastQuadTransform = immersiveFromQuad
+            quadFound()
+        } else if let held = lastQuadTransform {
+            // The window does not move on its own, so the last place it stood is still where it
+            // stands. Holding it keeps the picture still, where dropping it snaps the view to the
+            // design range and back the moment the wearer looks away and returns.
+            frame.HasQuad = true
+            frame.ImmersiveFromQuad = held
+            quadLost(quad)
+        } else {
+            quadLost(quad)
         }
         LighthouseVolumeUpdate(frame)
 
