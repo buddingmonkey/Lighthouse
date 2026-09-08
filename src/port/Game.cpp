@@ -1,5 +1,6 @@
 #include "Engine.h"
 #include <atomic>
+#include <clocale>
 #include <condition_variable>
 #include <cstring>
 #include <cstdlib>
@@ -236,16 +237,18 @@ void RenderTask(void* dlStart) {
     FrameInterpolation_ReleasePair(pair.prev, pair.curr);
 }
 
-// This thread plays the RCP: thread5 hands over a task,
-// we run it and raise SP then DP.
+// This thread plays the RCP: thread5 hands over a task, it runs and raises DP
+// then SP. Hardware raises SP first, but the list is fully drawn before either
+// goes out. DP has to lead: SP frees thread5 to start the next task, and starting
+// one overwrites the flags the frame's swap token gates on.
 int ServiceRcp() {
     OSTask* task = OS_SpTakePendingTask();
     if (task == nullptr) {
         return 0;
     }
     RenderTask(task->t.data_ptr);
-    OS_SendEventMesg(OS_EVENT_SP);
     OS_SendEventMesg(OS_EVENT_DP);
+    OS_SendEventMesg(OS_EVENT_SP);
     return 1;
 }
 
@@ -379,6 +382,7 @@ void push_frame() {
 
 int SDL_main(int argc, char* argv[]) {
 #ifdef _WIN32
+    setlocale(LC_ALL, ".UTF8");
     timeBeginPeriod(1);
 #endif
 
