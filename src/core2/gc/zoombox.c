@@ -999,6 +999,9 @@ void gczoombox_draw(GcZoombox *this, Gfx **gdl, Mtx ** mptr, void *vptr){
 
      if(func_802E4A08())
           sfx_rand_sync_to_rand();
+     // [port] A zoombox is placed from a screen coordinate, so in a headset it belongs on the
+     // window plane wherever it is drawn from, including an actor draw inside the world pass.
+     port_xr_beginFlat(gdl);
      //L80316BCC
      // [port] Stable scope. The crossfade branch below toggles 1↔2 sprite
      // draws, which would otherwise shift indices and ghost sprites
@@ -1048,6 +1051,7 @@ void gczoombox_draw(GcZoombox *this, Gfx **gdl, Mtx ** mptr, void *vptr){
           }
      }//L80316DD8
      FrameInterpolation_RecordCloseChild();
+     port_xr_endFlat(gdl);
      if(func_802E4A08()){
           rand_sync_to_sfx_rand();
      }
