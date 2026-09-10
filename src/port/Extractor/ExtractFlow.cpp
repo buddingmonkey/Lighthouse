@@ -145,10 +145,6 @@ bool AnyRomArchiveExists() {
     return false;
 }
 
-// An archive that exists but cannot be read is worse than one that is missing: a truncated
-// file fails to open with nothing but a log line, and an empty one opens as a valid empty
-// archive, so either boots the game with no assets and no explanation. Both shapes arrive the
-// same way -- a copy through the Files app that stopped early, or a write the system killed.
 bool RomArchiveIsUsable(const std::string& path) {
     std::error_code ec;
     if (std::filesystem::file_size(path, ec) == 0 || ec) {
@@ -163,8 +159,6 @@ bool RomArchiveIsUsable(const std::string& path) {
     return !archive->ListFiles()->empty();
 }
 
-// Moves an unreadable archive out of the way so the normal extraction path picks up from a
-// clean slate. Kept rather than deleted, matching how an invalid save file is handled.
 void MoveAsideUnusableRomArchives() {
     for (const auto& archive : kRomArchives) {
         const std::string path = Ship::Context::LocateFileAcrossAppDirs(archive, "bk");
@@ -185,9 +179,6 @@ void MoveAsideUnusableRomArchives() {
     }
 }
 
-// Teardown shared by every bail-out in RunExtract(). The thread pool is a RunExtract() local and
-// does not exist yet at the earliest bail-out, hence the pointer; `context` is the GameEngine
-// member. Both are passed in so this stays a plain function over exactly what it releases.
 [[noreturn]] void ShutdownAndExit(int code, std::shared_ptr<BS::thread_pool>* threadPool, Ship::Context*& context) {
     if (threadPool != nullptr) {
         *threadPool = nullptr;
@@ -212,8 +203,6 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
         gui->GetMenu()->Hide();
     }
 
-    // Before the version probe, which cannot tell an unreadable archive from a romhack's
-    // (legitimately absent) portVersion record.
     MoveAsideUnusableRomArchives();
 
     OTRVersion romArchiveVersion = { INT16_MAX, 0, 0 };
@@ -611,15 +600,10 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
             ShutdownAndExit(0, &threadPool, context);
         }
         wnd->HandleEvents();
-        // Extraction runs on the thread pool, so this loop can stop drawing
-        // while the app is off screen for the same reason the main loop does.
         if (!port_appIsOnScreen()) {
             SDL_Delay(16);
             continue;
         }
-        // This loop draws its own frames, so it asks for the scale the way StartFrame does. A
-        // headset window has no angular width until the session is up, which is after the
-        // constructor scaled the menu once.
         GameEngine::ScaleImGui();
         UIWidgets::Colors themeColor =
             static_cast<UIWidgets::Colors>(CVarGetInteger(CVAR_SETTING("Menu.Theme"), UIWidgets::Colors::LightBlue));

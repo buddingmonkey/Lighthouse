@@ -662,8 +662,6 @@ void Menu::DrawElement() {
     std::vector<ImVec2> headerSizes;
     float headerWidth = style.ItemSpacing.x + 20;
     bool headerSearch = !CVarGetInteger(CVAR_SETTING("Menu.SidebarSearch"), 0);
-    // The word in the empty field has to fit the field. A menu scaled up for a headset writes it
-    // wider than the fixed width, and the header then takes a scrollbar as tall as the row itself.
     const float searchWidth = std::max(200.0f, ImGui::CalcTextSize("Search...").x + style.ItemSpacing.x);
     if (headerSearch) {
         headerWidth += searchWidth + style.ItemSpacing.x + style.FramePadding.x;
@@ -703,8 +701,6 @@ void Menu::DrawElement() {
         scrollbar = true;
     }
     ImVec2 headerSelSize = { menuSize.x - buttonSize.x * 3 - style.ItemSpacing.x * 3, headerHeight };
-    // The entries size the row; the cap is the room there is for them, not the width they were
-    // measured at, so a measurement a few pixels short cannot cost the row a scrollbar.
     ImGui::SetNextWindowSizeConstraints({ 0, headerHeight }, { headerSelSize.x, headerHeight });
     if (scrollbar) {
         headerSelSize.y += style.ScrollbarSize;
@@ -765,7 +761,7 @@ void Menu::DrawElement() {
         ImGui::PopStyleColor();
     }
     ImGui::EndChild();
-#ifdef __IOS__
+#ifdef LIGHTHOUSE_MOBILE
     const float headerButtonSpan = 3.25f;
 #else
     const float headerButtonSpan = 4.25f;
@@ -782,9 +778,7 @@ void Menu::DrawElement() {
     options4.size = UIWidgets::Sizes::Inline;
     options4.tooltip = option4Tooltip.c_str();
     if (UIWidgets::Button(ICON_FA_QUESTION_CIRCLE, options4)) {}
-    // No quit control on iOS: the platform reserves that decision for the user, and taking
-    // it ourselves ends the process in a way the system reports as a crash.
-#ifndef __IOS__
+#ifndef LIGHTHOUSE_MOBILE
     ImGui::SameLine();
     UIWidgets::ButtonOptions options3 = {};
     options3.color = UIWidgets::Colors::Red;

@@ -124,13 +124,11 @@ void Rando::Logic::InitializeSaveData(SaveData* saveData) {
             .name = randoStaticCheck.name,
             .randoCheckId = randoCheckId,
             .randoItemId = randoStaticCheck.randoItemId,
-            .shuffledCheckId = randoCheckId,
             // .randoItemId = Rando::StaticData::GetRandoItemByActorId((actor_e)randoStaticCheck.actorId),
             .randoCollectionId = randoStaticCheck.collectionId,
             .isShuffled = false,
             .eligible = false,
             .received = false,
-            .obtained = false,
             .skipped = false,
         };
 

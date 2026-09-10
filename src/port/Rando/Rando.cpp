@@ -16,8 +16,6 @@ namespace fs = std::filesystem;
 
 int16_t selectedFileNum = DEFAULT_FILE_NUM;
 
-// Resolved on first use: the app directory comes from the platform at runtime, and on Android
-// that is SDL's JNI bridge, which does not exist yet while static initialisers run.
 static const fs::path& RandomizerFolderPath() {
     static const fs::path path(Ship::Context::GetPathRelativeToAppDirectory("randomizer", "bk64"));
     return path;

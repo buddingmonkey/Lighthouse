@@ -75,7 +75,7 @@ Actor* CustomCollectible_DrawCustomModel(ActorMarker* marker, Gfx** gfx, Mtx** m
             model = ARCHIPELAGO_MODEL_PROGRESSIVE;
             break;
         default:
-            return actor;
+            break;
     }
 
     Gfx* dl = CustomCollectible_GetDL(model);

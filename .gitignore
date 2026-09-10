@@ -16,6 +16,9 @@ build/
 build-cmake
 build-ios
 build-android
+build-vision*
+build-gles
+*.xcappdata
 
 #android sdk location, machine specific
 android/local.properties

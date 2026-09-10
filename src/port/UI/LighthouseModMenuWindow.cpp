@@ -37,7 +37,6 @@ std::map<std::string, std::filesystem::path> filePaths;
 static int dragSourceIndex = -1;
 static int dragTargetIndex = -1;
 
-// Mods only bind at process start. Desktop re-execs itself; mobile apps can't, so the user reopens the app.
 #ifdef LIGHTHOUSE_MOBILE
 static constexpr const char* kApplyRestartLabel = "Apply & Quit";
 static constexpr const char* kRestartButtonLabel = "Quit";

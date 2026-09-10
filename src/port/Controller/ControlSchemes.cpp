@@ -117,8 +117,6 @@ bool RightStickIsMapped(const std::shared_ptr<Controller>& controller) {
     return stick != nullptr && stick->HasMappingsForPhysicalDeviceType(Ship::SDLGamepad);
 }
 
-// Splits a C-button's mappings into the two kinds the shaping pass cares about, and reports
-// which of each kind is held right now.
 void CollectCButtonSources(const std::shared_ptr<Controller>& controller, CONTROLLERBUTTONS_T bitmask,
                            uint16_t& axisMask, uint16_t& axisHeld, uint16_t& otherHeld) {
     auto button = controller->GetButton(bitmask);
@@ -328,8 +326,6 @@ extern "C" void port_shapeControllerInput(void* contPad) {
         for (CONTROLLERBUTTONS_T cButton : kCButtons) {
             CollectCButtonSources(controller, cButton, axisMask, axisHeld, otherHeld);
         }
-        // Only what the stick is pressing right now: the pass regenerates that, and erasing
-        // the whole of axisMask would also take C presses no stick made, such as the pad's.
         const uint16_t clearMask = axisHeld & ~otherHeld;
 
         static uint16_t sLatchDir = 0;

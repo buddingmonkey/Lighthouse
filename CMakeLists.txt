@@ -15,7 +15,6 @@ if(CMAKE_SYSTEM_NAME MATCHES "^(iOS|visionOS)$")
 endif()
 
 if(APPLE)
-  enable_language(OBJC)
   enable_language(OBJCXX)
   if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
     enable_language(Swift)
@@ -75,8 +74,6 @@ endif()
 
 set(CMAKE_PROJECT_GIT_COMMIT_TAG "${GIT_COMMIT_TAG}" CACHE STRING "Git commit tag" FORCE)
 
-# Set the minimum version of CMake and the deployment target for macOS.
-# Skipped for iOS, where this is the iOS version and 10.15 is not a valid value.
 if (NOT LIGHTHOUSE_APPLE_MOBILE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum OS X deployment version")
 endif()
@@ -130,22 +127,16 @@ else()
     set(CPP "${CMAKE_C_COMPILER}" "-E" "-P" "-Wno-trigraphs" "-x" "c")
 endif()
 
-# iOS: the toolchain file (cmake/ios.toolchain.cmake) is supplied on the command line,
-# so CMAKE_SYSTEM_NAME is already "iOS" by the time we get here. See docs/BUILDING.md.
 if(LIGHTHOUSE_APPLE_MOBILE)
     set(PROJECT_ID "com.harbormasters.lighthouse" CACHE STRING "iOS bundle identifier")
     set(IOS_DEVELOPMENT_TEAM "" CACHE STRING "Apple Developer Team ID used to sign the iOS app")
     set(BUNDLE_ID "${PROJECT_ID}" CACHE STRING "Bundle ID libultraship signs its targets with")
-    # The minimum version comes from the toolchain's DEPLOYMENT_TARGET; mirror it into the plist.
     set(IOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
     if(CMAKE_SYSTEM_NAME STREQUAL "visionOS" AND IOS_DEPLOYMENT_TARGET VERSION_LESS 2.0)
-        # LowLevelTexture, a volume the system moves and resizes, and the custom hover effect the
-        # gaze highlight is drawn with, all start at visionOS 2.
         message(FATAL_ERROR "visionOS deployment target is ${IOS_DEPLOYMENT_TARGET}; pass "
                             "-DDEPLOYMENT_TARGET=2.0 to the toolchain.")
     endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND IOS_DEPLOYMENT_TARGET VERSION_LESS 14.0)
-        # The plist uses UILaunchScreen (iOS 14+) and libultraship pulls in iOS 16 metal-cpp headers.
         message(WARNING "iOS deployment target is ${IOS_DEPLOYMENT_TARGET}; pass -DDEPLOYMENT_TARGET=16.0 "
                         "to the toolchain for a supported configuration.")
     endif()
@@ -155,7 +146,6 @@ if(LIGHTHOUSE_APPLE_MOBILE)
     else()
         set(CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "7")
     endif()
-    # Keeps the static libraries out of an archive; the app target opts back in below.
     set(CMAKE_XCODE_ATTRIBUTE_SKIP_INSTALL "YES")
 endif()
 
@@ -190,7 +180,6 @@ endif()
 
 # Set game compilation version
 set(VERSION us)
-# SDL2_net isn't part of the mobile dependency sets, and Anchor multiplayer is desktop-only.
 if(LIGHTHOUSE_APPLE_MOBILE OR CMAKE_SYSTEM_NAME STREQUAL "Android")
     set(USE_NETWORKING_DEFAULT OFF)
 else()
@@ -215,7 +204,6 @@ add_compile_definitions(
 )
 
 # Find necessary libraries
-# Android is UNIX and not APPLE, but it has no desktop GL: libultraship links GLESv3 there.
 if (UNIX AND NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
     find_package(OpenGL REQUIRED)
 endif()
@@ -240,7 +228,7 @@ include_directories(
 
 # Collect source files to build the executable
 message(${CMAKE_CURRENT_SOURCE_DIR})
-file(GLOB_RECURSE ALL_FILES CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+file(GLOB_RECURSE ALL_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     # "src/assets/*.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/port/*.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/port/*.h"
@@ -301,8 +289,6 @@ if (LIGHTHOUSE_APPLE_MOBILE)
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_BINARY_DIR}/ios/Info.plist
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${PROJECT_ID}"
-        # CMake only fills INSTALL_PATH for shared libraries, and `xcodebuild archive` with an
-        # empty one leaves the archive without an Applications/ directory to export from.
         XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
         XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
     )
@@ -315,8 +301,6 @@ if (LIGHTHOUSE_APPLE_MOBILE)
         )
     endif()
     if(IOS_DEVELOPMENT_TEAM STREQUAL "")
-        # Lets the project configure and compile without an Apple developer account;
-        # set IOS_DEVELOPMENT_TEAM to produce an installable build.
         set_target_properties(${PROJECT_NAME} PROPERTIES
             XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
             XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
@@ -324,14 +308,6 @@ if (LIGHTHOUSE_APPLE_MOBILE)
         )
     endif()
 
-    # Without a shared scheme Xcode invents its own the first time the project is opened, and
-    # that one always runs Debug. Debug means -O0 for everything including the statically
-    # linked asset extractor, which is roughly 60x slower: extracting bk.o2r from a 16MB ROM
-    # takes ~45 minutes at -O0 against ~40 seconds optimised, and the game itself runs
-    # unoptimised too. Generate the scheme from here so the configuration is a deliberate
-    # choice rather than whatever Xcode defaulted to.
-    # -O0 also costs launch time: a cold start faults in and signature-checks every page of
-    # the 70MB Debug binary, against 14MB in Release, before main() runs.
     set(IOS_SCHEME_CONFIGURATION "Release" CACHE STRING
         "Build configuration the generated Xcode scheme runs (Debug or Release)")
     set_property(CACHE IOS_SCHEME_CONFIGURATION PROPERTY STRINGS Debug Release)
@@ -343,7 +319,6 @@ if (LIGHTHOUSE_APPLE_MOBILE)
     message(STATUS "Xcode scheme '${PROJECT_NAME}' runs the ${IOS_SCHEME_CONFIGURATION} "
                    "configuration (set IOS_SCHEME_CONFIGURATION to change)")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Android")
-    # SDLActivity loads libmain.so and calls SDL_main in it; there is no executable.
     add_library(${PROJECT_NAME} SHARED ${ALL_FILES})
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME main)
 else()
@@ -533,14 +508,11 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU|Clang|AppleClang")
 endif()
 
 if (LIGHTHOUSE_APPLE_MOBILE)
-    # libultraship defines __IOS__ only for its own target; the game needs it too.
     target_compile_definitions(${PROJECT_NAME} PRIVATE __IOS__)
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Android")
-    # The decompiled game code assumes a signed char; AArch64 Linux does not.
     target_compile_options(${PROJECT_NAME} PRIVATE -fsigned-char)
 endif()
 
-# Shared by every touchscreen handheld: app lifecycle, read-only bundle, no self-relaunch.
 if (LIGHTHOUSE_APPLE_MOBILE OR CMAKE_SYSTEM_NAME STREQUAL "Android")
     target_compile_definitions(${PROJECT_NAME} PRIVATE LIGHTHOUSE_MOBILE=1 LIGHTHOUSE_TOUCH_CONTROLS=1)
 endif()
@@ -587,10 +559,6 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "CafeOS")
         ${DEVKITPRO}/portlibs/wiiu/include/
     )
 elseif(LIGHTHOUSE_APPLE_MOBILE)
-    # Ogg/Vorbis are linked but unreferenced by any source, so iOS skips them.
-    # GameController/CoreHaptics back SDL2's MFi gamepad and rumble support. Metal,
-    # QuartzCore, AVFoundation, AudioToolbox and Foundation already arrive through
-    # libultraship's own find_library calls.
     set(ADDITIONAL_LIBRARY_DEPENDENCIES "")
     foreach(framework UIKit GameController CoreHaptics CoreMotion CoreGraphics)
         find_library(IOS_FW_${framework} ${framework} REQUIRED)
@@ -744,8 +712,22 @@ endif()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     if (CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR LIGHTHOUSE_APPLE_MOBILE)
+        set(APPLE_COMPILE_OPTIONS
+            -Wall -Wextra -Wno-error
+            -fno-strict-aliasing
+            -Wno-return-type
+            -Wno-unused-parameter
+            -Wno-unused-function
+            -Wno-unused-variable
+            -Wno-missing-field-initializers
+            -Wno-parentheses
+            -Wno-narrowing
+            -Wno-missing-braces
+            -Wno-int-conversion
+            -pthread
+        )
         target_compile_options(${PROJECT_NAME} PRIVATE
-            "$<$<NOT:$<COMPILE_LANGUAGE:Swift>>:-Wall;-Wextra;-Wno-error;-fno-strict-aliasing;-Wno-return-type;-Wno-unused-parameter;-Wno-unused-function;-Wno-unused-variable;-Wno-missing-field-initializers;-Wno-parentheses;-Wno-narrowing;-Wno-missing-braces;-Wno-int-conversion;-pthread>"
+            "$<$<NOT:$<COMPILE_LANGUAGE:Swift>>:${APPLE_COMPILE_OPTIONS}>"
             $<$<COMPILE_LANGUAGE:C>:
                 -Wno-implicit-function-declaration
                 -Wno-incompatible-pointer-types
@@ -811,7 +793,6 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
           >
       )
   else()
-      # -mcpu=native describes the build machine, so it is wrong for a cross-compile.
       if(NOT DEFINED CPU_OPTION AND NOT CMAKE_CROSSCOMPILING)
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
           set(CPU_OPTION -msse2 -mfpmath=sse)
@@ -854,28 +835,11 @@ endif()
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
 include(ExternalProject)
-# TorchExternal is the asset packer, so it must run on the build machine. ExternalProject
-# doesn't inherit CMAKE_TOOLCHAIN_FILE, but it does inherit CMAKE_GENERATOR -- which for an
-# iOS build means Xcode, and running xcodebuild inside an xcodebuild script phase does not
-# work. Pin a single-config generator, and name the macOS SDK because xcodebuild exports
-# SDKROOT=iPhoneOS into the script phase environment.
 set(TORCH_MULTI_CONFIG ${CMAKE_CONFIGURATION_TYPES})
-# ExternalProject does not inherit CMAKE_BUILD_TYPE, and an empty build type on a
-# single-config generator means no optimisation flags at all -- the packer was being built
-# -O0 even from a Release tree, which is most of why asset extraction takes tens of
-# minutes. It is a build-time tool, so build it Release regardless of the host project's
-# configuration. Multi-config generators ignore this and follow the parent configuration
-# instead.
 set(TORCH_HOST_ARGS -DCMAKE_BUILD_TYPE=Release)
 set(TORCH_HOST_GENERATOR "")
 if (LIGHTHOUSE_APPLE_MOBILE)
-    # The empty toolchain file is insurance: this CMake doesn't forward it, but the
-    # explicit -D takes precedence in versions that do.
     list(APPEND TORCH_HOST_ARGS -DCMAKE_TOOLCHAIN_FILE= -DCMAKE_OSX_SYSROOT=macosx)
-    # The sysroot alone is not enough. CMAKE_OSX_DEPLOYMENT_TARGET is empty by default, which
-    # emits no -mmacosx-version-min, and clang then takes its platform from the
-    # IPHONEOS_DEPLOYMENT_TARGET that xcodebuild also exports -- so the packer compiles for iOS
-    # against the macOS SDK and fails to link the host libraries. Name the host's own version.
     execute_process(COMMAND sw_vers -productVersion
         OUTPUT_VARIABLE TORCH_HOST_MACOS_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
     list(APPEND TORCH_HOST_ARGS -DCMAKE_OSX_DEPLOYMENT_TARGET=${TORCH_HOST_MACOS_VERSION})
@@ -965,23 +929,15 @@ if(LIGHTHOUSE_APPLE_MOBILE)
         https://raw.githubusercontent.com/mdqinc/SDL_GameControllerDB/master/gamecontrollerdb.txt
         ${CMAKE_BINARY_DIR}/gamecontrollerdb.txt)
 
-    # App icons come from an asset catalog, which Xcode compiles with actool. The icon is
-    # committed rather than derived from logo.png: iOS rejects an alpha channel, and
-    # logo.png is a rounded desktop tile with transparent margins. visionOS needs a layered
-    # icon instead of a flat one, so it gets its own catalog.
     target_sources(${PROJECT_NAME} PRIVATE ${APPLE_ASSET_CATALOG})
     set_source_files_properties(${APPLE_ASSET_CATALOG} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
     if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
-        # A raw .usda, copied and not compiled. It holds the camera index switch that gives each eye
-        # its own half of the picture, which no material the API can build by itself reaches.
         target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/visionos/GameScreen.usda)
         set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/visionos/GameScreen.usda
             PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     endif()
 
-    # Shipped read-only data. Context::GetAppBundlePath() resolves to the bundle on iOS, so
-    # LocateFileAcrossAppDirs finds these here while user data stays in Documents.
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND}
                 -DBUNDLE=$<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>
@@ -994,8 +950,6 @@ endif()
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY APPIMAGE_DESKTOP_FILE_TERMINAL YES)
 set_property(TARGET ${PROJECT_NAME} PROPERTY APPIMAGE_DESKTOP_FILE "${CMAKE_SOURCE_DIR}/Lighthouse.desktop")
-# linuxdeploy rejects any icon above 512x512, and the basename has to stay "logo" to match
-# Icon=logo in Lighthouse.desktop. logo.png is the 1024 master the macOS iconset needs.
 set_property(TARGET ${PROJECT_NAME} PROPERTY APPIMAGE_ICON_FILE "${CMAKE_SOURCE_DIR}/linux/logo.png")
 endif()
 

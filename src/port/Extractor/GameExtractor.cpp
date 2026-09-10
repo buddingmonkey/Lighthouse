@@ -355,12 +355,6 @@ bool GameExtractor::GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<siz
 
     sPhase = 1; // Parsing phase
 
-    // Torch assembles the archive in memory and writes it in one pass onto its final name, so
-    // a write that stops early -- the process killed, the disk full -- leaves a truncated file
-    // under the name the game loads next launch, and takes any previously working archive with
-    // it. Extracting into a staging directory and moving the result into place afterwards makes
-    // that swap atomic, and costs nothing: the destination directory reaches neither the
-    // archive's contents nor the assets Torch reads, only where the output lands.
     const fs::path stagingDir = fs::path(game_path) / ".extracting";
     std::error_code stagingEc;
     fs::remove_all(stagingDir, stagingEc);
@@ -388,8 +382,6 @@ bool GameExtractor::GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<siz
         return false;
     }
 
-    // Read before tearing Companion down; the move below is what puts it where the inline Mod
-    // Menu flow expects to find it.
     const fs::path produced = Companion::Instance->GetOutputPath();
 
     sPhase = 3;
@@ -397,7 +389,6 @@ bool GameExtractor::GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<siz
     delete Companion::Instance;
     Companion::Instance = nullptr;
 
-    // Torch stops with no exception and an empty output path when it has no configuration for the ROM.
     if (produced.empty() || !fs::exists(produced, stagingEc)) {
         const std::string hash = Companion::CalculateHash(this->mGameData);
         SPDLOG_ERROR("The extractor made no archive for ROM {} ({})", this->mGamePath.string(), hash);
@@ -408,8 +399,6 @@ bool GameExtractor::GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<siz
         return false;
     }
 
-    // Replaces the previous archive in one step -- no remove first, which would reopen the
-    // window this is here to close.
     const fs::path finalPath = fs::path(game_path) / produced.filename();
     std::error_code moveEc;
     fs::rename(produced, finalPath, moveEc);
@@ -423,7 +412,6 @@ bool GameExtractor::GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<siz
     }
     sLastOutputPath = finalPath.generic_string();
 
-    // Torch drops this beside the archive; keep it where every other workflow has it.
     const fs::path hashFile = stagingDir / "torch.hash.yml";
     if (fs::exists(hashFile, stagingEc)) {
         fs::rename(hashFile, fs::path(game_path) / "torch.hash.yml", stagingEc);
@@ -460,7 +448,6 @@ void GameExtractor::WritePortVersion() {
 }
 #endif
 
-// The header answers before the hash does: an unknown hash reads as "wrong game", not "wrong byte order".
 static bool IsN64Rom(const std::vector<uint8_t>& rom) {
     static const uint8_t z64[] = { 0x80, 0x37, 0x12, 0x40 };
     return rom.size() >= 4 && std::equal(std::begin(z64), std::end(z64), rom.begin());
@@ -473,9 +460,6 @@ static bool IsByteSwapped(const std::vector<uint8_t>& rom) {
                                std::equal(std::begin(n64), std::end(n64), rom.begin()));
 }
 
-// No #ifdef needed: Lighthouse::PickFile picks the backend (native dialog on desktop, system picker
-// on Android, ImGui browser on consoles/arm). The N64-ROM title/filters live here so libultraship
-// stays game-agnostic.
 void GameExtractor::SelectGameFromUI(std::function<void(bool)> onComplete) {
     Ship::FileBrowserRequest req;
     req.Title = "Select a N64 ROM";

@@ -133,13 +133,10 @@ void port_noteMainLoopAlive(void);
 int port_audioStallHold(void);
 int32_t port_audioPumpShouldWait(void);
 
-// False while the app is off screen, when nothing may be rendered
 int port_appIsOnScreen(void);
 
-// Starts watching for the app-state events port_appIsOnScreen reports
 void port_installLifecycleWatch(void);
 
-// Reports the same state from a platform that has no SDL app delegate to post it
 void port_setAppOnScreen(int onScreen);
 
 // One-shot cues when a teammate's file-progress flag arrives
@@ -228,14 +225,11 @@ void port_warnPropNotInCube(int32_t index, int32_t propCnt);
 // Rate-limited: a cube's node-prop split index passed 31, where the old :5 field wrapped.
 void port_warnNodePropSplit(int32_t splitIndex, int32_t nodeCnt);
 
-// Headset window (XrPatches.cpp)
-
 void port_xr_beginFlat(Gfx** gfx);
 void port_xr_endFlat(Gfx** gfx);
 
-// Keeps a pass out of the window's depth measurement without moving where it draws.
-void port_xr_beginNoSceneDepth(Gfx** gfx);
-void port_xr_endNoSceneDepth(Gfx** gfx);
+void port_xr_beginParticlePass(Gfx** gfx);
+void port_xr_endParticlePass(Gfx** gfx);
 
 #ifdef __cplusplus
 }

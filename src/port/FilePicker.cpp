@@ -108,11 +108,21 @@ void PickFile(Ship::FileBrowserRequest request, std::function<void(std::optional
     }
 #elif defined(__ANDROID__)
     if (!request.Save) {
+        bool busy;
         {
             std::lock_guard<std::mutex> lock(sPickMutex);
-            sPickCallback = std::move(onResult);
-            sPickResult.reset();
-            sPickResultReady = false;
+            busy = sPickCallback != nullptr;
+            if (!busy) {
+                sPickCallback = std::move(onResult);
+                sPickResult.reset();
+                sPickResultReady = false;
+            }
+        }
+        if (busy) {
+            if (onResult) {
+                onResult(std::nullopt);
+            }
+            return;
         }
         if (!OpenAndroidPicker()) {
             std::lock_guard<std::mutex> lock(sPickMutex);

@@ -2,6 +2,7 @@
 #include <libultraship/bridge/consolevariablebridge.h>
 #include "port/Rando/Logic/Logic.h"
 #include "port/UI/Notification.h"
+#include <spdlog/spdlog.h>
 
 extern void RandoSaveCheck_to_json(nlohmann::json& j, const RandoSaveCheck& randoSaveCheck);
 extern RandoSaveCheck RandoSaveCheck_from_json(const nlohmann::json& j, RandoSaveCheck& randoSaveCheck,
@@ -14,7 +15,6 @@ nlohmann::ordered_json GenerateFromPoolGeneration() {
     nlohmann::ordered_json orderedSpoiler = nlohmann::ordered_json::object();
 
     orderedSpoiler["type"] = "LIGHTHOUSE_RANDO_SPOILER";
-    orderedSpoiler["randoSaveCheckSchema"] = 2;
     orderedSpoiler["seed"] = randoFinalSeed; // TODO: Add once Manual Seed Input is finished.
 
     orderedSpoiler["options"] = nlohmann::json::object();
@@ -67,12 +67,13 @@ void GenerateFromSpoiler(nlohmann::json spoiler) {
     gameFile_saveData[selectedFileNum].shipSaveData.randoSaveData.seedId = spoiler["seed"];
 
     if (spoiler.contains("checks") && !spoiler["checks"].empty()) {
+        const int schemaVersion = spoiler.value("randoSaveCheckSchema", -1);
         for (auto& data : spoiler["checks"].items()) {
             RandoSaveCheck checkEntry{};
-            int schemaVersion = spoiler.value("randoSaveCheckSchema", 1);
             try {
                 RandoSaveCheck_from_json(data.value(), checkEntry, schemaVersion, data.key());
             } catch (const std::exception& e) {
+                SPDLOG_WARN("[Spoiler] ignoring malformed randomizer check {}: {}", data.key(), e.what());
                 Notification::Emit(
                     { .message = "Error: Malformed Spoiler Log entry.", .messageColor = ImVec4(0.85f, 0.3f, 0, 1) });
                 continue;

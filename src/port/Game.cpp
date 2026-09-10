@@ -54,18 +54,6 @@ std::thread sGameThread;
 thread_local bool tIsGameThread = false;
 
 #ifdef LIGHTHOUSE_MOBILE
-// Whether the app is on screen. A frame rendered once it isn't never presents,
-// so on iOS the drawables it takes are never handed back to the layer; three of
-// those empty the pool and every later nextDrawable spends its full one second
-// timeout before returning nothing. That state does not heal on its own -- with
-// no drawable there is nothing to present, and with nothing presented no
-// drawable is ever released -- and it leaves the game running at 1fps for the
-// rest of the session. So the loop stops rendering while off screen.
-//
-// The pair is willResignActive/didBecomeActive rather than the DID/WILL
-// background events: it is the earliest stop and the latest start, and it still
-// balances when iOS resigns activity without backgrounding at all, which is
-// what a notification banner or Control Centre does.
 std::atomic<bool> sAppOnScreen{ true };
 std::atomic<bool> sLowMemory{ false };
 
@@ -82,8 +70,6 @@ int SDLCALL LifecycleWatch(void* userdata, SDL_Event* event) {
             sLowMemory.store(true, std::memory_order_release);
             break;
         case SDL_APP_TERMINATING:
-            // The only state change the loop cannot be left to pick up: the process is gone
-            // once this returns. A marker separates an OS termination from a crash in the log.
             SPDLOG_WARN("[mobile] The system is terminating the app");
             if (const auto& logger = Ship::Context::GetRawInstance()->GetLogger()) {
                 logger->flush();
@@ -152,7 +138,6 @@ bool OnGameThread() {
 }
 } // namespace
 
-// Only mobile takes the window away underneath a running render loop; everywhere else this is always true.
 extern "C" int port_appIsOnScreen(void) {
 #ifdef LIGHTHOUSE_MOBILE
     return sAppOnScreen.load(std::memory_order_acquire) ? 1 : 0;
@@ -161,8 +146,6 @@ extern "C" int port_appIsOnScreen(void) {
 #endif
 }
 
-// visionOS has no SDL app delegate to post the events LifecycleWatch reads, so its compositor
-// shell reports the same state from the layer instead.
 extern "C" void port_setAppOnScreen(int onScreen) {
 #ifdef LIGHTHOUSE_MOBILE
     sAppOnScreen.store(onScreen != 0, std::memory_order_release);
@@ -171,8 +154,6 @@ extern "C" void port_setAppOnScreen(int onScreen) {
 #endif
 }
 
-// Called once the window exists, which is both the earliest SDL will accept a watch and
-// early enough to cover RunExtract's loop.
 extern "C" void port_installLifecycleWatch(void) {
 #ifdef LIGHTHOUSE_MOBILE
     static bool sInstalled = false;
@@ -316,7 +297,6 @@ extern "C" void port_pipelineSyncPoint(void) {
 // BK's gameloop conditionally skips game_draw during scene transitions.
 static bool sFrameRendered = false;
 
-// A 30 Hz tick, which is how long an iteration that drew nothing has to last.
 constexpr long long kNoDrawTickMs = 33;
 
 // The list itself reaches the renderer through thread5's task queue, submitted
@@ -362,20 +342,20 @@ void push_frame() {
         port_runOnRenderThread([](void*) { port_setWindowTitle(sTitleMap); }, nullptr);
     }
 
-    // The tick built no display list, so the frame pacing never held it and the loop would run
-    // free. Hold it here instead - but only for what is left of a tick, not for a whole one on
-    // top of the work already done.
     if (!sFrameRendered) {
-        const auto spentMs =
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - iterationStart)
-                .count();
-        if (spentMs < kNoDrawTickMs) {
-            SDL_Delay((Uint32)(kNoDrawTickMs - spentMs));
+        if (IsHeadsetWindow()) {
+            const auto spentMs =
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - iterationStart)
+                    .count();
+            if (spentMs < kNoDrawTickMs) {
+                SDL_Delay((Uint32)(kNoDrawTickMs - spentMs));
+            }
+        } else {
+            SDL_Delay((Uint32)kNoDrawTickMs);
         }
     }
 }
 
-// Rename SDL_main to main for SDL compatibility. Not on mobile: there the platform entry point calls SDL_main.
 #if defined(__GNUC__) && !defined(LIGHTHOUSE_MOBILE)
 #define SDL_main main
 #endif
@@ -390,7 +370,6 @@ int SDL_main(int argc, char* argv[]) {
     // when SHIP_HOME is not in use
     std::error_code ec;
 #ifdef LIGHTHOUSE_MOBILE
-    // The app package is read-only; anchor to the app directory, which is where saves, bk.o2r and mods live.
     std::filesystem::current_path(Ship::Context::GetAppDirectoryPath("bk"), ec);
 #else
     const char* shipHome = std::getenv("SHIP_HOME");
@@ -424,8 +403,6 @@ int SDL_main(int argc, char* argv[]) {
         }
         sGameThreadDone.store(true);
     });
-    // Ask first, then release: a thread woken before the request is set would just
-    // park again.
     bool gameThreadReleased = false;
     auto releaseGameThread = [&gameThreadReleased] {
         if (gameThreadReleased) {
@@ -442,8 +419,6 @@ int SDL_main(int argc, char* argv[]) {
         OS_BeginShutdown();
     };
 #ifdef LIGHTHOUSE_MOBILE
-    // Held for as long as the app is off screen, since the tick thread parks on
-    // its queues while nothing services the RCP.
     bool pausedOffScreen = false;
 #endif
     while (WindowIsRunning() || !sGameThreadDone.load()) {
@@ -455,8 +430,6 @@ int SDL_main(int argc, char* argv[]) {
         Lighthouse::PumpFilePicker();
         TouchControls_Poll();
         OS_SiService();
-        // The off screen park below stops servicing the RCP, so a quit that arrives
-        // there must release the tick thread from here or it never finishes a frame.
         if (!WindowIsRunning()) {
             releaseGameThread();
         }

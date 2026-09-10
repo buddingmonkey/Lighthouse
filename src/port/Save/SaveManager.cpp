@@ -32,7 +32,6 @@ using nlohmann::json;
 using nlohmann::ordered_json;
 namespace fs = std::filesystem;
 static bool mLoaded = false;
-// Resolved on first use, not at static-init time; see the note in Rando.cpp.
 static const std::string& SavesFolderPathString() {
     static const std::string path(Ship::Context::GetPathRelativeToAppDirectory("saves"));
     return path;
@@ -148,12 +147,6 @@ static uint32_t ClampPuzzleCount(int puzzle, uint32_t value, const char* name) {
     return value;
 }
 
-// Version 1 is the upstream layout. Version 0 is the short-lived XR layout
-// which removed shuffledCheckId/obtained and moved collectionId to slot 2.
-// Version 2 is deliberately explicit so another fork field cannot silently
-// change the meaning of an old array.
-static constexpr int RANDO_SAVE_SCHEMA_VERSION = 2;
-
 static RandoCheckId TranslateCheckId(int value, const std::string& name) {
     auto byName = Rando::StaticData::locationNameToEnum.find(name);
     if (byName != Rando::StaticData::locationNameToEnum.end()) {
@@ -165,56 +158,59 @@ static RandoCheckId TranslateCheckId(int value, const std::string& name) {
     return RC_UNKNOWN;
 }
 
-static RandoItemId TranslateLegacyItemId(int value, RandoCheckId checkId) {
-    // Upstream used one item ID per kind; the merged data uses one ID per
-    // world. The check's static item is the authoritative world-specific
-    // translation, and also handles singleton items and Archipelago items.
-    if (value <= RI_UNKNOWN || value > 12 || checkId <= RC_UNKNOWN || checkId >= RC_MAX) {
-        return (value >= RI_UNKNOWN && value < RI_MAX) ? static_cast<RandoItemId>(value) : RI_UNKNOWN;
+static int LegacyRandoSaveSchema(const nlohmann::json& j) {
+    if (!j.is_array()) {
+        return 1;
     }
-    const auto& check = Rando::StaticData::Checks.at(checkId);
-    return check.randoItemId;
+    if (j.size() >= 9) {
+        return 2;
+    }
+    return (j.size() >= 4 && j.at(3).is_boolean()) ? 0 : 1;
 }
 
 void RandoSaveCheck_to_json(nlohmann::json& j, const RandoSaveCheck& c) {
-    j = nlohmann::json::array({ c.randoCheckId, c.randoItemId, c.shuffledCheckId, c.randoCollectionId, c.isShuffled,
-                                c.eligible, c.received, c.obtained, c.skipped });
+    j = nlohmann::json::array(
+        { c.randoCheckId, c.randoItemId, c.randoCollectionId, c.isShuffled, c.eligible, c.received, c.skipped });
 }
 
-RandoSaveCheck RandoSaveCheck_from_json(const nlohmann::json& j, RandoSaveCheck& c,
-                                        int schemaVersion = RANDO_SAVE_SCHEMA_VERSION,
+RandoSaveCheck RandoSaveCheck_from_json(const nlohmann::json& j, RandoSaveCheck& c, int schemaVersion = -1,
                                         const std::string& checkName = "") {
+    if (schemaVersion < 0) {
+        schemaVersion = LegacyRandoSaveSchema(j);
+    }
     if (!j.is_array() || (schemaVersion == 2 && j.size() < 9) || (schemaVersion != 2 && j.size() < 7)) {
         throw std::runtime_error("Malformed randomizer check record");
     }
     int rawCheck = j.at(0).get<int>();
     c.randoCheckId = TranslateCheckId(rawCheck, checkName);
     if (schemaVersion == 1) {
-        c.randoItemId = TranslateLegacyItemId(j.at(1).get<int>(), c.randoCheckId);
-        c.shuffledCheckId = TranslateCheckId(j.at(2).get<int>(), "");
+        RandoCheckId originCheckId = TranslateCheckId(j.at(2).get<int>(), "");
+        int rawItem = j.at(1).get<int>();
+        auto originCheck = Rando::StaticData::Checks.find(originCheckId);
+        if (originCheckId > RC_UNKNOWN && originCheckId < RC_MAX && originCheck != Rando::StaticData::Checks.end()) {
+            c.randoItemId = originCheck->second.randoItemId;
+        } else {
+            c.randoItemId =
+                (rawItem >= RI_UNKNOWN && rawItem < RI_MAX) ? static_cast<RandoItemId>(rawItem) : RI_UNKNOWN;
+        }
         c.randoCollectionId = j.at(3).get<int32_t>();
         c.isShuffled = j.at(4).get<bool>();
-        c.obtained = j.at(5).get<bool>();
-        c.eligible = c.obtained;
-        c.received = c.obtained;
+        c.eligible = j.at(5).get<bool>();
+        c.received = c.eligible;
         c.skipped = j.at(6).get<bool>();
     } else if (schemaVersion == 0) {
         c.randoItemId = j.at(1).get<RandoItemId>();
-        c.shuffledCheckId = c.randoCheckId;
         c.randoCollectionId = j.at(2).get<int32_t>();
         c.isShuffled = j.at(3).get<bool>();
         c.eligible = j.at(4).get<bool>();
         c.received = j.at(5).get<bool>();
-        c.obtained = c.received;
         c.skipped = j.at(6).get<bool>();
     } else {
         c.randoItemId = j.at(1).get<RandoItemId>();
-        c.shuffledCheckId = TranslateCheckId(j.at(2).get<int>(), "");
         c.randoCollectionId = j.at(3).get<int32_t>();
         c.isShuffled = j.at(4).get<bool>();
         c.eligible = j.at(5).get<bool>();
         c.received = j.at(6).get<bool>();
-        c.obtained = j.at(7).get<bool>();
         c.skipped = j.at(8).get<bool>();
     }
     c.name = nullptr;
@@ -472,7 +468,6 @@ ordered_json Convert_SaveDataToJSON(SaveData* saveData, int32_t fileNum) {
     if (saveData->shipSaveData.fileType == FILE_TYPE_SAVE_RANDO) {
         Rando::Logic::GenerateSaveData(saveData);
         shipRando["seedId"] = saveData->shipSaveData.randoSaveData.seedId;
-        shipRando["randoSaveCheckSchema"] = RANDO_SAVE_SCHEMA_VERSION;
 
         for (int i = RC_UNKNOWN; i < RC_MAX; i++) {
             json jsonSaveChecks = nlohmann::json::object();
@@ -748,19 +743,12 @@ SaveData* Convert_JSONToSaveData(int32_t fileNum) {
             const auto& staticCheck = Rando::StaticData::Checks.at((RandoCheckId)i);
             auto it = rando["randoSaveCheck"].find(staticCheck.name);
             if (it == rando["randoSaveCheck"].end()) {
+                saveData->shipSaveData.randoSaveData.randoSaveCheck[i].name = staticCheck.name;
                 continue;
             }
             try {
                 RandoSaveCheck check{};
-                int recordSchema = schemaVersion;
-                if (recordSchema < 0) {
-                    // Before the discriminator was added, the fork layout can
-                    // be identified by its check ID matching the object key.
-                    // Otherwise read the upstream layout first.
-                    recordSchema =
-                        (it.value().is_array() && !it.value().empty() && it.value().at(0).get<int>() == i) ? 0 : 1;
-                }
-                RandoSaveCheck_from_json(it.value(), check, recordSchema, staticCheck.name);
+                RandoSaveCheck_from_json(it.value(), check, schemaVersion, staticCheck.name);
                 if (check.randoCheckId == RC_UNKNOWN) {
                     check.randoCheckId = staticCheck.randoCheckId;
                 }

@@ -31,19 +31,13 @@ import java.util.zip.ZipFile;
 
 import org.libsdl.app.SDLActivity;
 
-/**
- * Unpacks the shipped read-only data before SDL starts the game, and serves the file picker.
- * It also owns the window: it hides the system bars and reports the safe area to the game.
- */
 public class LighthouseActivity extends SDLActivity {
     private static final String TAG = "Lighthouse";
     private static final String STAMP = ".unpacked";
     private static final int REQUEST_PICK_FILE = 1;
-    /** The picked document is copied here: the game reads paths, not content URIs. */
     private static final String IMPORT_DIR = "import";
     private static final String FALLBACK_IMPORT_NAME = "import.tmp";
 
-    /** Files and directories copied out of the APK, relative to the assets root. */
     private static final String[] SHIPPED = {
         "lighthouse.o2r",
         "config.yml",
@@ -64,7 +58,6 @@ public class LighthouseActivity extends SDLActivity {
             Log.e(TAG, "Could not unpack the shipped assets", e);
         }
         super.onCreate(savedInstanceState);
-        // SDLActivity posts setWindowStyle(false) to this same looper, so queue behind it.
         mLayout.post(this::goImmersive);
         mLayout.setOnApplyWindowInsetsListener((view, insets) -> {
             reportInsets(view, insets);
@@ -77,7 +70,6 @@ public class LighthouseActivity extends SDLActivity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            // A dialog, the picker or a transient swipe all bring the bars back.
             goImmersive();
         }
     }
@@ -85,13 +77,11 @@ public class LighthouseActivity extends SDLActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        // A second SDL_main in this process never ticks: the shutdown flags stay set. Start clean.
         System.exit(0);
     }
 
     private void goImmersive() {
         Window window = getWindow();
-        // SDLActivity sets this to force the status bar on; it beats every other request.
         window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.setDecorFitsSystemWindows(false);
@@ -108,19 +98,16 @@ public class LighthouseActivity extends SDLActivity {
         }
     }
 
-    /** Tells the game which edges it may not draw on, and keeps the back gesture off the pad. */
     private void reportInsets(View view, WindowInsets insets) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             nativeSafeAreaInsets(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
                                  insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
             return;
         }
-        // A hidden bar reports zero, so this is the cutout plus anything the user keeps on.
         android.graphics.Insets reserved =
             insets.getInsets(WindowInsets.Type.displayCutout() | WindowInsets.Type.systemBars());
         nativeSafeAreaInsets(reserved.left, reserved.top, reserved.right, reserved.bottom);
 
-        // The system keeps at most 200 dp of each edge and drops the rest, nearest the bottom first.
         if (view.getWidth() <= 0 || view.getHeight() <= 0) {
             return;
         }
@@ -137,10 +124,8 @@ public class LighthouseActivity extends SDLActivity {
 
     private static native void nativeSafeAreaInsets(int left, int top, int right, int bottom);
 
-    /** Called from the game thread. The answer goes back through {@link #nativeFilePicked}. */
     public void openFilePicker() {
         runOnUiThread(() -> {
-            // No MIME type exists for .z64, and a guess would make the ROM unselectable.
             Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             pick.addCategory(Intent.CATEGORY_OPENABLE);
             pick.setType("*/*");
@@ -164,13 +149,10 @@ public class LighthouseActivity extends SDLActivity {
             nativeFilePicked(null);
             return;
         }
-        // A ROM is about 32 MB, so the copy stays off the UI thread.
         new Thread(() -> nativeFilePicked(importDocument(source)), "FileImport").start();
     }
 
-    /** Returns the path of the copy, or null when the document could not be read. */
     private String importDocument(Uri source) {
-        // Its own directory, emptied first: an import is never worth keeping after the next one.
         File files = getExternalFilesDir(null);
         if (files == null) {
             Log.e(TAG, "No external files directory to import into");
@@ -190,7 +172,6 @@ public class LighthouseActivity extends SDLActivity {
                 throw new IOException("Could not create " + dir);
             }
             copy(source, partial);
-            // Rename last, so a failed copy never looks like a complete file.
             if (!partial.renameTo(target)) {
                 throw new IOException("Could not move " + partial + " into place");
             }
@@ -202,7 +183,6 @@ public class LighthouseActivity extends SDLActivity {
         }
     }
 
-    /** What the provider calls the document, made safe to use as a file name. */
     private String documentName(Uri source) {
         String name = null;
         try (Cursor cursor = getContentResolver().query(source, new String[] { OpenableColumns.DISPLAY_NAME }, null,
@@ -236,7 +216,6 @@ public class LighthouseActivity extends SDLActivity {
 
     private static native void nativeFilePicked(String path);
 
-    /** Copies {@link #SHIPPED} into the external files directory whenever the shipped bytes change. */
     private void unpackAssets() throws IOException {
         File target = getExternalFilesDir(null);
         if (target == null) {
@@ -251,7 +230,6 @@ public class LighthouseActivity extends SDLActivity {
         if (stamp.isFile() && fingerprint.equals(readText(stamp)) && shippedAssetsExist(target)) {
             return;
         }
-        // Removed first, so a copy that stops part way is done again rather than called complete.
         stamp.delete();
 
         AssetManager assets = getAssets();
@@ -272,11 +250,6 @@ public class LighthouseActivity extends SDLActivity {
         return true;
     }
 
-    /**
-     * The size and CRC of every shipped APK entry, read from the zip directory. The version code
-     * cannot answer this: the archives are built by a host tree and no version number counts them.
-     * Nothing is inflated, and the answer comes from the installed file rather than from the build.
-     */
     private String shippedFingerprint() throws IOException {
         List<String> entries = new ArrayList<>();
         try (ZipFile apk = new ZipFile(getApplicationInfo().sourceDir)) {
@@ -294,14 +267,11 @@ public class LighthouseActivity extends SDLActivity {
                 }
             }
         }
-        // Zip order is not promised to hold from one build to the next, and an order the digest
-        // can see would ask for a copy at random.
         Collections.sort(entries);
         CRC32 digest = new CRC32();
         for (String entry : entries) {
             digest.update(entry.getBytes(StandardCharsets.UTF_8));
         }
-        // readText reads 64 bytes, so the stamp stays short.
         return String.format("%08x.%d", digest.getValue(), entries.size());
     }
 

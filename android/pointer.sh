@@ -25,8 +25,6 @@ if [ -z "$AT" ]; then
 fi
 
 if [ "$ACTION" = "click" ]; then
-    # A press needs a frame of hover before it, the same as a hand arriving on the window does,
-    # and the release has to land in the same place for the widget under it to fire.
     put "$AT"
     sleep 0.3
     put "$AT down"
