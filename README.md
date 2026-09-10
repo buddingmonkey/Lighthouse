@@ -74,8 +74,8 @@ Lighthouse ships with a file with many standard controller mappings that can be 
 | F11 | Fullscreen |
 | Tab | Toggle Alternate assets |
 
-### Touch controls (iOS)
-On iPhone and iPad an on-screen N64 controller is drawn over the game: a floating analog stick on the left, A/B and the C cluster on the right, and L/Z/Start/R along the top edge. Tap `MENU` to open the port menu (the equivalent of ESC). Size, opacity, edge margin, stick deadzone and an optional D-Pad are under `Settings -> Controls`.
+### Touch controls (iOS and Android)
+On iPhone, iPad and Android an on-screen N64 controller is drawn over the game: a floating analog stick on the left, A/B and the C cluster on the right, and L/Z/Start/R along the top edge. Tap `MENU` to open the port menu (the equivalent of ESC). Size, opacity, edge margin, stick deadzone and an optional D-Pad are under `Settings -> Controls`.
 
 Connect any MFi or Bluetooth controller and the on-screen pad hides itself automatically.
 

@@ -272,11 +272,15 @@ static const std::unordered_map<Ship::AudioBackend, const char*> audioBackendsMa
     { Ship::AudioBackend::NUL, "Null" },
 };
 
+// clang-format off
 static const std::unordered_map<Fast::WindowBackend, const char*> windowBackendsMap = {
-    { Fast::WindowBackend::FAST3D_DXGI_DX11, "DirectX" },    { Fast::WindowBackend::FAST3D_SDL_OPENGL, "OpenGL" },
-    { Fast::WindowBackend::FAST3D_SDL_METAL, "Metal" },      { Fast::WindowBackend::FAST3D_OPENXR_OPENGL, "OpenXR" },
+    { Fast::WindowBackend::FAST3D_DXGI_DX11, "DirectX" },
+    { Fast::WindowBackend::FAST3D_SDL_OPENGL, "OpenGL" },
+    { Fast::WindowBackend::FAST3D_SDL_METAL, "Metal" },
+    { Fast::WindowBackend::FAST3D_OPENXR_OPENGL, "OpenXR" },
     { Fast::WindowBackend::FAST3D_VISIONOS_METAL, "Metal" },
 };
+// clang-format on
 
 struct MenuInit {
     static std::vector<std::function<void()>>& GetInitFuncs() {

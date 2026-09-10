@@ -162,9 +162,6 @@ void func_802EED1C(ParticleEmitter *this, f32 age, f32 arg2[3]){
     }
 }
 
-// [port] Split out of __particleEmitter_drawOnPass so a run of emitters that share a sprite and a
-// setup can emit one setup and then their particles in texture order. The commands each particle
-// emits, and the scope path the interpolation recorder sees, are the same either way.
 static bool __particleEmitter_spriteIsColored(ParticleEmitter *this){
     return this->rgb[0] != 0xff || this->rgb[1] != 0xff || this->rgb[2] != 0xff || this->alpha != 0xff;
 }
@@ -204,7 +201,6 @@ static void __particleEmitter_drawSpriteParticle(ParticleEmitter *this, Particle
     flat_rotation[0] = 90.0f;
     flat_rotation[1] = 0.0f;
     flat_rotation[2] = 0.0f;
-    // [port] Same spawn-serial identity as the model branch.
     FrameInterpolation_RecordOpenChild("part_emit", FrameInterpolation_GetId(this));
     FrameInterpolation_RecordOpenChildHash3("part", (uint64_t)iPtr->portSerial, 0, 0);
     gDPSetPrimColor((*gfx)++, 0, 0, this->rgb[0], this->rgb[1], this->rgb[2], iPtr->fade*this->alpha);
@@ -840,14 +836,6 @@ void partEmitMgr_update(void){
     }//L802F0A14
 }
 
-// [port] A draw ends when the texture binding changes, and a particle's texture is its sprite frame.
-// A burst is many emitters of one or two particles each, all of one sprite, whose frames are spawned
-// at random inside a range - so two draws in a row almost never share a texture and every particle
-// costs a draw call. Emit a run of neighbouring emitters that share a sprite and a setup in frame
-// order rather than emitter order, so one texture covers one draw. An emitter on its own gains the
-// same way, because its own particles carry frames drawn at random from a range. Only neighbours are
-// grouped, so nothing is re-ordered across a different sprite, a different colour or a model
-// emitter, and the commands a particle emits do not change.
 #define PART_GROUP_FRAME_SPAN_MAX 32
 
 static bool __particleEmitter_groupable(ParticleEmitter *this, u32 draw_pass){
@@ -863,12 +851,6 @@ static bool __particleEmitter_sameGroup(ParticleEmitter *a, ParticleEmitter *b){
         && a->unk0_16 == b->unk0_16
         && (0.0f != a->unk108) == (0.0f != b->unk108);
 }
-
-// [port] Bring-up only: how well the run grouping actually catches. Read and cleared once a tick.
-s32 gPartGroupedEmitters = 0;
-s32 gPartSingleEmitters = 0;
-s32 gPartGroups = 0;
-s32 gPartParticles = 0;
 
 static void partEmitMgr_drawGroupedPass(Gfx **gdl, Mtx **mptr, Vtx **vptr, u32 draw_pass){
     ParticleEmitter *head;
@@ -890,8 +872,6 @@ static void partEmitMgr_drawGroupedPass(Gfx **gdl, Mtx **mptr, Vtx **vptr, u32 d
             continue;
         }
 
-        // How far the run of neighbours reaches. An emitter of the other pass draws nothing here, so
-        // it does not break the run.
         end = i + 1;
         members = 1;
         lowFrame = 0x7FFFFFFF;
@@ -918,8 +898,6 @@ static void partEmitMgr_drawGroupedPass(Gfx **gdl, Mtx **mptr, Vtx **vptr, u32 d
             }
         }
 
-        // Nothing to gather, or so many frames in flight that the sweep costs more than the draws it
-        // saves. Either way the run falls back to what it did before.
         if(lowFrame > highFrame || (highFrame - lowFrame) >= PART_GROUP_FRAME_SPAN_MAX){
             for(j = i; j < end; j++){
                 __particleEmitter_drawOnPass(partEmitMgr[j], gdl, mptr, vptr, draw_pass);
@@ -928,8 +906,6 @@ static void partEmitMgr_drawGroupedPass(Gfx **gdl, Mtx **mptr, Vtx **vptr, u32 d
             continue;
         }
 
-        gPartGroups++;
-        if(members < 2){ gPartSingleEmitters++; } else { gPartGroupedEmitters += members; }
         __particleEmitter_beginSprites(head, gdl);
         for(frame = lowFrame; frame <= highFrame; frame++){
             for(j = i; j < end; j++){
@@ -938,7 +914,6 @@ static void partEmitMgr_drawGroupedPass(Gfx **gdl, Mtx **mptr, Vtx **vptr, u32 d
                 }
                 for(pPtr = partEmitMgr[j]->pList_start_124; pPtr < partEmitMgr[j]->pList_end_128; pPtr++){
                     if((s32)pPtr->frame == frame){
-                        gPartParticles++;
                         __particleEmitter_drawSpriteParticle(partEmitMgr[j], pPtr, gdl, mptr);
                     }
                 }
@@ -950,19 +925,15 @@ static void partEmitMgr_drawGroupedPass(Gfx **gdl, Mtx **mptr, Vtx **vptr, u32 d
 }
 
 void partEmitMgr_drawPass0(Gfx **gdl, Mtx **mptr, Vtx **vptr){
-    port_xr_beginNoSceneDepth(gdl);
-    gSPTextureBatch((*gdl)++, 1);
+    port_xr_beginParticlePass(gdl);
     partEmitMgr_drawGroupedPass(gdl, mptr, vptr, 4);
-    gSPTextureBatch((*gdl)++, 0);
-    port_xr_endNoSceneDepth(gdl);
+    port_xr_endParticlePass(gdl);
 }
 
 void partEmitMgr_drawPass1(Gfx **gdl, Mtx **mptr, Vtx **vptr){
-    port_xr_beginNoSceneDepth(gdl);
-    gSPTextureBatch((*gdl)++, 1);
+    port_xr_beginParticlePass(gdl);
     partEmitMgr_drawGroupedPass(gdl, mptr, vptr, 0);
-    gSPTextureBatch((*gdl)++, 0);
-    port_xr_endNoSceneDepth(gdl);
+    port_xr_endParticlePass(gdl);
 }
 
 void partEmitMgr_draw(Gfx **gdl, Mtx **mptr, Vtx **vptr){

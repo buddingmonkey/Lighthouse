@@ -23,16 +23,6 @@ extern std::shared_ptr<LighthouseMenu> mLighthouseMenu;
 extern std::shared_ptr<LighthouseModalWindow> mModalWindow;
 using namespace UIWidgets;
 
-static bool HeadsetWindow() {
-    auto window = Ship::Context::GetRawInstance()->GetWindow();
-    if (window == nullptr) {
-        return false;
-    }
-    const auto backend = window->GetWindowBackend();
-    return backend == Fast::WindowBackend::FAST3D_OPENXR_OPENGL ||
-           backend == Fast::WindowBackend::FAST3D_VISIONOS_METAL;
-}
-
 static std::unordered_map<int32_t, const char*> imguiScaleOptions = {
     { 0, "Small" },
     { 1, "Normal" },
@@ -191,17 +181,13 @@ void LighthouseMenu::AddMenuSettings() {
         .RaceDisable(false)
         .Options(CheckboxOptions().Tooltip(
             "Search input box gets autofocus when visible. Does not affect using other widgets."));
-    // ButtonOptions doesn't override Disabled()/DisabledTooltip(), so those return WidgetOptions&
-    // and can't be chained into Options(); set them on a named local instead.
     ButtonOptions filesFolderOptions =
         ButtonOptions().Tooltip("Opens the folder that contains the save and mods folders, etc.");
 #ifdef __IOS__
-    // iOS has no file:// URL handler, so the button can't do anything there.
     filesFolderOptions.Disabled(true).DisabledTooltip(
         "Not available on iOS. Open the Files app and look under On My iPhone / On My iPad > Lighthouse "
         "to reach the same folder.");
 #elif defined(__ANDROID__)
-    // Android rejects a raw file:// Intent with FileUriExposedException, so the button can't do anything there.
     filesFolderOptions.Disabled(true).DisabledTooltip(
         "Not available on Android. Reach the same folder with a file manager, or over USB under "
         "Android/data > Lighthouse.");
@@ -476,12 +462,12 @@ void LighthouseMenu::AddMenuSettings() {
         .RaceDisable(false)
         .Options(CheckboxOptions()
                      .Tooltip("Matches interpolation value to the refresh rate of your display.")
-                     .DefaultValue(HeadsetWindow()));
+                     .DefaultValue(IsHeadsetWindow()));
 #ifdef ENABLE_XR_WINDOW
     AddWidget(path, "Diorama Depth", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrDioramaDepth"))
         .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !IsHeadsetWindow(); })
         .Options(FloatSliderOptions()
                      .Tooltip("How deep the world reaches behind the glass. The farthest thing the game draws sits "
                               "this far behind the window, and everything nearer sorts itself in between, whatever "
@@ -496,7 +482,7 @@ void LighthouseMenu::AddMenuSettings() {
     AddWidget(path, "Window Range", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrWindowRange"))
         .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !IsHeadsetWindow(); })
         .Options(FloatSliderOptions()
                      .Tooltip("How far away the window hangs. The window keeps the size it has, so a further range "
                               "makes it small in the eye and takes it out into the room. The depth of the world "
@@ -509,7 +495,7 @@ void LighthouseMenu::AddMenuSettings() {
     AddWidget(path, "Window Size", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrWindowScale"))
         .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !IsHeadsetWindow(); })
         .Options(FloatSliderOptions()
                      .Tooltip("How large the glass is, against the width the game's field of view gives it at the "
                               "nearest range. The range does not touch it, so a large screen far away asks for both: "
@@ -521,7 +507,7 @@ void LighthouseMenu::AddMenuSettings() {
     AddWidget(path, "Edge Float", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrEdgeFloat"))
         .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !IsHeadsetWindow(); })
         .Options(FloatSliderOptions()
                      .Tooltip("How far the side edges of the window come towards you, against the space between your "
                               "eyes. At a side edge one eye sees a little of the world the other cannot, as it does "
@@ -535,7 +521,7 @@ void LighthouseMenu::AddMenuSettings() {
     AddWidget(path, "Edge Softness", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrEdgeSoftness"))
         .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !IsHeadsetWindow(); })
         .Options(FloatSliderOptions()
                      .Tooltip("How far the picture fades out at the edge of the window. It softens the frame but it "
                               "does not change what each eye sees through it, so use Edge Float for that.")
@@ -546,7 +532,7 @@ void LighthouseMenu::AddMenuSettings() {
     AddWidget(path, "Max Refresh Rate", WIDGET_CVAR_SLIDER_INT)
         .CVar(CVAR_SETTING("XrMaxRate"))
         .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !IsHeadsetWindow(); })
         .Options(IntSliderOptions()
                      .Tooltip("The fastest the headset is asked to run. The game draws a whole number of frames a "
                               "tick, so it can only use a rate its 30 Hz logic divides into, and it takes the "
@@ -559,14 +545,14 @@ void LighthouseMenu::AddMenuSettings() {
                      .Format("%d Hz"));
     AddWidget(path, "Recenter Window", WIDGET_BUTTON)
         .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !IsHeadsetWindow(); })
         .Callback([](WidgetInfo&) { Fast::RecenterXrWindow(); })
         .Options(
             ButtonOptions().Size(Sizes::Inline).Tooltip("Puts the window in front of you, where you are looking now."));
     AddWidget(path, "Stereo", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_SETTING("XrStereo"))
         .RaceDisable(false)
-        .PreFunc([](WidgetInfo& info) { info.isHidden = !HeadsetWindow(); })
+        .PreFunc([](WidgetInfo& info) { info.isHidden = !IsHeadsetWindow(); })
         .Options(CheckboxOptions()
                      .Tooltip("Draws the frame once per eye so the world has depth. Turn it off to draw one image "
                               "for both eyes, which costs half as much and sends one layer to the compositor.")

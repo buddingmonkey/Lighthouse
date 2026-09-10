@@ -4,7 +4,7 @@
 #include <fstream>
 #include <chrono>
 #include <future>
-#ifdef ENABLE_DEBUG_TOOLS
+#if defined(ENABLE_DEBUG_TOOLS) && defined(__ANDROID__)
 #include <android/log.h>
 #endif
 #if defined(__linux__) || defined(__APPLE__)
@@ -72,48 +72,31 @@
 
 const float imguiScaleOptionToValue[4] = { 0.75f, 1.0f, 1.5f, 2.0f };
 
-// Radians of the window one unit of ImGui scale covers, for a menu drawn on a window in the room,
-// and the smallest angle the menu is laid out for. The floor holds about 830 units of menu width,
-// which is what the widest row needs.
 static constexpr float MENU_ANGLE_PER_UNIT = 0.0009f;
 static constexpr float MENU_ANGLE_MIN = 0.75f;
-std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
 
-// [port] Bring-up only: the particle grouping counters in src/core2/particle/particle.c.
-extern "C" {
-extern int gPartGroupedEmitters;
-extern int gPartSingleEmitters;
-extern int gPartGroups;
-extern int gPartParticles;
-}
-
-// The window is a rectangle in the room rather than a screen. Both headset backends are one.
 bool IsHeadsetWindow() {
-    auto window = Ship::Context::GetRawInstance()->GetWindow();
-    if (window == nullptr) {
+    auto ctx = Ship::Context::GetRawInstance();
+    if (ctx == nullptr || ctx->GetWindow() == nullptr) {
         return false;
     }
-    const auto backend = window->GetWindowBackend();
+    const auto backend = ctx->GetWindow()->GetWindowBackend();
     return backend == static_cast<int32_t>(Fast::WindowBackend::FAST3D_OPENXR_OPENGL) ||
            backend == static_cast<int32_t>(Fast::WindowBackend::FAST3D_VISIONOS_METAL);
 }
 
 uint32_t DefaultImGuiScaleIndex() {
 #ifdef LIGHTHOUSE_MOBILE
-    // A tablet takes the larger menu; a phone has too little screen to navigate it, so split at a 600 short side.
     static const uint32_t index = []() {
         auto window = Ship::Context::GetRawInstance()->GetWindow();
         if (window == nullptr) {
             return 0u;
         }
-        // A headset window is measured in an angle, not in a screen size, so it takes the unit the
-        // angle is set in rather than the phone or tablet step.
         if (IsHeadsetWindow()) {
             return 1u;
         }
         float shortSide = static_cast<float>(std::min(window->GetWidth(), window->GetHeight()));
 #ifdef __ANDROID__
-        // Android measures windows in pixels, and 600 is a count of density-independent ones.
         float ddpi = 0.0f;
         float hdpi = 0.0f;
         float vdpi = 0.0f;
@@ -129,7 +112,6 @@ uint32_t DefaultImGuiScaleIndex() {
 #endif
 }
 
-// Android counts window units in pixels where iOS counts points, so the menu comes out much smaller there.
 float ImGuiDensityScale() {
     float density = 1.0f;
 #ifdef __ANDROID__
@@ -145,16 +127,6 @@ float ImGuiDensityScale() {
     density = androidDensity;
 #endif
 
-    // A headset reads the menu on a window in the room, and the only thing that decides whether a
-    // letter can be read is the angle it covers in the eye. That angle is the angle the window
-    // spans over the width of the picture drawn on it, so the scale is the width over the angle and
-    // the display DPI does not come into it. DPI stood in for the width before, which held on a
-    // headset whose panel is the picture and failed on one that draws the game across a whole
-    // binocular panel: Quest hands the game 4128 pixels where Galaxy XR hands it 1536, and the same
-    // DPI gave letters a third of the angle.
-    //
-    // A window put far away and left small covers too small an angle to hold a menu at that rate.
-    // The angle has a floor, so the letters give up their angle rather than the menu its width.
 #ifdef ENABLE_XR_WINDOW
     if (IsHeadsetWindow()) {
         auto window = Ship::Context::GetRawInstance()->GetWindow();
@@ -185,19 +157,15 @@ bool sInterpolationRecorded = false;
 std::vector<std::future<void>> sMapBuildFutures;
 long long sPassBudgetNs = 0;
 
-// The cost of a sub-frame, filtered, and how many sub-frames the last tick put on the screen. One
-// raw sample flaps too much to decide on, and the requested count says nothing about what was
-// delivered.
 long long sFilteredSubFrameNs = 0;
 int sDeliveredSubFrames = 0;
-// Sub-frames in a row that each took longer than a whole tick. One is a hitch; two is the scene.
 int sOverBudgetRun = 0;
 } // namespace
 
+std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
 bool portArchiveVersionMatch = false;
 std::string assets_path;
 
-// Tracks the scale already baked into the ImGui style, which always starts unscaled.
 float previousImGuiScale = 1.0f;
 
 namespace fs = std::filesystem;
@@ -226,16 +194,11 @@ GameEngine* GameEngine::Instance;
 
 GameEngine::GameEngine() {
 #ifdef LIGHTHOUSE_MOBILE
-    // Otherwise the accelerometer appears as a phantom joystick in the device list.
     SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
-    // Without this hint SDL sets the Android activity to FULL_USER, which allows the portrait the manifest excludes.
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
 #ifdef __IOS__
-    // Play through the ring/silent switch like other games do.
     SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "playback");
-    // Hides the home indicator and defers the edge swipes that would otherwise reach the
-    // touch controls sitting along the bottom of the screen.
     SDL_SetHint(SDL_HINT_IOS_HIDE_HOME_INDICATOR, "2");
 #endif
 
@@ -481,8 +444,6 @@ ImFont* GameEngine::CreateFontWithSize(float size, std::string fontPath) {
 void GameEngine::ScaleImGui() {
     int32_t imGuiScaleIndex = CVarGetInteger("gSettings.ImGuiScale", DefaultImGuiScaleIndex());
     float scale = imguiScaleOptionToValue[imGuiScaleIndex] * ImGuiDensityScale();
-    // On a headset the scale follows the window as well as the setting, and the window resizes when
-    // the game first says what field of view it needs and whenever a hand pulls a corner.
     if (fabsf(scale - previousImGuiScale) < 0.001f) {
         return;
     }
@@ -613,7 +574,6 @@ void GameEngine::RelaunchIfRequested(int argc, char* argv[]) {
         }
     }
 #elif defined(LIGHTHOUSE_MOBILE)
-    // exec is unavailable to sandboxed apps; the user relaunches the app themselves.
     (void)argc;
     (void)argv;
 #elif defined(__linux__) || defined(__APPLE__)
@@ -697,9 +657,6 @@ inline long long NsSince(Clock::time_point t0) {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count();
 }
 
-// A headset walks the display list once per eye, so a list the processor is slow to walk is slow
-// twice. This tells a sub-frame the processor holds up from one the graphics chip holds up: the
-// draw time goes up with the first and stays where it is with the second.
 void ReportDrawTime(long long drawNs, uint32_t views, uint32_t drawCalls, uint32_t drawTextures, uint32_t markedCalls,
                     uint32_t markedTextures, uint32_t* flushCauses) {
 #ifdef ENABLE_DEBUG_TOOLS
@@ -719,9 +676,6 @@ void ReportDrawTime(long long drawNs, uint32_t views, uint32_t drawCalls, uint32
     }
     callTotal += drawCalls;
     if (drawCalls > callWorst) {
-        // Keep the four numbers of one sub-frame together. The average hides a burst, and the
-        // question the burst asks is what the same sub-frame would cost if the draws it issued were
-        // grouped by the texture they bind.
         callWorst = drawCalls;
         worstTextures = drawTextures;
         worstMarkedCalls = markedCalls;
@@ -739,17 +693,21 @@ void ReportDrawTime(long long drawNs, uint32_t views, uint32_t drawCalls, uint32
                 "({} draws over {} textures in the marked pass), {} views, {:.1f} sub-frames a second",
                 total / (double)subframes / 1.0e6, worst / 1.0e6, (double)callTotal / subframes, callWorst,
                 worstTextures, worstMarkedCalls, worstMarkedTextures, views, subframes / seconds);
+#ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
                         "draw %.2f ms a sub-frame, worst %.2f ms, %.0f draws a sub-frame, worst %u over %u textures "
                         "(%u draws over %u textures in the marked pass), %u views, %.1f sub-frames a second",
                         total / (double)subframes / 1.0e6, worst / 1.0e6, (double)callTotal / subframes, callWorst,
                         worstTextures, worstMarkedCalls, worstMarkedTextures, views, subframes / seconds);
+#endif
     if (flushCauses != nullptr) {
+#ifdef __ANDROID__
         __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
                             "marked flush causes: depth %u decal %u vp %u sciss %u tex %u sfb %u samp %u shader %u "
                             "alpha %u cap %u",
                             flushCauses[0], flushCauses[1], flushCauses[2], flushCauses[3], flushCauses[4],
                             flushCauses[5], flushCauses[6], flushCauses[7], flushCauses[8], flushCauses[9]);
+#endif
         for (int i = 0; i < 10; i++) {
             flushCauses[i] = 0;
         }
@@ -793,8 +751,6 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
         if (frameIdx >= 1 && frameIdx - 1 < sMapBuildFutures.size()) {
             sMapBuildFutures[frameIdx - 1].wait();
         }
-        // Stop once another sub-frame no longer fits in what the tick's worth
-        // of wall time has left.
         if (frameIdx > 0 && sFilteredSubFrameNs > 0 && (sPassBudgetNs - NsSince(passT0)) < sFilteredSubFrameNs) {
             break;
         }
@@ -810,20 +766,16 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
         if (frameCount > 1 || wndBase->IsFrameReady()) {
             auto gui = wndBase->GetGui();
             wndBase->GetMouseStateManager()->StartFrame();
-            // A headset draws the sub-frame once per eye, each with its own off-axis projection.
             const uint32_t views = wnd->BeginRenderFrame();
             long long drawNs = 0;
-            interpreter->mDrawCallCount = 0;
 #ifdef ENABLE_DEBUG_TOOLS
+            interpreter->mDrawCallCount = 0;
             interpreter->mMarkedDrawCount = 0;
             interpreter->mDrawTextures.clear();
             interpreter->mMarkedTextures.clear();
 #endif
             for (uint32_t view = 0; view < views; view++) {
                 wnd->BeginRenderView(view);
-                // Sample the CPU cost of producing this sub-frame, both eyes and neither present.
-                // A present waits for the display, and the budget below must weigh the work, not
-                // the wait, or a sub-frame that exactly fills its slot looks like one that misses.
                 auto runT0 = Clock::now();
                 gui->StartDraw();
                 interpreter->StartFrame();
@@ -838,15 +790,6 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
                 drawNs += NsSince(runT0);
                 interpreter->EndFrame();
             }
-            // Believe a rise at once, so a scene that gets heavy does not overrun even one tick.
-            // Ease a fall in, so one cheap sub-frame does not ask for the full count again.
-            //
-            // A sub-frame longer than the whole tick is a hitch and not the price of the next one.
-            // The budget is the one value the estimate must never take from it: at the budget no
-            // count at all fits the tick, so the gate opens, the tick delivers one sub-frame, and
-            // the count falls to one and needs seconds to climb back. One hitch cost 111 frames
-            // that way. So drop the first such sample. A scene that is really this heavy sends
-            // another one on the next sub-frame, and that one is believed.
             long long sample = drawNs;
             bool believe = true;
             if (sPassBudgetNs > 0 && drawNs > sPassBudgetNs) {
@@ -868,7 +811,7 @@ void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map
                            interpreter->mMarkedDrawCount, (uint32_t)interpreter->mMarkedTextures.size(),
                            interpreter->mMarkedFlushCauses);
 #else
-            ReportDrawTime(drawNs, views, interpreter->mDrawCallCount, 0, 0, 0, nullptr);
+            ReportDrawTime(drawNs, views, 0, 0, 0, 0, nullptr);
 #endif
             CALL_EVENT(FrameDrawEnd);
         }
@@ -896,26 +839,14 @@ struct SubframePacing {
     float blendStep;
 };
 
-// A headset looks best when its refresh rate is a whole multiple of the game's logic rate: the
-// sub-frame count is then constant and every tick ends on the game's own state. The carried slot
-// phase in ComputeSubframePacing fills a rate that does not divide, but the whole multiple stays
-// the better ask. Ask for the fastest rate that divides, once, and let ComputeSubframePacing read
-// it back through GetCurrentRefreshRate.
-// Ticks to let a rate settle before the next one down is taken. The window re-asks a refused rate
-// a few times, each on an event from the runtime, so the wait has to outlast that.
 constexpr int RATE_SETTLE_TICKS = 90;
 
 void SelectDisplayRefreshRate(Fast::Fast3dWindow* wnd) {
     if (!IsHeadsetWindow()) {
         return;
     }
-    // Quest offers 120 as well as 90, and both divide. The setting is how a user who would rather
-    // have the battery, or who finds the tick rate falling short, holds it down.
     const int cap = CVarGetInteger(CVAR_SETTING("XrMaxRate"), 120);
 
-    // The rates come with the session, which is up after the first frames draw. Asking once and
-    // counting the ask as spent left the panel wherever the runtime put it, because the list was
-    // still empty at the only tick that looked at it.
     const float logicRate = 60.0f / gVIsPerFrame;
     std::vector<float> rates;
     for (float rate : wnd->GetSupportedRefreshRates()) {
@@ -945,9 +876,6 @@ void SelectDisplayRefreshRate(Fast::Fast3dWindow* wnd) {
         return;
     }
 
-    // A runtime is free to refuse the rate and say nothing more about it. Wait out the window's own
-    // retries, then take the next rate down, because a panel the logic rate does not divide beats
-    // against the game for the whole run.
     if (fabsf((float)wnd->GetCurrentRefreshRate() - asked) < 0.5f) {
         waited = 0;
         return;
@@ -965,9 +893,6 @@ void SelectDisplayRefreshRate(Fast::Fast3dWindow* wnd) {
     }
 }
 
-// A display the game cannot keep up with does not drop frames, it runs the game slowly: the VI
-// retrace gates a tick on the render finishing. So the speed of the game is the measurement that
-// decides whether a refresh rate can be used, and the present rate on its own says nothing.
 void ReportTickRate(int subframes, int delivered) {
 #ifdef ENABLE_DEBUG_TOOLS
     static auto since = std::chrono::steady_clock::now();
@@ -990,22 +915,15 @@ void ReportTickRate(int subframes, int delivered) {
     if (window != nullptr) {
         rate = window->GetCurrentRefreshRate();
     }
-    {
-        __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
-                            "particles: %d grouped emitters in %d groups, %d single, %d particles drawn grouped",
-                            gPartGroupedEmitters, gPartGroups, gPartSingleEmitters, gPartParticles);
-        gPartGroupedEmitters = 0;
-        gPartSingleEmitters = 0;
-        gPartGroups = 0;
-        gPartParticles = 0;
-    }
     SPDLOG_INFO("game ticks {:.2f} of {} a second, {:.2f} sub-frames a tick asked and {:.2f} drawn, display {} Hz",
                 ticks / seconds, 60 / gVIsPerFrame, (double)subframeTotal / ticks, (double)deliveredTotal / ticks,
                 rate);
+#ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
                         "game ticks %.2f of %d a second, %.2f sub-frames a tick asked and %.2f drawn, display %u Hz",
                         ticks / seconds, 60 / gVIsPerFrame, (double)subframeTotal / ticks,
                         (double)deliveredTotal / ticks, rate);
+#endif
 
     since = now;
     ticks = 0;
@@ -1017,22 +935,12 @@ void ReportTickRate(int subframes, int delivered) {
 #endif
 }
 
-// Ticks between two attempts to raise the sub-frame count again. One truncated tick is the cost of
-// finding out that a scene got cheaper, so pay it about once a second, not every tick.
 constexpr int PACING_PROBE_TICKS = 30;
 
-// Ticks of wall time with no tick at all, after which the pacing forgets what it measured. The app
-// was parked, and the cost, the short count and the filter all describe a scene that is gone.
 constexpr int PACING_GAP_TICKS = 8;
 
-// What a sub-frame costs over its measured draw time. The measurement leaves out the submission
-// and the blit, and it is a filtered median, not a peak; on device the whole sub-frame runs about
-// a third over the interpreter walk, so two keeps the drop gate shut for every steady second and
-// open for a real overload.
 constexpr int PACING_WORK_MARGIN = 2;
 
-// Game-logic VI per tick: gVIsPerFrame (=2 -> 30 Hz) normally; demo
-// replay and cutscene stutter raise it for slow N64 frames.
 int CurrentViPerTick() {
     int viPerTick = port_getDemoViCount();
     if (viPerTick <= 0) {
@@ -1063,12 +971,6 @@ SubframePacing ComputeSubframePacing() {
     int viPerTick = CurrentViPerTick();
     int subframesPerTick = SubframesForTarget(target_fps);
 
-    // A headset presents one sub-frame per panel slot, and the VI ticker holds the tick to its
-    // game time. When the slots per tick are not whole, a fixed count leaves the spare slots
-    // repeating the old picture while the tick waits out its VIs. So carry the slot phase across
-    // ticks: the count then alternates, every slot gets a sub-frame, and the blend of each one is
-    // its slot's place in the tick, so the motion stays even. A whole ratio keeps a zero carry and
-    // the counts and blends of the fixed rule.
     float blendStep = 0.0f;
     int slotCount = 0;
     static float sSlotCarry = 0.0f;
@@ -1076,8 +978,6 @@ SubframePacing ComputeSubframePacing() {
         const float slots = (float)target_fps * (float)viPerTick / 60.0f;
         if (slots >= 2.0f) {
             if (fabsf(slots - roundf(slots)) <= 0.05f) {
-                // A rate the cadence read a hertz or two off a whole multiple still gets the
-                // whole count; the truncating rule would lose a slot to the misread.
                 subframesPerTick = (int)roundf(slots);
             } else {
                 blendStep = 1.0f / slots;
@@ -1096,24 +996,7 @@ SubframePacing ComputeSubframePacing() {
         subframesPerTick = 1;
     }
 
-    // A sub-frame the tick has no time for is not drawn: RunCommands leaves the pass part way
-    // through, and the interpolation map it built is thrown away. Ask for what the tick really
-    // delivers instead, so a heavy scene settles on a steady count rather than asking for six and
-    // putting three on the screen.
-    //
-    // The delivered count says that a tick ran short. It does not say why, and a display path that
-    // holds one present too long makes the same number as a heavy scene. So the draw time gets a
-    // veto: the count only comes down when the work of the sub-frames also fills the tick. Draw
-    // time cannot set the count on its own, because it is only the part of a sub-frame between
-    // StartDraw and EndDraw and leaves out the submission and the wait for the display. Pacing on
-    // the wall time of a sub-frame would not do either, because the pacing itself puts the wait
-    // there, so the number would chase its own tail down to one.
-    //
-    // A cutscene, a dialog and a demo each change the VI count, and with it both the length of a
-    // tick and the count of sub-frames that fits in one. So the learned count is measured against
-    // what the last tick asked for, and a target that drops is not written back into it: the
-    // number has to survive the way out of the cutscene as well as the way in.
-    {
+    if (IsHeadsetWindow()) {
         static int allowed = 0;
         static int probeCountdown = 0;
         static int asked = 0;
@@ -1124,17 +1007,11 @@ SubframePacing ComputeSubframePacing() {
             allowed = subframesPerTick;
         }
 
-        // The learned count is sub-frames in one tick, and a tick is viPerTick VIs long. When the
-        // VI count steps, the count follows at once; the probe would need 30 ticks for each step.
         if (scaledVi > 0 && viPerTick != scaledVi) {
             allowed = (allowed * viPerTick + scaledVi - 1) / scaledVi;
         }
         scaledVi = viPerTick;
 
-        // Nothing drew between the last tick and this one, so the app was parked: an immersive
-        // space given back, a background, a lock, a long load. The measured cost and the delivered
-        // count belong to the scene and the display path of before, and the first tick back must
-        // not be judged by them. The learned count stays: it is the scene the app comes back to.
         static Clock::time_point lastTick;
         const bool resumed = lastTick.time_since_epoch().count() != 0 && sPassBudgetNs > 0 &&
                              NsSince(lastTick) > sPassBudgetNs * PACING_GAP_TICKS;
@@ -1150,14 +1027,9 @@ SubframePacing ComputeSubframePacing() {
         const bool fitsTick = sFilteredSubFrameNs <= 0 || sPassBudgetNs <= 0 ||
                               sFilteredSubFrameNs * PACING_WORK_MARGIN * asked < sPassBudgetNs;
         if (isShort && wasShort && !fitsTick) {
-            // Two ticks in a row ran out of time and the work of those ticks explains it, so the
-            // scene is heavy. One step down, because two short ticks measure that the last count
-            // was too high and nothing more. A hitch - a map load, a first texture upload - must
-            // not cost seconds of a lower rate, which is what a cutscene showed.
             allowed = asked - 1;
             probeCountdown = PACING_PROBE_TICKS;
         } else if (!isShort && --probeCountdown <= 0) {
-            // Ask for one more now and then, or a scene that gets cheaper never gets it back.
             allowed++;
             probeCountdown = PACING_PROBE_TICKS;
         }
@@ -1186,8 +1058,6 @@ SubframePacing ComputeSubframePacing() {
     }
 
 #ifdef ENABLE_XR_WINDOW
-    // Nothing states what the pacing settled on. A heavy scene collapses the sub-frame count and
-    // the game presents at the tick rate, which reads as a low frame rate with no other sign.
     {
         static double nextReport = 0.0;
         static double windowStart = 0.0;
@@ -1204,8 +1074,6 @@ SubframePacing ComputeSubframePacing() {
         deliveredTotal += sDeliveredSubFrames;
         viTotal += viPerTick;
         if (now >= nextReport) {
-            // The window is a second only if a tick arrived to close it. A parked app closes it
-            // late, so the rate comes from the wall time the ticks really took.
             const double window = now - windowStart;
             if (nextReport > 0.0 && ticks > 0 && window > 0.0) {
                 SPDLOG_INFO("xr pacing: target {} Hz, ticks {:.1f}/s, vi {:.2f}, asked {:.2f}, delivered {:.2f}, "
@@ -1223,16 +1091,11 @@ SubframePacing ComputeSubframePacing() {
     }
 #endif
 
-    // paceFps drives DXGI's per-present wait so that subframes * 1/paceFps =
-    // viPerTick/60 wall (= game time per tick). Derived from viPerTick rather than
-    // effective_logic_fps: the latter is truncated (VI=7 -> 8, not 8.57), which would
-    // stretch wall time on the odd VI counts demo playback hands us every tick.
     int fps = subframesPerTick * 60 / viPerTick;
     if (fps < 1) {
         fps = 1;
     }
 
-    // A carried tick spans its own count of slots, not the whole VI time, so its budget does too.
     const long long budgetNs =
         (blendStep > 0.0f) ? 1000000000LL * subframesPerTick / target_fps : 1000000000LL * viPerTick / 60;
 
@@ -1240,11 +1103,6 @@ SubframePacing ComputeSubframePacing() {
 }
 
 #ifdef ENABLE_OPENXR
-// The menu and the window's own handles write the same number. Push it when the menu moved it since
-// the last frame, and read the window back when the menu did not, so the one that moved last wins
-// and a slider always shows where the hand left the window. Both numbers are themselves, so the
-// same conversion serves both ways.
-// Answers true when the window is what moved, so the caller can save once the hand lets go.
 bool SyncXrSetting(const char* cVar, float low, float high, float defaultValue, float& pushed, float held,
                    void (*apply)(float), float (*convert)(float)) {
     const float shown = std::clamp(CVarGetFloat(cVar, defaultValue), low, high);
@@ -1282,10 +1140,6 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
 #endif
 
 #ifdef ENABLE_OPENXR
-    // The range is meters from the user to the glass, and the size is meters of glass. They are
-    // apart: a range that goes out leaves the window the width it had, so it goes small in the eye
-    // and takes the diorama into the room with it. The move bar and the corner handles write the
-    // same two numbers from inside the headset.
     static float pushedRange = 0.0f;
     static float pushedScale = 0.0f;
     const bool rangeMoved =
@@ -1295,8 +1149,6 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
         SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 8.0f, 2.6f, pushedScale, Fast::GetXrWindowScale(),
                       Fast::SetXrWindowScale, [](float value) { return value; });
 
-    // The menu saves what the menu changes. A hand on the window writes the same numbers with the
-    // menu closed, so the save comes when the window stops moving.
     static bool wasMoving = false;
     const bool moving = rangeMoved || scaleMoved;
     if (wasMoving && !moving) {
@@ -1306,10 +1158,6 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
 #endif
 
 #ifdef ENABLE_OPENXR
-    // The window covers part of the view, and everything the game draws past what that window can
-    // show is thrown away. The window backend now reports the size of that fit as the window size,
-    // so the multiplier carries Internal Resolution alone: 1 is one game pixel to an eye pixel and
-    // 2 is a picture the blit resolves down.
     wnd->SetResolutionMultiplier(CVarGetFloat(CVAR_INTERNAL_RESOLUTION, 1.0f));
 
     Fast::SetXrStereo(CVarGetInteger(CVAR_SETTING("XrStereo"), 1) != 0);
@@ -1377,9 +1225,6 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
 }
 
 uint32_t GameEngine::GetInterpolationFPS() {
-    // A headset is not a screen a player chooses a frame rate for. Anything below the panel rate
-    // beats against it, and the parallax the off-axis frustum bakes into each eye only updates as
-    // often as the game presents. The setting stays reachable, it just starts on.
     if (CVarGetInteger(CVAR_SETTING("MatchRefreshRate"), IsHeadsetWindow() ? 1 : 0)) {
         return Ship::Context::GetRawInstance()->GetWindow()->GetCurrentRefreshRate();
 

@@ -7,7 +7,6 @@
 #include "port/UI/cvar_prefixes.h"
 
 std::vector<std::string> Rando::Spoiler::spoilerLogs;
-// Resolved on first use, not at static-init time; see the note in Rando.cpp.
 static const std::filesystem::path& RandomizerFolderPath() {
     static const std::filesystem::path path(Ship::Context::GetPathRelativeToAppDirectory("randomizer", "bk64"));
     return path;

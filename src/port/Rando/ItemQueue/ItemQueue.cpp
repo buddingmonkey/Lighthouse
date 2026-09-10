@@ -83,7 +83,6 @@ void ItemQueue::Process() {
         ItemQueue::SendNotification(randoSaveCheck.randoItemId);
         Rando::StaticData::ModifyRandoInfFlagState(randoCheckId);
         RANDO_SAVE_CHECKS[randoCheckId].received = true;
-        RANDO_SAVE_CHECKS[randoCheckId].obtained = true;
     }
 
     itemQueue.pop();
@@ -337,7 +336,7 @@ void ItemQueue::AddCheck(RandoCheckId randoCheckId) {
         return;
     }
     auto& check = RANDO_SAVE_CHECKS[randoCheckId];
-    if (check.eligible || check.received || check.obtained) {
+    if (check.eligible || check.received) {
         return;
     }
     check.eligible = true;

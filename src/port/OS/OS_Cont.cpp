@@ -64,8 +64,6 @@ extern "C" int OS_SiService(void) {
         std::lock_guard<std::mutex> lock(sLatchMutex);
         memset(sLatch, 0, sizeof(sLatch));
         Ship::Context::GetRawInstance()->GetControlDeck()->WriteToPad(sLatch);
-        // Merged here rather than through a mapping so it survives mapping reloads and
-        // stays on the thread that polls SDL.
         TouchControls_MergeInto(&sLatch[0]);
         XrControls_MergeInto(&sLatch[0]);
 #ifdef ENABLE_DEBUG_TOOLS

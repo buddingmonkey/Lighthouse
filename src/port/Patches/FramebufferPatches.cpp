@@ -12,7 +12,6 @@
 // From Patches.h; declared here because this file's definitions use concrete
 // Gfx/model types where the header declares void*.
 extern "C" void port_runOnRenderThread(void (*fn)(void*), void* arg);
-bool IsHeadsetWindow();
 
 extern "C" {
 
@@ -77,7 +76,6 @@ static void currentRenderSize(int* w, int* h) {
 static void createPauseFb(void* arg) {
     (void)arg;
     s_pauseFbId = gfx_create_framebuffer(s_pauseFbW, s_pauseFbH, s_pauseFbW, s_pauseFbH, 0, 0);
-    // The snapshot is taken and drawn once per eye, so the right eye needs a picture of its own.
     if (IsHeadsetWindow() && s_pauseFbId >= 0) {
         s32 rightFb = gfx_create_framebuffer(s_pauseFbW, s_pauseFbH, s_pauseFbW, s_pauseFbH, 0, 0);
         gfx_register_stereo_fb_pair(s_pauseFbId, rightFb);
@@ -300,8 +298,6 @@ static void createTransitionFb(void* arg) {
     sTransitionGpuFbId = gfx_create_framebuffer(DEFAULT_FRAMEBUFFER_WIDTH, DEFAULT_FRAMEBUFFER_HEIGHT,
                                                 DEFAULT_FRAMEBUFFER_WIDTH, DEFAULT_FRAMEBUFFER_HEIGHT, 1, 0);
     gfx_register_fb_texture(sTransitionFbDummy, sTransitionGpuFbId);
-    // A headset runs the display list once per eye and each pass captures its own view, so the
-    // right eye copies into and samples a second framebuffer: a stereoscopic photo on the pieces.
     if (IsHeadsetWindow()) {
         s32 rightFb = gfx_create_framebuffer(DEFAULT_FRAMEBUFFER_WIDTH, DEFAULT_FRAMEBUFFER_HEIGHT,
                                              DEFAULT_FRAMEBUFFER_WIDTH, DEFAULT_FRAMEBUFFER_HEIGHT, 1, 0);

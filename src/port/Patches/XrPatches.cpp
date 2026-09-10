@@ -2,8 +2,22 @@
 
 #include "Patches.h"
 
-// The mark has to travel in the display list: the list is built here and the projection is
-// substituted later, when it is run.
+#ifndef ENABLE_XR_WINDOW
+
+extern "C" void port_xr_beginFlat(Gfx** gfx) {
+}
+
+extern "C" void port_xr_endFlat(Gfx** gfx) {
+}
+
+extern "C" void port_xr_beginParticlePass(Gfx** gfx) {
+}
+
+extern "C" void port_xr_endParticlePass(Gfx** gfx) {
+}
+
+#else
+
 extern "C" void port_xr_beginFlat(Gfx** gfx) {
     gSPXrFlatProjection((*gfx)++, 1);
 }
@@ -12,10 +26,14 @@ extern "C" void port_xr_endFlat(Gfx** gfx) {
     gSPXrFlatProjection((*gfx)++, 0);
 }
 
-extern "C" void port_xr_beginNoSceneDepth(Gfx** gfx) {
+extern "C" void port_xr_beginParticlePass(Gfx** gfx) {
+    gSPXrSceneDepth((*gfx)++, 1);
+    gSPTextureBatch((*gfx)++, 1);
+}
+
+extern "C" void port_xr_endParticlePass(Gfx** gfx) {
+    gSPTextureBatch((*gfx)++, 0);
     gSPXrSceneDepth((*gfx)++, 0);
 }
 
-extern "C" void port_xr_endNoSceneDepth(Gfx** gfx) {
-    gSPXrSceneDepth((*gfx)++, 1);
-}
+#endif

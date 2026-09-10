@@ -1,21 +1,14 @@
 #ifndef TOUCH_CONTROLS_H
 #define TOUCH_CONTROLS_H
 
-// On-screen gamepad for touch devices. Enabled only where a touchscreen is the primary
-// input (iOS); everything here compiles to nothing elsewhere.
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Reads the current fingers and updates the virtual pad. Call once per event pump,
-// on the thread that pumps SDL events.
 void TouchControls_Poll(void);
 
-// ORs the virtual pad into an OSContPad. Call after the control deck has written it.
 void TouchControls_MergeInto(void* contPad);
 
-// Opens or closes the menu. A platform with no pad, such as visionOS, still needs the same route.
 void TouchControls_OpenMenu(void);
 
 #ifdef __cplusplus
@@ -23,7 +16,6 @@ void TouchControls_OpenMenu(void);
 
 #include <libultraship/libultraship.h>
 
-// Overlay host. Draws nothing off touch platforms, so it can be registered unconditionally.
 class TouchControlsWindow final : public Ship::GuiWindow {
 public:
     using GuiWindow::GuiWindow;
@@ -35,9 +27,7 @@ public:
 };
 
 namespace Lighthouse {
-// Draws the overlay. Called from the gui pass.
 void TouchControls_Draw();
-// True when the overlay should exist at all (touch-first platform, user hasn't disabled it).
 bool TouchControls_Active();
 } // namespace Lighthouse
 #endif
