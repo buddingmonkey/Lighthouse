@@ -81,8 +81,15 @@ bool IsHeadsetWindow() {
         return false;
     }
     const auto backend = ctx->GetWindow()->GetWindowBackend();
-    return backend == static_cast<int32_t>(Fast::WindowBackend::FAST3D_OPENXR_OPENGL) ||
-           backend == static_cast<int32_t>(Fast::WindowBackend::FAST3D_VISIONOS_METAL);
+    if (backend != static_cast<int32_t>(Fast::WindowBackend::FAST3D_OPENXR_OPENGL) &&
+        backend != static_cast<int32_t>(Fast::WindowBackend::FAST3D_VISIONOS_METAL)) {
+        return false;
+    }
+#ifdef ENABLE_XR_WINDOW
+    return Fast::IsXrPresenting();
+#else
+    return false;
+#endif
 }
 
 uint32_t DefaultImGuiScaleIndex() {
