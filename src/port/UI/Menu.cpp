@@ -761,11 +761,14 @@ void Menu::DrawElement() {
         ImGui::PopStyleColor();
     }
     ImGui::EndChild();
-#ifdef LIGHTHOUSE_MOBILE
-    const float headerButtonSpan = 3.25f;
+#if defined(LIGHTHOUSE_MOBILE) && !defined(__ANDROID__)
+    const bool showQuit = false;
+#elif defined(LIGHTHOUSE_MOBILE)
+    const bool showQuit = IsHeadsetWindow();
 #else
-    const float headerButtonSpan = 4.25f;
+    const bool showQuit = true;
 #endif
+    const float headerButtonSpan = showQuit ? 4.25f : 3.25f;
     ImGui::SameLine(menuSize.x - (buttonSize.x * headerButtonSpan) - (style.ItemSpacing.x * 2));
     UIWidgets::ButtonOptions options4 = {};
     std::string option4Tooltip =
@@ -778,26 +781,26 @@ void Menu::DrawElement() {
     options4.size = UIWidgets::Sizes::Inline;
     options4.tooltip = option4Tooltip.c_str();
     if (UIWidgets::Button(ICON_FA_QUESTION_CIRCLE, options4)) {}
-#ifndef LIGHTHOUSE_MOBILE
-    ImGui::SameLine();
-    UIWidgets::ButtonOptions options3 = {};
-    options3.color = UIWidgets::Colors::Red;
-    options3.size = UIWidgets::Sizes::Inline;
-    options3.tooltip = "Quit Lighthouse";
-    if (UIWidgets::Button(ICON_FA_POWER_OFF, options3)) {
-        LighthouseGui::mModalWindow->RegisterPopup(
-            "Quit Lighthouse", "Are you sure you want to quit Lighthouse?", "Quit", "Cancel",
-            []() {
-                std::shared_ptr<Menu> menu =
-                    static_pointer_cast<Menu>(Ship::Context::GetRawInstance()->GetWindow()->GetGui()->GetMenu());
-                if (!menu->IsMenuPopped()) {
-                    menu->ToggleVisibility();
-                }
-                Ship::Context::GetRawInstance()->GetWindow()->Close();
-            },
-            nullptr);
+    if (showQuit) {
+        ImGui::SameLine();
+        UIWidgets::ButtonOptions options3 = {};
+        options3.color = UIWidgets::Colors::Red;
+        options3.size = UIWidgets::Sizes::Inline;
+        options3.tooltip = "Quit Lighthouse";
+        if (UIWidgets::Button(ICON_FA_POWER_OFF, options3)) {
+            LighthouseGui::mModalWindow->RegisterPopup(
+                "Quit Lighthouse", "Are you sure you want to quit Lighthouse?", "Quit", "Cancel",
+                []() {
+                    std::shared_ptr<Menu> menu =
+                        static_pointer_cast<Menu>(Ship::Context::GetRawInstance()->GetWindow()->GetGui()->GetMenu());
+                    if (!menu->IsMenuPopped()) {
+                        menu->ToggleVisibility();
+                    }
+                    Ship::Context::GetRawInstance()->GetWindow()->Close();
+                },
+                nullptr);
+        }
     }
-#endif
     ImGui::PopStyleVar();
     ImGui::SameLine();
     UIWidgets::ButtonOptions options2 = {};
