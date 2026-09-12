@@ -66,92 +66,62 @@ private func note(_ text: String) {
     LighthouseVolumeNote(text)
 }
 
-private final class CopyHandoff: @unchecked Sendable {
-    private let lock = NSLock()
-    private var pair: (any MTLCommandBuffer, any MTLTexture)?
-    private var busy = false
+// replace(using:) hands out the texture that the buffer it is given must write, and the shell has
+// to commit that buffer before it asks for the next one. visionOS 26.5 drops a picture whose buffer
+// is committed later, on another thread, and the volume then shows the material with no texture.
+@MainActor private final class PictureCopy {
     private var stereo = false
     private var done = false
 
     func setStereo() {
-        lock.lock()
         stereo = true
-        lock.unlock()
     }
 
     var eyes: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return stereo ? 2 : 1
-    }
-
-    var hasRoom: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return pair == nil && !busy
-    }
-
-    func stash(_ buffer: any MTLCommandBuffer, _ destination: any MTLTexture) {
-        lock.lock()
-        pair = (buffer, destination)
-        lock.unlock()
-    }
-
-    func take() -> (any MTLCommandBuffer, any MTLTexture)? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let taken = pair else { return nil }
-        pair = nil
-        busy = true
-        return taken
-    }
-
-    func finish() {
-        lock.lock()
-        busy = false
-        done = true
-        lock.unlock()
+        stereo ? 2 : 1
     }
 
     var copied: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return done
+        done
     }
-}
 
-private let gCopyHandoff = CopyHandoff()
-
-@_cdecl("LighthouseVolumeEncodeCopy")
-func lighthouseVolumeEncodeCopy() {
-    guard let (buffer, destination) = gCopyHandoff.take() else { return }
-    let started = CACurrentMediaTime()
-    if let blit = buffer.makeBlitCommandEncoder() {
-        for eye in 0..<gCopyHandoff.eyes {
-            guard let raw = LighthouseVolumeTexture(Int32(eye)),
-                  let source = Unmanaged<AnyObject>.fromOpaque(raw).takeUnretainedValue() as? any MTLTexture
-            else {
-                continue
+    func run(queue: any MTLCommandQueue, texture: LowLevelTexture) {
+        let started = CACurrentMediaTime()
+        guard let buffer = queue.makeCommandBuffer() else { return }
+        let destination = texture.replace(using: buffer)
+        var copiedAnEye = false
+        if let blit = buffer.makeBlitCommandEncoder() {
+            for eye in 0..<eyes {
+                guard let raw = LighthouseVolumeTexture(Int32(eye)),
+                      let source = Unmanaged<AnyObject>.fromOpaque(raw).takeUnretainedValue() as? any MTLTexture
+                else {
+                    continue
+                }
+                blit.copy(from: source,
+                          sourceSlice: 0,
+                          sourceLevel: 0,
+                          sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                          sourceSize: MTLSize(width: kEyeWidth, height: kTextureHeight, depth: 1),
+                          to: destination,
+                          destinationSlice: 0,
+                          destinationLevel: 0,
+                          destinationOrigin: MTLOrigin(x: eye * kEyeWidth, y: 0, z: 0))
+                copiedAnEye = true
             }
-            blit.copy(from: source,
-                      sourceSlice: 0,
-                      sourceLevel: 0,
-                      sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                      sourceSize: MTLSize(width: kEyeWidth, height: kTextureHeight, depth: 1),
-                      to: destination,
-                      destinationSlice: 0,
-                      destinationLevel: 0,
-                      destinationOrigin: MTLOrigin(x: eye * kEyeWidth, y: 0, z: 0))
+            blit.endEncoding()
         }
-        blit.endEncoding()
+        buffer.addCompletedHandler { done in
+            LighthouseVolumeNoteCopyGpu(done.gpuEndTime - done.gpuStartTime)
+        }
+        buffer.commit()
+        if copiedAnEye {
+            done = true
+        }
+        LighthouseVolumeNoteCopy(CACurrentMediaTime() - started)
     }
-    buffer.addCompletedHandler { done in
-        LighthouseVolumeNoteCopyGpu(done.gpuEndTime - done.gpuStartTime)
-    }
-    buffer.commit()
-    gCopyHandoff.finish()
-    LighthouseVolumeNoteCopy(CACurrentMediaTime() - started)
 }
+
+@MainActor private let gPictureCopy = PictureCopy()
 
 private struct HoverRect: Identifiable, Equatable {
     let id: Int
@@ -180,6 +150,7 @@ private final class VolumeState {
     private var hoverQuad = SIMD2<Float>(0.0, 0.0)
     private var hoverMaterial: ShaderGraphMaterial?
     private var hoverNote: String?
+    private var eyeNote: String?
 
     private var eyeMaterial: (any RealityKit.Material)?
 
@@ -232,19 +203,19 @@ private final class VolumeState {
 
     func loadEyeMaterial() async {
         guard let url = Bundle.main.url(forResource: "GameScreen", withExtension: "usda") else {
-            note("GameScreen.usda is not in the bundle")
+            eyeNote = "GameScreen.usda is not in the bundle"
             return
         }
         do {
             var material = try await ShaderGraphMaterial(named: "/Root/GameScreen", from: url)
             try material.setParameter(name: "GameTexture", value: .textureResource(resource))
             eyeMaterial = material
-            gCopyHandoff.setStereo()
+            gPictureCopy.setStereo()
             LighthouseVolumeSetStereo(true)
             quad?.model?.materials = [material]
-            note("an eye each")
+            eyeNote = "an eye each"
         } catch {
-            note("the eye material did not load, \(error)")
+            eyeNote = "the eye material did not load, \(error)"
         }
         do {
             var material = try await ShaderGraphMaterial(named: "/Root/HoverPlate", from: url)
@@ -378,16 +349,15 @@ private final class VolumeState {
         }
         LighthouseVolumeUpdate(frame)
 
-        if let line = hoverNote, gCopyHandoff.copied {
+        if let line = hoverNote, gPictureCopy.copied {
             hoverNote = nil
             note(line)
         }
-
-        guard gCopyHandoff.hasRoom else { return }
-        let started = CACurrentMediaTime()
-        guard let buffer = queue.makeCommandBuffer() else { return }
-        gCopyHandoff.stash(buffer, texture.replace(using: buffer))
-        LighthouseVolumeNotePrepare(CACurrentMediaTime() - started)
+        if let line = eyeNote, gPictureCopy.copied {
+            eyeNote = nil
+            note(line)
+        }
+        gPictureCopy.run(queue: queue, texture: texture)
     }
 }
 

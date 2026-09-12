@@ -43,7 +43,6 @@ typedef struct {
 
 size_t LighthouseVolumeHoverRects(LighthouseVolumeHoverRect* out, size_t max);
 
-void LighthouseVolumeNotePrepare(double seconds);
 void LighthouseVolumeNoteCopy(double seconds);
 void LighthouseVolumeNoteCopyGpu(double seconds);
 
