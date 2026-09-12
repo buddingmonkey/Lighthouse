@@ -20,7 +20,6 @@ extern "C" int SDL_main(int argc, char* argv[]);
 extern "C" void SDL_SetMainReady(void);
 extern "C" void port_setAppOnScreen(int onScreen);
 extern "C" void TouchControls_OpenMenu(void);
-extern "C" void LighthouseVolumeEncodeCopy(void);
 
 namespace {
 
@@ -141,7 +140,6 @@ bool VolumeOpenFrame() {
 
 void VolumeCloseFrame() {
     Fast::FlipVisionOSGameTextures();
-    LighthouseVolumeEncodeCopy();
 }
 
 bool VolumeIsRunning() {
@@ -343,9 +341,6 @@ size_t LighthouseVolumeHoverRects(LighthouseVolumeHoverRect* out, size_t max) {
 }
 
 void LighthouseVolumeNoteCopy(double) {
-}
-
-void LighthouseVolumeNotePrepare(double) {
 }
 
 void LighthouseVolumeNoteCopyGpu(double) {
