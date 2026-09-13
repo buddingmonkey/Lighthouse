@@ -108,9 +108,8 @@ The game hangs on a window in front of you. There is no on-screen pad on any hea
 | Z | either trigger |
 | Start | left hand Menu button |
 
-**Samsung Galaxy XR** — the headset comes with hands and eyes, not controllers, and **hands cannot
-play the game**. Pair a Bluetooth gamepad, as on Vision Pro. The map above is bound to the Oculus
-Touch profile only, so another OpenXR controller can reach the menu and still not reach the game.
+**Samsung Galaxy XR** — the headset comes with hands and eyes, not controllers, and **Bluetooth gamepad required**. The map above is bound to the Oculus
+Touch profile only.
 
 **Both** — point a hand or a controller at the window to get a cursor, then pinch or pull the
 trigger to click:
