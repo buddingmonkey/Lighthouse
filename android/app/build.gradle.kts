@@ -26,7 +26,7 @@ android {
         applicationId = providers.gradleProperty("applicationId").get()
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
+        versionCode = providers.gradleProperty("versionCode").getOrElse("1").toInt()
         versionName = lighthouseVersion
 
         externalNativeBuild {
