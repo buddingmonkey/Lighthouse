@@ -12,6 +12,8 @@ jobs:
     # Same-repo branches fire both push and pull_request; only build once.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.extract_version.outputs.version }}
     steps:
     - uses: actions/checkout@v7
       with:
@@ -211,6 +213,7 @@ jobs:
   build-android:
     needs: generate-port-o2r
     runs-on: ubuntu-latest
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || '' }}
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -306,3 +309,43 @@ jobs:
             config.yml
             assets
             gamecontrollerdb.txt
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [generate-port-o2r, build-windows, build-linux, build-android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the tag against the project version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PROJECT="${{ needs.generate-port-o2r.outputs.version }}"
+          test "${TAG%%-*}" = "$PROJECT" || {
+            echo "Tag $GITHUB_REF_NAME does not agree with the CMakeLists version $PROJECT"
+            exit 1
+          }
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+      - name: Stage the release files
+        run: |
+          set -eu
+          VER="${GITHUB_REF_NAME#v}"
+          mkdir -p dist/release
+          mv dist/Lighthouse-windows/debug dist/windows-pdb
+          (cd dist/Lighthouse-windows && zip -qr "../release/Lighthouse-$VER-windows-x64.zip" .)
+          (cd dist/windows-pdb && zip -qr "../release/Lighthouse-$VER-windows-x64-pdb.zip" .)
+          chmod +x dist/Lighthouse-linux/lighthouse.appimage
+          mv dist/Lighthouse-linux/lighthouse.appimage "dist/release/Lighthouse-$VER-linux-x86_64.AppImage"
+          mkdir -p dist/linux-extras
+          cp -r config.yml assets dist/Lighthouse-linux/gamecontrollerdb.txt dist/Lighthouse-linux/readme.txt dist/linux-extras/
+          (cd dist/linux-extras && zip -qr "../release/Lighthouse-$VER-linux-extras.zip" .)
+          mv dist/Lighthouse-android/lighthouse-release.apk "dist/release/Lighthouse-$VER-android-universal.apk"
+          ls -l dist/release
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/release/*
+          draft: true
+          generate_release_notes: true
+          body_path: docs/release-notes-template.md
