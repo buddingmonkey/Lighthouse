@@ -239,6 +239,10 @@ _Note: the build cross-compiles, so `lighthouse.o2r` has to come from a macOS bu
 
 _Note: `IOS_DEVELOPMENT_TEAM` is your 10-character Apple Developer Team ID, from <https://developer.apple.com/account>, and `PROJECT_ID` a bundle identifier your team owns. A free Apple ID works, added under Xcode > Settings > Accounts, but its profiles expire after 7 days. Leave the team unset to compile without an Apple account._
 
+**CMake generates the Xcode project. Xcode builds it.** Use CMake once to make the project, then
+work in Xcode. That is the path we validate, and it is the only path that signs the app and puts it
+on a device.
+
 ```bash
 # Clone the repo
 git clone --recursive https://github.com/buddingmonkey/Lighthouse.git
@@ -260,13 +264,25 @@ cmake -S . -B build-ios -G Xcode \
   -DPROJECT_ID=com.yourname.lighthouse \
   -DIOS_DEVELOPMENT_TEAM=YOURTEAMID
 
-# Compile the project, or open build-ios/Lighthouse.xcodeproj and hit Run
-# Build the Lighthouse target rather than ALL_BUILD to skip the SDL2 dylib and the host Torch
-# Drop -allowProvisioningUpdates if you set no team
-cmake --build build-ios --config Release --target Lighthouse -- -allowProvisioningUpdates
+open build-ios/Lighthouse.xcodeproj
 ```
 
-_Note: if the build reports that no profiles were found, open `build-ios/Lighthouse.xcodeproj` once and pick your team under the Lighthouse target's *Signing & Capabilities*._
+In Xcode: select the **Lighthouse** scheme, choose your device at the top, and press **Run** (⌘R).
+The first run asks the device to trust the developer; accept it in *Settings > General > VPN &
+Device Management* on the device.
+
+_Note: if Xcode reports that no profiles were found, pick your team under the Lighthouse target's
+*Signing & Capabilities*._
+
+_Note: **run the Release configuration.** A Debug build makes the first-start asset extraction about
+60 times slower, because the extractor is statically linked and takes the configuration of the app.
+The generated scheme runs Release already; `-DIOS_SCHEME_CONFIGURATION=Debug` changes it._
+
+_Note: `cmake --build build-ios --config Release --target Lighthouse` compiles the same project from
+a terminal. Use it to prove that a change builds, not to install: it cannot sign without a GUI
+session, and the Xcode generator returns success even when the log says `** BUILD FAILED **`, so
+read the log rather than the exit status. Build the `Lighthouse` target, never `ALL_BUILD`, which
+also tries the host Torch packer._
 
 ### Getting the game onto a device
 1. Install and launch the app once. It creates a `Lighthouse` folder under *On My iPhone* / *On My iPad* in the Files app.
@@ -310,6 +326,9 @@ _Note: the build cross-compiles, so `lighthouse.o2r` has to come from a macOS bu
 _Note: `IOS_DEVELOPMENT_TEAM` and `PROJECT_ID` work as they do for iOS. A free Apple ID works, and
 its profiles expire after 7 days._
 
+**CMake generates the Xcode project. Xcode builds it.** As on iOS, use CMake once to make the
+project, then work in Xcode.
+
 ```bash
 git clone --recursive https://github.com/buddingmonkey/Lighthouse.git
 cd Lighthouse
@@ -327,12 +346,18 @@ cmake -S . -B build-visionos -G Xcode \
   -DPROJECT_ID=com.yourname.lighthouse.vision \
   -DIOS_DEVELOPMENT_TEAM=YOURTEAMID
 
-# Compile, or open build-visionos/Lighthouse.xcodeproj and hit Run
-cmake --build build-visionos --config Release --target Lighthouse -- -allowProvisioningUpdates
+open build-visionos/Lighthouse.xcodeproj
 ```
 
-`-DPLATFORM=SIMULATOR_VISIONOS` builds for the simulator instead. The simulator reports one view,
-so it cannot show the stereo result, but placement and the menu are checkable there.
+In Xcode: select the **Lighthouse** scheme, choose your Vision Pro, and press **Run** (⌘R). Pair
+the headset first under *Window > Devices and Simulators*.
+
+`-DPLATFORM=SIMULATOR_VISIONOS` makes a simulator project instead, which needs no signing. The
+simulator reports one view, so it cannot show the stereo result, but placement and the menu are
+checkable there.
+
+_Note: the terminal build and the Release rule are the same as for iOS. See the notes in the
+[iOS section](#ios-iphone--ipad)._
 
 ### Getting the game onto a device
 The same as iOS: launch once, copy a `.z64` into the `Lighthouse` folder the app makes in the Files
