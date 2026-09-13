@@ -1,8 +1,9 @@
 ## Before you start
 
-Lighthouse does not contain the game. You must supply your own Banjo-Kazooie ROM. The app asks for
-the ROM on the first start and makes `bk.o2r` from it. The `README` in the repository lists the supported
-versions and their checksums.
+Lighthouse does not contain the game. You must supply your own Banjo-Kazooie ROM. Copy the ROM onto
+the device first. On the first start the app asks *"No O2R files found. Generate one now?"*; answer
+**Yes** and choose the ROM in the picker that opens. It then makes `bk.o2r`, which takes a few
+minutes. The `README` in the repository lists the supported versions and their checksums.
 
 ## Which file do I need?
 

@@ -64,10 +64,15 @@ The app makes `bk.o2r` from your ROM on the first start. This takes a few minute
 200 MB free.
 
 * **Android, Quest, Galaxy XR** — copy the ROM anywhere on the device, `Downloads` is fine. Start
-  the app. It opens the system file picker. Choose the ROM.
+  the app. It asks *"No O2R files found. Generate one now?"*; answer **Yes**. The system file
+  picker opens. Choose the ROM.
 * **iPhone, iPad, Vision Pro** — start the app once. It makes a `Lighthouse` folder under *On My
   iPhone* / *On My iPad* / *On My Apple Vision Pro* in the Files app. Copy the ROM into that
-  folder and start the app again.
+  folder and start the app again. Answer **Yes** to *"No O2R files found. Generate one now?"*, then
+  **Yes** to *"ROMs found in application directory. Would you like to process them?"*.
+
+**No** to the first question closes the app. That is not a fault; the game cannot start without
+`bk.o2r`.
 
 Saves, `lighthouse.cfg.json` and the `mods` folder are in the same place.
 
@@ -89,7 +94,9 @@ Size, reach, opacity, edge margin, a left-handed layout and an optional D-pad ar
 
 ### Meta Quest and Galaxy XR
 
-The game hangs on a window in front of you. There is no on-screen pad; use the Touch controllers.
+The game hangs on a window in front of you. There is no on-screen pad on any headset.
+
+**Meta Quest 3 / 3S** — the Touch controllers play the game:
 
 | N64 | Touch controller |
 | --- | --- |
@@ -101,7 +108,12 @@ The game hangs on a window in front of you. There is no on-screen pad; use the T
 | Z | either trigger |
 | Start | left hand Menu button |
 
-Point a hand or a controller at the window to get a cursor, and pinch or pull the trigger to click.
+**Samsung Galaxy XR** — the headset comes with hands and eyes, not controllers, and **hands cannot
+play the game**. Pair a Bluetooth gamepad, as on Vision Pro. The map above is bound to the Oculus
+Touch profile only, so another OpenXR controller can reach the menu and still not reach the game.
+
+**Both** — point a hand or a controller at the window to get a cursor, then pinch or pull the
+trigger to click:
 
 * The **MENU** tab above the window opens the port menu.
 * The **bar under the window** moves it. Pinch and drag; push and pull to set the range.

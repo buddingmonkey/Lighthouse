@@ -287,7 +287,8 @@ also tries the host Torch packer._
 ### Getting the game onto a device
 1. Install and launch the app once. It creates a `Lighthouse` folder under *On My iPhone* / *On My iPad* in the Files app.
 2. Copy a supported Banjo-Kazooie ROM (`.z64`) into that folder.
-3. Relaunch and let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
+3. Relaunch. Answer **Yes** to *"No O2R files found. Generate one now?"*, then **Yes** to *"ROMs found in application directory. Would you like to process them?"*. **No** to the first question closes the app.
+4. Let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
 
 Saves, `lighthouse.cfg.json` and the `mods` folder live in the same folder.
 
@@ -361,7 +362,8 @@ _Note: the terminal build and the Release rule are the same as for iOS. See the 
 
 ### Getting the game onto a device
 The same as iOS: launch once, copy a `.z64` into the `Lighthouse` folder the app makes in the Files
-app under *On My Apple Vision Pro*, then launch again.
+app under *On My Apple Vision Pro*, then launch again and answer **Yes** to both extraction
+questions.
 
 ### visionOS notes
 * The app is tested on visionOS 26. `DEPLOYMENT_TARGET` below 2.0 is refused by the configure step.
@@ -410,8 +412,9 @@ _Note: with no keystore given the release APK is signed with the debug key, whic
 
 ### Getting the game onto a device
 1. Copy a supported Banjo-Kazooie ROM (`.z64`) onto the device, anywhere you like — Downloads is fine.
-2. Install and launch the app. It asks for a ROM and opens the system file picker; choose the ROM.
-3. Let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
+2. Install and launch the app. It asks *"No O2R files found. Generate one now?"*; answer **Yes**. **No** closes the app.
+3. The system document picker opens. Choose the ROM.
+4. Let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
 
 _Note: the app keeps its data in `Android/data/<applicationId>/files`, which Android 11 closed to the Files app, to USB, and to the file picker alike. That is why the ROM is imported through the picker rather than copied in by hand, and it is also why saves and mods are not reachable from the device itself; use `adb` for those._
 
@@ -425,7 +428,8 @@ _Note: the app keeps its data in `Android/data/<applicationId>/files`, which And
 
 ### Android XR and Quest notes
 * The game hangs on a window in the room. Head motion changes the projection only; the game camera never follows the head. Range, size, depth, edge treatment, the refresh rate cap and stereo are under *Settings > Graphics*.
-* There are no on-screen touch controls in XR. Play with the Touch controllers; see the [README](../README.md#meta-quest-and-galaxy-xr) for the button map.
+* There are no on-screen touch controls in XR. On a Quest the Touch controllers play the game; see the [README](../README.md#meta-quest-and-galaxy-xr) for the button map. On a Galaxy XR, which ships with hands and no controllers, the player needs a paired Bluetooth gamepad.
+* The pad actions are suggested for `/interaction_profiles/oculus/touch_controller` only (`libultraship/src/fast/backends/gfx_openxr.cpp:698`). The pointer actions also take `khr/simple_controller` and `ext/hand_interaction_ext`, so hands drive the menu and the window on every runtime, but they never reach the game pad.
 * Point a hand or a controller at the window to get a cursor, and pinch or pull the trigger to click. The **MENU** tab above the window opens the port menu, the bar under the window moves it, and the corner handles resize it.
 * The right hand's system button belongs to Horizon OS and cannot be bound, so Start is the left hand's Menu button.
 * The OpenXR loader needs the `uses-native-library` and `org.khronos.openxr.permission.*` lines in the manifest. Without them the loader finds no runtime on Galaxy XR.
