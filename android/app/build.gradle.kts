@@ -67,6 +67,8 @@ android {
             storePassword = providers.gradleProperty("keystorePassword").get()
             keyAlias = providers.gradleProperty("keyAlias").get()
             keyPassword = providers.gradleProperty("keyPassword").get()
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 
