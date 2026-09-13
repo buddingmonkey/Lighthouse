@@ -1,7 +1,8 @@
 [submodule "libultraship"]
 	path = libultraship
 	url = https://github.com/buddingmonkey/libultraship.git
-	branch = ios-support
+	branch = mobile-xr-port
 [submodule "Torch"]
 	path = Torch
-	url = https://github.com/HarbourMasters/Torch.git
+	url = https://github.com/buddingmonkey/Torch.git
+	branch = torch/segment-macro-collision
