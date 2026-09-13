@@ -12,6 +12,8 @@ jobs:
     # Same-repo branches fire both push and pull_request; only build once.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.extract_version.outputs.version }}
     steps:
     - uses: actions/checkout@v7
       with:
@@ -211,6 +213,12 @@ jobs:
   build-android:
     needs: generate-port-o2r
     runs-on: ubuntu-latest
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || '' }}
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -222,8 +230,17 @@ jobs:
           java-version: '17'
       - name: Set up the Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+      - name: Decode the release keystore
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          keytool -certreq -keystore "$RUNNER_TEMP/release.jks" -alias "$ANDROID_KEY_ALIAS" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" -keypass "$ANDROID_KEY_PASSWORD" > /dev/null
+          echo "RELEASE_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
       - name: Install the NDK and CMake
-        run: sdkmanager "ndk;29.0.14206865" "cmake;3.31.6" "platforms;android-35" "build-tools;35.0.0"
+        run: sdkmanager "platform-tools" "ndk;29.0.14206865" "cmake;3.31.6" "platforms;android-35" "build-tools;35.0.0"
       - name: Cache Gradle
         uses: actions/cache@v5
         with:
@@ -243,7 +260,19 @@ jobs:
       - name: Build
         run: |
           cd android
-          ./gradlew --no-daemon assembleRelease
+          ARGS=(--no-daemon assembleRelease "-PversionCode=${{ github.run_number }}")
+          if [ -n "${RELEASE_KEYSTORE:-}" ]; then
+            ARGS+=("-PkeystoreFile=$RELEASE_KEYSTORE"
+                   "-PkeystorePassword=$ANDROID_KEYSTORE_PASSWORD"
+                   "-PkeyAlias=$ANDROID_KEY_ALIAS"
+                   "-PkeyPassword=$ANDROID_KEY_PASSWORD")
+          else
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret. The APK gets the debug key and cannot update an installed release."
+          fi
+          ./gradlew "${ARGS[@]}"
+      - name: Remove the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
       - name: Upload build
         uses: actions/upload-artifact@v7
         with:
@@ -284,3 +313,36 @@ jobs:
             config.yml
             assets
             gamecontrollerdb.txt
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [generate-port-o2r, build-windows, build-linux, build-android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the tag against the project version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PROJECT="${{ needs.generate-port-o2r.outputs.version }}"
+          test "${TAG%%-*}" = "$PROJECT" || {
+            echo "Tag $GITHUB_REF_NAME does not agree with the CMakeLists version $PROJECT"
+            exit 1
+          }
+      - uses: actions/download-artifact@v8
+        with:
+          name: Lighthouse-android
+          path: dist
+      - name: Stage the release files
+        run: |
+          set -eu
+          VER="${GITHUB_REF_NAME#v}"
+          mkdir -p dist/release
+          mv dist/lighthouse-release.apk "dist/release/Lighthouse-$VER-android-universal.apk"
+          ls -l dist/release
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/release/*
+          draft: true
+          generate_release_notes: true
+          body_path: docs/release-notes-template.md
