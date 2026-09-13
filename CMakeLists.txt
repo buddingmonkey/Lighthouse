@@ -440,6 +440,7 @@ if (CMAKE_GENERATOR MATCHES "Visual Studio")
 endif()
 
 add_subdirectory(libultraship ${CMAKE_CURRENT_BINARY_DIR}/libultraship)
+include(cmake/check-sdl2-compat.cmake)
 add_dependencies(${PROJECT_NAME} libultraship)
 target_link_libraries(${PROJECT_NAME} PRIVATE libultraship)
 

@@ -169,6 +169,12 @@ cmake --build build-cmake --target clean
 ## macOS
 Requires Xcode (or xcode-tools) && `sdl2, libpng, glew, ninja, cmake, nlohmann-json, tinyxml2, libzip, vorbis-tools` (can be installed via homebrew, macports, etc)
 
+**Use the MacPorts SDL2.** The Homebrew `sdl2` formula is `sdl2-compat`, which is the SDL2 ABI on
+top of SDL3. It loads SDL3 with `dlopen()`, so the bundle fixup can not put SDL3 in the app. The
+app then runs from a terminal but aborts before `main()` when you start it from the Finder. The
+configure step stops with instructions if it finds `sdl2-compat`. Pass
+`-DLIGHTHOUSE_ALLOW_SDL2_COMPAT=ON` only if you stage `libSDL3.dylib` in the bundle yourself.
+
 **Important: For maximum performance make sure you have ninja build tools installed!**
 
 _Note: If you're using Visual Studio Code, the [cpack plugin](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cmake-tools) makes it very easy to just press run and debug._
