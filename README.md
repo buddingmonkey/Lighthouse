@@ -1,120 +1,209 @@
-[comment]: <> (Todo: Make Light Mode Image)
-[comment]: <> (Todo: Make Dark Mode Image)
+# Lighthouse — mobile and XR fork
 
-# Lighthouse
-Harbour Masters port of Banjo Kazooie
+[Lighthouse](https://github.com/HarbourMasters/Lighthouse) is the Harbour Masters port of
+Banjo-Kazooie. This fork adds the platforms the upstream port does not build yet:
 
-Lead Developer: 
-* Malkierian
+| | |
+| --- | --- |
+| **Android** | phone and tablet, on-screen pad |
+| **Meta Quest 3 / 3S** | the game on a window in your room |
+| **Samsung Galaxy XR / Android XR** | the same |
+| **iPhone / iPad** | on-screen pad, Metal renderer |
+| **Apple Vision Pro** | the game in a volume in the Shared Space |
 
-Developers:
-* JeodC
-* Caladius
+**On Windows, Linux, macOS or Switch, use [HarbourMasters/Lighthouse](https://github.com/HarbourMasters/Lighthouse/releases)
+instead.** That repository is the canonical port. Everything here is sent back to it.
 
-## Discord
-Official Discord: https://discord.com/invite/shipofharkinian
+Lighthouse holds no game data. You must supply your own Banjo-Kazooie ROM. We do not condone piracy.
 
-If you're having any trouble after reading through this `README`, feel free ask for help in the Lighthouse text channels. Please keep in mind that we do not condone piracy.
+---
 
-# Quick Start
+## 1. Get a supported ROM
 
-Lighthouse does not include any copyrighted assets.  You are required to provide a supported copy of the game.
+Any retail version works. Check your dump against these SHA-1 sums:
 
-### 1. Verify your ROM dump
-Any retail version listed below is supported. You can verify you have dumped a supported copy of the game by using the SHA-1 File Checksum Online at https://www.romhacking.net/hash/. 
+| ROM | SHA-1 |
+| --- | --- |
+| `baserom.us.v10.z64` | `1fe1632098865f639e22c11b9a81ee8f29c75d7a` |
+| `baserom.us.v11.z64` | `ded6ee166e740ad1bc810fd678a84b48e245ab80` |
+| `baserom.jp.z64` | `90726d7e7cd5bf6cdfd38f45c9acbf4d45bd9fd8` |
+| `baserom.pal.z64` | `bb359a75941df74bf7290212c89fbc6e2c5601fe` |
 
-* `baserom.us.v10.z64`: `1fe1632098865f639e22c11b9a81ee8f29c75d7a`
-* `baserom.us.v11.z64`: `ded6ee166e740ad1bc810fd678a84b48e245ab80`
-* `baserom.jp.z64`:     `90726d7e7cd5bf6cdfd38f45c9acbf4d45bd9fd8`
-* `baserom.pal.z64`:    `bb359a75941df74bf7290212c89fbc6e2c5601fe`
+The file must be `.z64`. Convert an `.n64` with <https://hack64.net/tools/swapper.php>.
 
-If you have multiple regions of the game and want to use them as language packs, see `# Language Packs` below.
+## 2. Install the app
 
-### 2. Verify your ROM is in .z64 format
-Your ROM needs to be in .z64 format. If it's in .n64 format, use the following to convert it to a .z64: https://hack64.net/tools/swapper.php
+### Android, Meta Quest and Galaxy XR — download the APK
 
-### 3. Download Lighthouse from [Releases](https://github.com/HarbourMasters/Lighthouse/releases)
+Get `Lighthouse-<version>-android-universal.apk` from
+[Releases](../../releases).
 
-### 4. Generating the OTR from the ROM and Play!
+**One APK covers all three devices.** There is no separate Quest file. It is `arm64-v8a` only, so
+it runs on every shipping phone and headset but not on an x86_64 emulator.
 
-#### Windows
-* Extract every file from the zip into a folder of your choosing.
-* Run lighthouse.exe and select your compatible ROM.
+* **Android phone or tablet** — copy the APK to the device and open it, or run
+  `adb install -r Lighthouse-<version>-android-universal.apk`.
+* **Meta Quest 3 / 3S** — turn on developer mode for the headset in the Meta Horizon phone app,
+  connect by USB, accept the prompt in the headset, then `adb install -r <apk>`. The app is in the
+  library under *Unknown Sources*.
+* **Samsung Galaxy XR** — turn on Developer options and USB debugging in Settings, then
+  `adb install -r <apk>`.
 
-#### Linux
-* Extract every file from the zip into a folder of your choosing.
-* Execute lighthouse.appimage. You may have to chmod +x the appimage via terminal.
+### iPhone, iPad and Apple Vision Pro — build it with Xcode
 
-#### MacOS
-* Extract every file from the zip into a folder of your choosing.
-* Run lighthouse and select your compatible ROM.
+Apple permits no sideloading, so there is no download. Build the app on a Mac and run it on your
+device from Xcode. See [docs/BUILDING.md](docs/BUILDING.md#ios-iphone--ipad) for iOS and
+[docs/BUILDING.md](docs/BUILDING.md#visionos-apple-vision-pro) for Vision Pro.
 
-#### iOS (iPhone / iPad)
-* Apple's restrictions allow no prebuilt release, so build and install it with Xcode. See the [building instructions](https://github.com/HarbourMasters/Lighthouse/blob/main/docs/BUILDING.md#ios-iphone--ipad).
-* Launch the app once, copy your compatible ROM into the `Lighthouse` folder it makes in the Files app, and relaunch.
+A free Apple ID is enough. Its profile expires after 7 days and you then build again. A paid
+membership gives a one-year profile.
 
-#### Android
-* Build the APK with Gradle and sideload it. See the [building instructions](https://github.com/HarbourMasters/Lighthouse/blob/main/docs/BUILDING.md#android).
-* Copy your compatible ROM onto the device, then launch the app and pick it in the file picker it opens.
+## 3. Give the app the ROM
 
-# Configuration
+The app makes `bk.o2r` from your ROM on the first start. This takes a few minutes and needs about
+200 MB free.
 
-Lighthouse ships with a file with many standard controller mappings that can be used as-is with most controllers. If your controller isn't recognized by Lighthouse, or isn't working properly, you can create your own custom mapping using the built-in mapper in the Settings menu.
+* **Android, Quest, Galaxy XR** — copy the ROM anywhere on the device, `Downloads` is fine. Start
+  the app. It asks *"No O2R files found. Generate one now?"*; answer **Yes**. The system file
+  picker opens. Choose the ROM.
+* **iPhone, iPad, Vision Pro** — start the app once. It makes a `Lighthouse` folder under *On My
+  iPhone* / *On My iPad* / *On My Apple Vision Pro* in the Files app. Copy the ROM into that
+  folder and start the app again. Answer **Yes** to *"No O2R files found. Generate one now?"*, then
+  **Yes** to *"ROMs found in application directory. Would you like to process them?"*.
 
-### Default keyboard configuration
+**No** to the first question closes the app. That is not a fault; the game cannot start without
+`bk.o2r`.
+
+Saves, `lighthouse.cfg.json` and the `mods` folder are in the same place.
+
+---
+
+## Controls
+
+Any MFi or Bluetooth controller that SDL2 knows works on every platform. Pair it in the system
+settings first.
+
+### Touch — iPhone, iPad, Android phone and tablet
+
+An on-screen N64 pad is drawn over the game: analog stick on the left, A/B and the C cluster on the
+right, L/Z/Start/R along the top. **MENU** opens the port menu. The pad hides itself while a
+controller is connected.
+
+Size, reach, opacity, edge margin, a left-handed layout and an optional D-pad are under
+*Settings → Controls → On-Screen Controls*.
+
+### Meta Quest and Galaxy XR
+
+The game hangs on a window in front of you. There is no on-screen pad on any headset.
+
+**Meta Quest 3 / 3S** — the Touch controllers play the game:
+
+| N64 | Touch controller |
+| --- | --- |
+| Analog stick | left thumbstick |
+| A / B | right hand A / B |
+| C buttons | right thumbstick |
+| D-pad up / left | left hand Y / X |
+| L / R | left / right grip |
+| Z | either trigger |
+| Start | left hand Menu button |
+
+**Samsung Galaxy XR** — the headset comes with hands and eyes, not controllers, and **Bluetooth gamepad required**. The map above is bound to the Oculus
+Touch profile only.
+
+**Both** — point a hand or a controller at the window to get a cursor, then pinch or pull the
+trigger to click:
+
+* The **MENU** tab above the window opens the port menu.
+* The **bar under the window** moves it. Pinch and drag; push and pull to set the range.
+* The **corner handles** resize it.
+
+### Apple Vision Pro
+
+The game plays in a volume you can place in the room. **A paired game controller is needed to
+play** — visionOS gives no pad of its own. The **Menu** button under the volume opens the port
+menu, and look-and-pinch drives it. A paired keyboard opens it with Escape.
+
+### Keyboard (desktop and any platform with a keyboard)
+
 | N64 | A | B | L | R | Z | Start | Analog stick | C buttons | D-Pad |
 | - | - | - | - | - | - | - | - | - | - |
 | Keyboard | X | C | E | R | Z | Space | WASD | Arrow keys | TFGH |
 
-### Other shortcuts
 | Keys | Action |
 | - | - |
-| ESC | Toggle menubar |
+| ESC | Toggle the menu |
 | Ctrl+R / ⌘R | Reset |
 | F11 | Fullscreen |
-| Tab | Toggle Alternate assets |
+| Tab | Toggle alternate assets |
 
-### Touch controls (iOS and Android)
-On iPhone, iPad and Android an on-screen N64 controller is drawn over the game: a floating analog stick on the left, A/B and the C cluster on the right, and L/Z/Start/R along the top edge. Tap `MENU` to open the port menu (the equivalent of ESC). Size, opacity, edge margin, stick deadzone and an optional D-Pad are under `Settings -> Controls`.
+## Headset window settings
 
-Connect any MFi or Bluetooth controller and the on-screen pad hides itself automatically.
+*Settings → Graphics*, on a headset only:
 
-### Graphics Backends
-Currently, there are three rendering APIs supported: DirectX11 (Windows), OpenGL (all platforms), and Metal (macOS and iOS). You can change which API to use in the `Settings` menu of the menubar, which requires a restart.  If you're having an issue with crashing, you can change the API in the `lighthouse.cfg.json` file by finding the line `"Backend":{`... and changing the `id` value to `2` and set the `Name` to `OpenGL`. `DirectX 11` with id `1` is the default on Windows. `Metal` with id `3` is the default on macOS, and the only backend on iOS.
+| Setting | What it does |
+| --- | --- |
+| Diorama Depth | How deep the world reaches behind the glass. A small depth is the easiest to look at for a long session. |
+| Window Range | How far away the window hangs. |
+| Window Size | How large the glass is. |
+| Edge Float | Brings the side edges towards you, so the sliver one eye cannot see reads as a near frame. |
+| Edge Softness | Fades the picture out at the edge. |
+| Max Refresh Rate | The fastest rate the headset is asked to run. Lower it for battery, heat, or if the game runs slowly. |
+| Recenter Window | Puts the window where you are looking now. |
+| Stereo | Draws once per eye. Turn it off to halve the drawing cost. |
 
-# Language Packs
+## Graphics backends
 
-Lighthouse supports using multiple regions of Banjo-Kazooie as language packs. Generate your base `bk.o2r` file and once Lighthouse has started, open the imgui menu. Under General -> Languages, you will be able to select another ROM to extract as a language pack. PAL supports UK, French, and German, and Japanese adds Japanese support. After the language pack is generated, the language it brings will be added to the dropdown menu.
+Metal on iOS and Vision Pro. OpenGL ES 3.0 on Android and the Android headsets. The desktop
+choices are unchanged. Change the backend in *Settings → Graphics*, which needs a restart, or set
+`"Backend"` in `lighthouse.cfg.json` if a bad choice stops the app from starting.
 
-# Romhacks
+## Mods and custom assets
 
-Many romhacks can be extracted from patched ROMs and used as mods with Lighthouse. This can be done in-game using the Romhacks menu in the Settings section. If any hack isn't fully supported, the menu should inform you when extracting the mod. Most supported romhacks currently haven't been fully tested, so there may still be some issues.
+Custom assets are `.o2r` or `.otr` files in the `mods` folder.
 
-Lighthouse can also be launched directly to a romhack with a launch argument like so: `./Lighthouse.exe -hack jiggies-of-time`. This is a one-off and your loaded romhack is not saved to your remembered config when using a launch argument.
+* **iPhone, iPad, Vision Pro** — `mods` is inside the `Lighthouse` folder in the Files app.
+* **Android, Quest, Galaxy XR** — the app data is in `Android/data/<applicationId>/files`, which
+  Android 11 closed to the Files app and to USB. Use `adb push` to reach `mods` and the saves.
 
-_NOTE_: When using romhacks, only US v1.0 is supported, inherited from Banjo's Backpack. Therefore, it is recommended to use **US v1.0** as your base `bk.o2r` file.
+Applying a mod list needs the app to be closed and opened again. A mobile app cannot restart
+itself.
 
-# Custom Assets
+To pack your own assets, see [retro](https://github.com/HarbourMasters64/retro) and
+[fast64](https://github.com/HarbourMasters/fast64).
 
-Custom assets are packed in `.o2r` or `.otr` files. To use custom assets, place them in the `mods` folder.
+## Language packs
 
-On iOS the `mods` folder is inside the `Lighthouse` folder under *On My iPhone* / *On My iPad* in the Files app; copy `.o2r`/`.otr` files there and reopen the app.
+Lighthouse can use other regions of Banjo-Kazooie as language packs. With `bk.o2r` made, open
+*General → Languages* and select another ROM to extract. PAL gives UK, French and German. The
+Japanese ROM gives Japanese.
 
-If you're interested in creating and/or packing your own custom asset `.o2r`/`.otr` files, check out the following tools:
-* [**retro - OTR and O2R generator**](https://github.com/HarbourMasters64/retro)
-* [**fast64 - Blender plugin (Note that BK64 is not supported at this time)**](https://github.com/HarbourMasters/fast64)
+## Romhacks
 
-# Development
+Many romhacks can be extracted from a patched ROM and used as mods, from *Settings → Romhacks*.
+Only US v1.0 is supported as the base, inherited from Banjo's Backpack.
 
-### Building
-If you want to manually compile Lighthouse, please consult the [building instructions](https://github.com/HarbourMasters/Lighthouse/blob/main/docs/BUILDING.md).
+## Anchor multiplayer
 
-### Playtesting
-If you want to playtest a continuous integration build, you can find them at the links below. Keep in mind that these are for playtesting only, and you will likely encounter bugs and possibly crashes.
+Off on iOS, Android and the headsets. SDL2_net is not part of the mobile dependency set.
 
-* [Windows](https://nightly.link/HarbourMasters/Lighthouse/workflows/main/main/Lighthouse-windows.zip)
-* [macOS](https://nightly.link/HarbourMasters/Lighthouse/workflows/main/main/Lighthouse-mac.zip)
-* [Linux](https://nightly.link/HarbourMasters/Lighthouse/workflows/main/main/Lighthouse-linux.zip)
+---
+
+## Building and development
+
+[docs/BUILDING.md](docs/BUILDING.md) has the build for every platform.
+[docs/PORTING_PLAYBOOK.md](docs/PORTING_PLAYBOOK.md) records how the mobile and XR ports were made
+and what was learned; read it before you work on either area.
+
+A push to a tag builds Windows, Linux and Android and makes a draft release. Apple targets are
+built by hand, because CI holds no signing identity.
+
+## Discord
+
+Official Discord: <https://discord.com/invite/shipofharkinian>. Ask in the Lighthouse channels.
+Report a fault with a mobile or XR device in this fork's
+[issues](../../issues); report a fault the upstream port
+shares with [HarbourMasters/Lighthouse](https://github.com/HarbourMasters/Lighthouse/issues).
 
 <a href="https://github.com/Kenix3/libultraship/">
   <picture>
@@ -123,7 +212,8 @@ If you want to playtest a continuous integration build, you can find them at the
   </picture>
 </a>
 
-# Special Thanks:
+## Credits
 
-* The Banjo decomp team
-* Fredomato, scorched11 for work on rando
+Lighthouse is by Harbour Masters. Lead developer Malkierian; developers JeodC and Caladius.
+
+Special thanks to the Banjo decomp team, and to Fredomato and scorched11 for the randomizer.

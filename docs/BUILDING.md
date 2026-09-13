@@ -1,5 +1,16 @@
 # Building Lighthouse
 
+This fork builds Lighthouse for iOS, Android, Android XR, Meta Quest and Apple Vision Pro, on top
+of the upstream desktop port. The Windows, Linux and macOS sections below are unchanged from
+[HarbourMasters/Lighthouse](https://github.com/HarbourMasters/Lighthouse); build those from
+upstream unless you are working on this fork.
+
+Most users do not have to build anything. See the [README](../README.md) for the Android APK and
+for what Apple platforms need.
+
+Every target needs the `libultraship` submodule. Clone with `--recursive`, or run
+`git submodule update --init` after cloning.
+
 ## Windows
 
 Requires:
@@ -123,8 +134,8 @@ _Note: If you're using Visual Studio Code, the [CMake Tools plugin](https://mark
 
 ```bash
 # Clone the repo and enter the directory
-git clone https://github.com/HarbourMasters/lighthouse.git
-cd lighthouse
+git clone --recursive https://github.com/buddingmonkey/Lighthouse.git
+cd Lighthouse
 
 # Clone the submodules
 git submodule update --init
@@ -181,8 +192,8 @@ _Note: If you're using Visual Studio Code, the [cpack plugin](https://marketplac
 
 ```bash
 # Clone the repo
-git clone https://github.com/HarbourMasters/lighthouse.git
-cd lighthouse
+git clone --recursive https://github.com/buddingmonkey/Lighthouse.git
+cd Lighthouse
 # Clone the submodule libultraship
 git submodule update --init
 
@@ -228,10 +239,14 @@ _Note: the build cross-compiles, so `lighthouse.o2r` has to come from a macOS bu
 
 _Note: `IOS_DEVELOPMENT_TEAM` is your 10-character Apple Developer Team ID, from <https://developer.apple.com/account>, and `PROJECT_ID` a bundle identifier your team owns. A free Apple ID works, added under Xcode > Settings > Accounts, but its profiles expire after 7 days. Leave the team unset to compile without an Apple account._
 
+**CMake generates the Xcode project. Xcode builds it.** Use CMake once to make the project, then
+work in Xcode. That is the path we validate, and it is the only path that signs the app and puts it
+on a device.
+
 ```bash
 # Clone the repo
-git clone https://github.com/HarbourMasters/lighthouse.git
-cd lighthouse
+git clone --recursive https://github.com/buddingmonkey/Lighthouse.git
+cd Lighthouse
 # Clone the submodule libultraship
 git submodule update --init
 
@@ -249,18 +264,31 @@ cmake -S . -B build-ios -G Xcode \
   -DPROJECT_ID=com.yourname.lighthouse \
   -DIOS_DEVELOPMENT_TEAM=YOURTEAMID
 
-# Compile the project, or open build-ios/Lighthouse.xcodeproj and hit Run
-# Build the Lighthouse target rather than ALL_BUILD to skip the SDL2 dylib and the host Torch
-# Drop -allowProvisioningUpdates if you set no team
-cmake --build build-ios --config Release --target Lighthouse -- -allowProvisioningUpdates
+open build-ios/Lighthouse.xcodeproj
 ```
 
-_Note: if the build reports that no profiles were found, open `build-ios/Lighthouse.xcodeproj` once and pick your team under the Lighthouse target's *Signing & Capabilities*._
+In Xcode: select the **Lighthouse** scheme, choose your device at the top, and press **Run** (⌘R).
+The first run asks the device to trust the developer; accept it in *Settings > General > VPN &
+Device Management* on the device.
+
+_Note: if Xcode reports that no profiles were found, pick your team under the Lighthouse target's
+*Signing & Capabilities*._
+
+_Note: **run the Release configuration.** A Debug build makes the first-start asset extraction about
+60 times slower, because the extractor is statically linked and takes the configuration of the app.
+The generated scheme runs Release already; `-DIOS_SCHEME_CONFIGURATION=Debug` changes it._
+
+_Note: `cmake --build build-ios --config Release --target Lighthouse` compiles the same project from
+a terminal. Use it to prove that a change builds, not to install: it cannot sign without a GUI
+session, and the Xcode generator returns success even when the log says `** BUILD FAILED **`, so
+read the log rather than the exit status. Build the `Lighthouse` target, never `ALL_BUILD`, which
+also tries the host Torch packer._
 
 ### Getting the game onto a device
 1. Install and launch the app once. It creates a `Lighthouse` folder under *On My iPhone* / *On My iPad* in the Files app.
 2. Copy a supported Banjo-Kazooie ROM (`.z64`) into that folder.
-3. Relaunch and let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
+3. Relaunch. Answer **Yes** to *"No O2R files found. Generate one now?"*, then **Yes** to *"ROMs found in application directory. Would you like to process them?"*. **No** to the first question closes the app.
+4. Let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
 
 Saves, `lighthouse.cfg.json` and the `mods` folder live in the same folder.
 
@@ -288,8 +316,70 @@ xcodebuild -exportArchive -archivePath build-ios/Lighthouse.xcarchive \
 * Mods work as on desktop — drop `.o2r`/`.otr` files into `Lighthouse/mods` via the Files app. Applying a mod list needs the app to be closed and reopened, since iOS apps can't relaunch themselves.
 * Networking (Anchor multiplayer) is off, SDL2_net isn't part of the iOS dependency set.
 
-## Android
+## visionOS (Apple Vision Pro)
+Requires a Mac with Xcode 26 or newer and the visionOS SDK, plus `cmake, ninja`. The app is a
+native RealityKit shell that holds the game on a plate in a volumetric window in the Shared Space.
+The renderer is Metal. There is no SDL video.
+
+_Note: the build cross-compiles, so `lighthouse.o2r` has to come from a macOS build tree and
+`bk.o2r` is extracted on the device._
+
+_Note: `IOS_DEVELOPMENT_TEAM` and `PROJECT_ID` work as they do for iOS. A free Apple ID works, and
+its profiles expire after 7 days._
+
+**CMake generates the Xcode project. Xcode builds it.** As on iOS, use CMake once to make the
+project, then work in Xcode.
+
+```bash
+git clone --recursive https://github.com/buddingmonkey/Lighthouse.git
+cd Lighthouse
+
+# Generate lighthouse.o2r (port-specific assets) on the host
+cmake -H. -Bbuild-cmake -GNinja
+cmake --build build-cmake --target GeneratePortO2R
+
+# Generate the Xcode project
+cmake -S . -B build-visionos -G Xcode \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/ios.toolchain.cmake \
+  -DPLATFORM=VISIONOS \
+  -DDEPLOYMENT_TARGET=2.0 \
+  -DCMAKE_IGNORE_PREFIX_PATH="/opt/homebrew;/usr/local;/opt/local" \
+  -DPROJECT_ID=com.yourname.lighthouse.vision \
+  -DIOS_DEVELOPMENT_TEAM=YOURTEAMID
+
+open build-visionos/Lighthouse.xcodeproj
+```
+
+In Xcode: select the **Lighthouse** scheme, choose your Vision Pro, and press **Run** (⌘R). Pair
+the headset first under *Window > Devices and Simulators*.
+
+`-DPLATFORM=SIMULATOR_VISIONOS` makes a simulator project instead, which needs no signing. The
+simulator reports one view, so it cannot show the stereo result, but placement and the menu are
+checkable there.
+
+_Note: the terminal build and the Release rule are the same as for iOS. See the notes in the
+[iOS section](#ios-iphone--ipad)._
+
+### Getting the game onto a device
+The same as iOS: launch once, copy a `.z64` into the `Lighthouse` folder the app makes in the Files
+app under *On My Apple Vision Pro*, then launch again and answer **Yes** to both extraction
+questions.
+
+### visionOS notes
+* The app is tested on visionOS 26. `DEPLOYMENT_TARGET` below 2.0 is refused by the configure step.
+* **A paired game controller is needed to play.** A volumetric window keeps most of a controller
+  for its own navigation; the app asks for it back with
+  `.handlesGameControllerEvents(matching: .gamepad)`, which is the only thing that works. A paired
+  keyboard opens and closes the menu with Escape.
+* Look-and-pinch drives the menu. The **Menu** button in the ornament under the volume opens it.
+* The window model is a window, not a head-mounted camera: head motion changes the projection only.
+  Depth is set by *Settings → Graphics → Diorama Depth*.
+* Networking (Anchor multiplayer) is off.
+
+## Android, Meta Quest and Android XR
 Requires the Android SDK (platform 35, build-tools), NDK r29 and a JDK 17. Gradle drives CMake, and the renderer is OpenGL ES 3.0. Set `ANDROID_HOME` and `ANDROID_NDK_HOME`, or write them into `android/local.properties`.
+
+**One APK covers the phone, Samsung Galaxy XR and Meta Quest 3 / 3S.** `android/app/src/main/AndroidManifest.xml` declares all three feature sets, and every XR feature is `required="false"`. Do not build three variants. On a headset the app starts in the XR window mode; on a phone it starts flat with the on-screen pad.
 
 _Note: the build cross-compiles, so `lighthouse.o2r` has to come from a host build tree and `bk.o2r` is extracted on the device._
 
@@ -297,8 +387,8 @@ _Note: Gradle clones SDL2 into `build-android/sdl2-src` on the first configure. 
 
 ```bash
 # Clone the repo
-git clone https://github.com/HarbourMasters/lighthouse.git
-cd lighthouse
+git clone --recursive https://github.com/buddingmonkey/Lighthouse.git
+cd Lighthouse
 # Clone the submodule libultraship
 git submodule update --init
 
@@ -316,10 +406,15 @@ adb install -r ../build-android/lighthouse-release.apk
 
 _Note: with no keystore given the release APK is signed with the debug key, which installs on your own device but is not fit to hand out. To sign it properly, pass `-PkeystoreFile`, `-PkeystorePassword`, `-PkeyAlias` and `-PkeyPassword`. Do not build `assembleDebug` to play: it compiles the game at `-O0`, and asset extraction then takes tens of minutes._
 
+### Installing on a headset
+* **Meta Quest 3 / 3S** — turn on developer mode for the headset in the Meta Horizon phone app, connect by USB and accept the prompt in the headset, then `adb install -r`. The app is in the library under *Unknown Sources*.
+* **Samsung Galaxy XR** — turn on Developer options and USB debugging in Settings, then `adb install -r`.
+
 ### Getting the game onto a device
 1. Copy a supported Banjo-Kazooie ROM (`.z64`) onto the device, anywhere you like — Downloads is fine.
-2. Install and launch the app. It asks for a ROM and opens the system file picker; choose the ROM.
-3. Let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
+2. Install and launch the app. It asks *"No O2R files found. Generate one now?"*; answer **Yes**. **No** closes the app.
+3. The system document picker opens. Choose the ROM.
+4. Let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
 
 _Note: the app keeps its data in `Android/data/<applicationId>/files`, which Android 11 closed to the Files app, to USB, and to the file picker alike. That is why the ROM is imported through the picker rather than copied in by hand, and it is also why saves and mods are not reachable from the device itself; use `adb` for those._
 
@@ -331,8 +426,17 @@ _Note: the app keeps its data in `Android/data/<applicationId>/files`, which And
 * Networking (Anchor multiplayer) is off, SDL2_net isn't part of the Android dependency set.
 * An Android device hands out neither a screenshot nor a controller. Build with `-PdebugTools=ON` to add two bring-up tools that make up for it: `android/capture.sh` asks the app for its frames, and `android/pad.sh` drives the pad from the host. They are off by default and must stay out of a release build.
 
+### Android XR and Quest notes
+* The game hangs on a window in the room. Head motion changes the projection only; the game camera never follows the head. Range, size, depth, edge treatment, the refresh rate cap and stereo are under *Settings > Graphics*.
+* There are no on-screen touch controls in XR. On a Quest the Touch controllers play the game; see the [README](../README.md#meta-quest-and-galaxy-xr) for the button map. On a Galaxy XR, which ships with hands and no controllers, the player needs a paired Bluetooth gamepad.
+* The pad actions are suggested for `/interaction_profiles/oculus/touch_controller` only (`libultraship/src/fast/backends/gfx_openxr.cpp:698`). The pointer actions also take `khr/simple_controller` and `ext/hand_interaction_ext`, so hands drive the menu and the window on every runtime, but they never reach the game pad.
+* Point a hand or a controller at the window to get a cursor, and pinch or pull the trigger to click. The **MENU** tab above the window opens the port menu, the bar under the window moves it, and the corner handles resize it.
+* The right hand's system button belongs to Horizon OS and cannot be bound, so Start is the left hand's Menu button.
+* The OpenXR loader needs the `uses-native-library` and `org.khronos.openxr.permission.*` lines in the manifest. Without them the loader finds no runtime on Galaxy XR.
+* Drawing cost in XR is CPU bound on the display list walk, not on pixels. Lower *Max Refresh Rate* or turn *Stereo* off before you lower the resolution.
+
 # Compatible Roms
-Any retail version. See [the readme](https://github.com/HarbourMasters/Lighthouse/blob/develop/README.md#1-verify-your-rom-dump)
+Any retail version. See [the readme](../README.md#1-get-a-supported-rom)
 
 ## Getting CI to work on your fork
 
