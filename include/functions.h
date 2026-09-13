@@ -61,6 +61,8 @@ extern f32 fabsf(f32);
     position, \
     _SHIFTL(e, 0, 16) + _SHIFTL(f, 16, 16)\
 )
+#undef bzero
+#undef bcopy
 #define bzero(pointer, size) memset(pointer, 0, size)
 #define bcopy(src, dest, size) memcpy(dest, src, size)
 
