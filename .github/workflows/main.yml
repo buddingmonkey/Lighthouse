@@ -230,6 +230,8 @@ jobs:
           java-version: '17'
       - name: Set up the Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
       - name: Decode the release keystore
         if: env.ANDROID_KEYSTORE_BASE64 != ''
         run: |
@@ -238,7 +240,7 @@ jobs:
             -storepass "$ANDROID_KEYSTORE_PASSWORD" -keypass "$ANDROID_KEY_PASSWORD" > /dev/null
           echo "RELEASE_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
       - name: Install the NDK and CMake
-        run: sdkmanager "ndk;29.0.14206865" "cmake;3.31.6" "platforms;android-35" "build-tools;35.0.0"
+        run: sdkmanager "platform-tools" "ndk;29.0.14206865" "cmake;3.31.6" "platforms;android-35" "build-tools;35.0.0"
       - name: Cache Gradle
         uses: actions/cache@v5
         with:
