@@ -329,21 +329,14 @@ jobs:
           }
       - uses: actions/download-artifact@v8
         with:
+          name: Lighthouse-android
           path: dist
       - name: Stage the release files
         run: |
           set -eu
           VER="${GITHUB_REF_NAME#v}"
           mkdir -p dist/release
-          mv dist/Lighthouse-windows/debug dist/windows-pdb
-          (cd dist/Lighthouse-windows && zip -qr "../release/Lighthouse-$VER-windows-x64.zip" .)
-          (cd dist/windows-pdb && zip -qr "../release/Lighthouse-$VER-windows-x64-pdb.zip" .)
-          chmod +x dist/Lighthouse-linux/lighthouse.appimage
-          mv dist/Lighthouse-linux/lighthouse.appimage "dist/release/Lighthouse-$VER-linux-x86_64.AppImage"
-          mkdir -p dist/linux-extras
-          cp -r config.yml assets dist/Lighthouse-linux/gamecontrollerdb.txt dist/Lighthouse-linux/readme.txt dist/linux-extras/
-          (cd dist/linux-extras && zip -qr "../release/Lighthouse-$VER-linux-extras.zip" .)
-          mv dist/Lighthouse-android/lighthouse-release.apk "dist/release/Lighthouse-$VER-android-universal.apk"
+          mv dist/lighthouse-release.apk "dist/release/Lighthouse-$VER-android-universal.apk"
           ls -l dist/release
       - uses: softprops/action-gh-release@v2
         with:
