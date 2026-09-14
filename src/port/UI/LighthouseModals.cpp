@@ -33,8 +33,6 @@ void LighthouseModalWindow::DrawElement() {
     if (modals.size() > 0) {
         LighthouseModal curModal = modals.at(0);
         if (!ImGui::IsPopupOpen(curModal.title_.c_str())) {
-            ImVec2 center = ImGui::GetMainViewport()->GetWorkCenter();
-            ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
             ImGui::OpenPopup(curModal.title_.c_str());
         }
         if (closePopup) {
@@ -42,6 +40,7 @@ void LighthouseModalWindow::DrawElement() {
             modals.erase(modals.begin());
             closePopup = false;
         }
+        ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetWorkCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         if (ImGui::BeginPopupModal(curModal.title_.c_str(), NULL,
                                    ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize |
                                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
