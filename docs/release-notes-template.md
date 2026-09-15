@@ -13,6 +13,20 @@ places would only put users on a build that nobody supports.
 Lighthouse does not contain the game. You must supply your own Banjo-Kazooie ROM. The app asks for
 the ROM on the first start and makes `bk.o2r` from it.
 
+## Where your files live
+
+The app keeps its data in `Android/media/com.harbormasters.lighthouse` in internal storage. The
+Files app, a file manager in a headset and a PC over USB all reach that folder. Your saves,
+`lighthouse.cfg.json` and the `mods` folder are in it.
+
+To load the game, copy your ROM into that folder and start the app. Answer **Yes** to *"No O2R
+files found. Generate one now?"*, then **Yes** to *"ROMs found in application directory"*. If the
+folder holds no ROM, the system document picker opens and takes a ROM from anywhere on the device.
+
+If you have an earlier version, the app moves your data into the new folder the first time it
+starts, and it keeps your saves. Install the update over the old version. **Do not uninstall
+first**, because an uninstall deletes the data of the old version.
+
 ## One APK covers all three devices
 
 There is no separate Quest file. The same package declares the phone, the Google XR and the
