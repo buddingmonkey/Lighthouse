@@ -5,7 +5,7 @@ set -euo pipefail
 
 ADB="${ADB:-$HOME/Android/platform-tools/adb}"
 PKG="${PKG:-com.harbormasters.lighthouse}"
-FILES="/sdcard/Android/data/${PKG}/files"
+FILES="/sdcard/Android/media/${PKG}"
 OUT="${1:-$(dirname "$0")/../build-android/captures}"
 
 mkdir -p "$OUT"

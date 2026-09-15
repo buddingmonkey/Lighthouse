@@ -188,9 +188,11 @@ void LighthouseMenu::AddMenuSettings() {
         "Not available on iOS. Open the Files app and look under On My iPhone / On My iPad > Lighthouse "
         "to reach the same folder.");
 #elif defined(__ANDROID__)
-    filesFolderOptions.Disabled(true).DisabledTooltip(
-        "Not available on Android. Reach the same folder with a file manager, or over USB under "
-        "Android/data > Lighthouse.");
+    static const std::string androidFilesTip =
+        "Not available on Android. Open this folder with a file manager, with the headset file "
+        "browser, or over USB:\n" +
+        Ship::Context::GetRawInstance()->GetAppDirectoryPath();
+    filesFolderOptions.Disabled(true).DisabledTooltip(androidFilesTip.c_str());
 #endif
     AddWidget(path, "Open App Files Folder", WIDGET_BUTTON)
         .RaceDisable(false)
