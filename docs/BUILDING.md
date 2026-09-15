@@ -411,18 +411,22 @@ _Note: with no keystore given the release APK is signed with the debug key, whic
 * **Samsung Galaxy XR** — turn on Developer options and USB debugging in Settings, then `adb install -r`.
 
 ### Getting the game onto a device
-1. Copy a supported Banjo-Kazooie ROM (`.z64`) onto the device, anywhere you like — Downloads is fine.
-2. Install and launch the app. It asks *"No O2R files found. Generate one now?"*; answer **Yes**. **No** closes the app.
-3. The system document picker opens. Choose the ROM.
+1. Install and launch the app once. It creates the folder `Android/media/com.harbormasters.lighthouse` in internal storage. Use the applicationId you built with if you changed it.
+2. Copy a supported Banjo-Kazooie ROM (`.z64`) into that folder. The Files app, a headset file browser and a PC over USB all reach it.
+3. Relaunch. Answer **Yes** to *"No O2R files found. Generate one now?"*, then **Yes** to *"ROMs found in application directory. Would you like to process them?"*. **No** to the first question closes the app.
 4. Let the app extract `bk.o2r`. This takes a few minutes and needs roughly 200 MB free.
 
-_Note: the app keeps its data in `Android/data/<applicationId>/files`, which Android 11 closed to the Files app, to USB, and to the file picker alike. That is why the ROM is imported through the picker rather than copied in by hand, and it is also why saves and mods are not reachable from the device itself; use `adb` for those._
+Saves, `lighthouse.cfg.json` and the `mods` folder live in the same folder.
+
+To load a ROM from somewhere else, leave the folder empty or answer **No** to the second question. The system document picker then opens and takes a ROM from anywhere on the device.
+
+_Note: Android 11 closed `Android/data` to the Files app, to USB and to the document picker alike. `Android/media` stayed open to all three and needs no permission. An installation that still keeps its data in `Android/data` moves it across on the next launch._
 
 ### Android notes
 * arm64-v8a only, landscape, full screen. A device without OpenGL ES 3.0 is not supported.
 * Any controller SDL2 recognises works. Pair it in Android Settings first; the on-screen pad hides itself while one is connected.
 * The on-screen controls are configured in *Settings > Controls*, under **On-Screen Controls**, and are sized from the reported screen density rather than a fixed point size.
-* Mods go in the `mods` folder, which is only reachable over `adb` for the reason above. Applying a mod list needs the app to be closed and reopened, since Android apps can't relaunch themselves.
+* Mods go in the `mods` folder inside `Android/media/com.harbormasters.lighthouse`. Applying a mod list needs the app to be closed and reopened, since Android apps can't relaunch themselves.
 * Networking (Anchor multiplayer) is off, SDL2_net isn't part of the Android dependency set.
 * An Android device hands out neither a screenshot nor a controller. Build with `-PdebugTools=ON` to add two bring-up tools that make up for it: `android/capture.sh` asks the app for its frames, and `android/pad.sh` drives the pad from the host. They are off by default and must stay out of a release build.
 

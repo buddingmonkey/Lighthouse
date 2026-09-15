@@ -13,6 +13,6 @@ set -euo pipefail
 
 ADB="${ADB:-$HOME/Android/platform-tools/adb}"
 PKG="${PKG:-com.harbormasters.lighthouse}"
-FILE="/sdcard/Android/data/${PKG}/files/debug-pad"
+FILE="/sdcard/Android/media/${PKG}/debug-pad"
 
 "$ADB" shell "printf '%s' '$*' > $FILE"

@@ -163,8 +163,8 @@ choices are unchanged. Change the backend in *Settings → Graphics*, which need
 Custom assets are `.o2r` or `.otr` files in the `mods` folder.
 
 * **iPhone, iPad, Vision Pro** — `mods` is inside the `Lighthouse` folder in the Files app.
-* **Android, Quest, Galaxy XR** — the app data is in `Android/data/<applicationId>/files`, which
-  Android 11 closed to the Files app and to USB. Use `adb push` to reach `mods` and the saves.
+* **Android, Quest, Galaxy XR** — the app data is in `Android/media/<applicationId>`. The Files
+  app, a headset file browser and a PC over USB all reach it, so `mods` and the saves are open.
 
 Applying a mod list needs the app to be closed and opened again. A mobile app cannot restart
 itself.

@@ -34,6 +34,7 @@ import org.libsdl.app.SDLActivity;
 public class LighthouseActivity extends SDLActivity {
     private static final String TAG = "Lighthouse";
     private static final String STAMP = ".unpacked";
+    private static final String MOVED = ".moved";
     private static final int REQUEST_PICK_FILE = 1;
     private static final String IMPORT_DIR = "import";
     private static final String FALLBACK_IMPORT_NAME = "import.tmp";
@@ -45,6 +46,8 @@ public class LighthouseActivity extends SDLActivity {
         "assets/yaml",
     };
 
+    private volatile File dataDir;
+
     @Override
     protected String[] getLibraries() {
         return new String[] { "SDL2", "main" };
@@ -52,8 +55,10 @@ public class LighthouseActivity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        dataDir = dataDir();
+        moveLegacyData(dataDir);
         try {
-            unpackAssets();
+            unpackAssets(dataDir);
         } catch (IOException e) {
             Log.e(TAG, "Could not unpack the shipped assets", e);
         }
@@ -124,6 +129,74 @@ public class LighthouseActivity extends SDLActivity {
 
     private static native void nativeSafeAreaInsets(int left, int top, int right, int bottom);
 
+    // Android 11 closed Android/data to the Files app, to USB and to the document picker.
+    // Android/media stayed open to all three and needs no permission. Ship::Context picks the
+    // same folder by the same rule.
+    private File dataDir() {
+        File[] media = getExternalMediaDirs();
+        if (media != null && media.length > 0 && media[0] != null
+            && (media[0].isDirectory() || media[0].mkdirs())) {
+            return media[0];
+        }
+        return getExternalFilesDir(null);
+    }
+
+    // A file the app cannot read must not strand the rest, so each entry is moved on its own and
+    // the stamp waits until every one of them arrived.
+    private void moveLegacyData(File target) {
+        File legacy = getExternalFilesDir(null);
+        if (target == null || legacy == null || legacy.equals(target)) {
+            return;
+        }
+        File stamp = new File(target, MOVED);
+        if (stamp.isFile()) {
+            return;
+        }
+        boolean complete = true;
+        File[] entries = legacy.listFiles();
+        if (entries != null) {
+            for (File entry : entries) {
+                try {
+                    move(entry, new File(target, entry.getName()));
+                } catch (IOException e) {
+                    Log.e(TAG, "Could not move " + entry, e);
+                    complete = false;
+                }
+            }
+        }
+        if (!complete) {
+            return;
+        }
+        try {
+            writeText(stamp, legacy.getPath());
+        } catch (IOException e) {
+            Log.e(TAG, "Could not write " + stamp, e);
+            return;
+        }
+        Log.i(TAG, "Moved the app folder out of " + legacy);
+    }
+
+    private static void move(File source, File target) throws IOException {
+        if (target.exists() || source.renameTo(target)) {
+            return;
+        }
+        if (source.isDirectory()) {
+            if (!target.mkdirs()) {
+                throw new IOException("Could not create " + target);
+            }
+            File[] children = source.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    move(child, new File(target, child.getName()));
+                }
+            }
+            source.delete();
+            return;
+        }
+        copy(source, target);
+        source.delete();
+    }
+
     public void openFilePicker() {
         runOnUiThread(() -> {
             Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -153,9 +226,9 @@ public class LighthouseActivity extends SDLActivity {
     }
 
     private String importDocument(Uri source) {
-        File files = getExternalFilesDir(null);
+        File files = dataDir;
         if (files == null) {
-            Log.e(TAG, "No external files directory to import into");
+            Log.e(TAG, "No app folder to import into");
             return null;
         }
         File dir = new File(files, IMPORT_DIR);
@@ -199,6 +272,20 @@ public class LighthouseActivity extends SDLActivity {
         return name.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
+    private static void copy(File source, File target) throws IOException {
+        File parent = target.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            throw new IOException("Could not create " + parent);
+        }
+        try (InputStream in = new java.io.FileInputStream(source); OutputStream out = new FileOutputStream(target)) {
+            byte[] buffer = new byte[256 * 1024];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+        }
+    }
+
     private void copy(Uri source, File target) throws IOException {
         try (InputStream in = getContentResolver().openInputStream(source)) {
             if (in == null) {
@@ -216,10 +303,9 @@ public class LighthouseActivity extends SDLActivity {
 
     private static native void nativeFilePicked(String path);
 
-    private void unpackAssets() throws IOException {
-        File target = getExternalFilesDir(null);
+    private void unpackAssets(File target) throws IOException {
         if (target == null) {
-            throw new IOException("No external files directory");
+            throw new IOException("No app folder");
         }
         if (!target.isDirectory() && !target.mkdirs()) {
             throw new IOException("Could not create " + target);
