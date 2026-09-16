@@ -26,6 +26,7 @@
 #include "UIWidgets.hpp"
 #include "port/Engine.h"
 #include "port/Extractor/GameExtractor.h"
+#include "port/FilePicker.h"
 #include "port/GameVersion/BaseGameVersion.h"
 #include "port/ResourceHelpers.h"
 #include "port/Localization/Language.h"
@@ -45,6 +46,7 @@ static constexpr const char* kApplyRestartBody = "Applying mods requires a resta
 static constexpr const char* kModInstalledBody = "The romhack mod was extracted into your mods folder.\n"
                                                  "Lighthouse needs to restart to load it.\n\n"
                                                  "Close now, then reopen?";
+static constexpr const char* kModAddedBody = "It is in the Disabled list. Move it to Enabled, then use Apply & Quit.";
 #else
 static constexpr const char* kApplyRestartLabel = "Apply & Restart";
 static constexpr const char* kRestartButtonLabel = "Restart";
@@ -53,6 +55,8 @@ static constexpr const char* kApplyRestartBody =
 static constexpr const char* kModInstalledBody = "The romhack mod was extracted into your mods folder.\n"
                                                  "Lighthouse needs to restart to load it.\n\n"
                                                  "Restart now?";
+static constexpr const char* kModAddedBody =
+    "It is in the Disabled list. Move it to Enabled, then use Apply & Restart.";
 #endif
 
 enum class ModCategory {
@@ -74,6 +78,7 @@ extern std::shared_ptr<LighthouseMenu> mLighthouseMenu;
 static WidgetInfo enableModsWidget;
 static WidgetInfo tabHotkeyWidget;
 static WidgetInfo generateRomhackWidget;
+static WidgetInfo addModWidget;
 
 static std::atomic<bool> sInlineExtracting{ false };
 static std::atomic<int> sInlineResult{ -1 }; // -1 idle, 0 running, 1 success, 2 failure
@@ -654,6 +659,8 @@ void LighthouseModMenuWindow::DrawElement() {
     ImGui::SameLine();
     LighthouseGui::mLighthouseMenu->MenuDrawItem(tabHotkeyWidget, 200,
                                                  static_cast<UIWidgets::Colors>(LighthouseGui::GetMenuThemeColor()));
+    LighthouseGui::mLighthouseMenu->MenuDrawItem(addModWidget, 200,
+                                                 static_cast<UIWidgets::Colors>(LighthouseGui::GetMenuThemeColor()));
 
     const std::string activeHack = GetActiveHack();
     if (activeHack.empty()) {
@@ -737,6 +744,16 @@ static void RegisterModMenuWidgets() {
                               "folder. Lighthouse closes afterward so the mod loads on the next launch."));
     LighthouseGui::mLighthouseMenu->AddSearchWidget(
         { generateRomhackWidget, "Settings", "Romhack Menu", "Top", "generate romhack rom extract overlay" });
+
+    addModWidget = { .name = "Add Mod from File", .type = WidgetType::WIDGET_BUTTON };
+    addModWidget.RaceDisable(false)
+        .Callback([](WidgetInfo& info) { RequestModFileImport(); })
+        .Options(UIWidgets::ButtonOptions()
+                     .Size(UIWidgets::Sizes::Inline)
+                     .Tooltip("Pick an .o2r mod file and copy it into the mods folder. Use this when a file "
+                              "manager cannot reach that folder."));
+    LighthouseGui::mLighthouseMenu->AddSearchWidget(
+        { addModWidget, "Settings", "Mod Menu", "Top", "add mod file import o2r" });
 }
 
 static RegisterMenuInitFunc menuInitFunc(RegisterModMenuWidgets);
@@ -923,6 +940,83 @@ static void StartInlineRomExtraction(bool langPack) {
             return;
         }
         BeginInlineExtraction(extractor, langPack);
+    });
+}
+
+static bool IsReadableArchive(const std::filesystem::path& path) {
+    int err = 0;
+    zip_t* z = zip_open(path.string().c_str(), ZIP_RDONLY, &err);
+    if (z == nullptr) {
+        return false;
+    }
+    zip_close(z);
+    return true;
+}
+
+// The Android picker stages its copy under <appdir>/import. A file taken from there is ours to
+// delete; a file picked anywhere else is the user's own and must stay where it is.
+static bool IsStagedImport(const std::filesystem::path& path) {
+    std::error_code ec;
+    const std::filesystem::path staging = std::filesystem::path(Ship::Context::GetAppDirectoryPath()) / "import";
+    return std::filesystem::equivalent(path.parent_path(), staging, ec);
+}
+
+static void CopyModIntoModsFolder(const std::filesystem::path& source, const std::filesystem::path& target) {
+    std::error_code ec;
+    std::filesystem::create_directories(target.parent_path(), ec);
+    std::filesystem::copy_file(source, target, std::filesystem::copy_options::overwrite_existing, ec);
+    if (ec) {
+        LighthouseGui::RegisterPopup("Could Not Add Mod",
+                                     "Lighthouse could not copy the file into the mods folder.\n\n" + ec.message());
+        return;
+    }
+    if (IsStagedImport(source)) {
+        std::error_code removeEc;
+        std::filesystem::remove(source, removeEc);
+    }
+    UpdateModFiles(false, true);
+    LighthouseGui::RegisterPopup("Mod Added",
+                                 target.filename().generic_string() + " is in your mods folder.\n\n" + kModAddedBody);
+}
+
+static void AcceptPickedModFile(const std::filesystem::path& source) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(source, ec)) {
+        LighthouseGui::RegisterPopup("Could Not Add Mod", "Lighthouse could not read that file.");
+        return;
+    }
+    if (!IsValidExtension(source.extension().generic_string())) {
+        LighthouseGui::RegisterPopup("Not a Mod File", "A mod is an .o2r archive.\nThat file is " +
+                                                           source.filename().generic_string() + ".");
+        return;
+    }
+    if (!IsReadableArchive(source)) {
+        LighthouseGui::RegisterPopup("Not a Mod File",
+                                     source.filename().generic_string() + " is not a readable .o2r archive.");
+        return;
+    }
+
+    const std::filesystem::path target =
+        std::filesystem::path(Ship::Context::GetPathRelativeToAppDirectory("mods")) / source.filename();
+    if (std::filesystem::exists(target, ec)) {
+        LighthouseGui::RegisterPopup(
+            "Mod Already Exists",
+            target.filename().generic_string() + " is already in your mods folder.\n\nReplace it?", "Replace", "Cancel",
+            [source, target]() { CopyModIntoModsFolder(source, target); }, nullptr);
+        return;
+    }
+    CopyModIntoModsFolder(source, target);
+}
+
+void RequestModFileImport() {
+    Ship::FileBrowserRequest req;
+    req.Title = "Select a mod (.o2r)";
+    req.Filters = { { "Lighthouse mods (.o2r)", { "*.o2r" } }, { "All files", { "*" } } };
+    Lighthouse::PickFile(std::move(req), [](std::optional<std::filesystem::path> path) {
+        if (!path.has_value()) {
+            return;
+        }
+        AcceptPickedModFile(*path);
     });
 }
 

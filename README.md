@@ -1,7 +1,7 @@
 # Lighthouse — mobile and XR fork
 
 [Lighthouse](https://github.com/HarbourMasters/Lighthouse) is the Harbour Masters port of
-Banjo-Kazooie. This fork adds the platforms the upstream port does not build yet:
+Banjo-Kazooie. This fork adds some platforms the upstream port does not build:
 
 | | |
 | --- | --- |
@@ -12,7 +12,7 @@ Banjo-Kazooie. This fork adds the platforms the upstream port does not build yet
 | **Apple Vision Pro** | the game in a volume in the Shared Space |
 
 **On Windows, Linux, macOS or Switch, use [HarbourMasters/Lighthouse](https://github.com/HarbourMasters/Lighthouse/releases)
-instead.** That repository is the canonical port. Everything here is sent back to it.
+instead.** That repository is the canonical port. Everything that benefits all platforms is sent back to it.
 
 Lighthouse holds no game data. You must supply your own Banjo-Kazooie ROM. We do not condone piracy.
 
@@ -164,7 +164,7 @@ Custom assets are `.o2r` or `.otr` files in the `mods` folder.
 
 * **iPhone, iPad, Vision Pro** — `mods` is inside the `Lighthouse` folder in the Files app.
 * **Android, Quest, Galaxy XR** — the app data is in `Android/media/<applicationId>`. The Files
-  app, a headset file browser and a PC over USB all reach it, so `mods` and the saves are open.
+  app, a headset file browser and a PC over USB all reach it, so `mods` and the saves are open. You may also use the add mod to folder button in the menu to copy a mod to the right folder.
 
 Applying a mod list needs the app to be closed and opened again. A mobile app cannot restart
 itself.
