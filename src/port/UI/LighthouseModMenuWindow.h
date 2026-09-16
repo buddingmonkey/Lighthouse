@@ -59,6 +59,11 @@ void MaybeShowRomhackBaseMismatchPopup();
 // boot-time conflict check doesn't quarantine the freshly-generated romhack.
 void SetSoleEnabledRomhack(const std::string& keepBasename);
 
+// Mod Menu "Add Mod from File" button. Opens the system file picker for an .o2r
+// and copies the choice into the mods folder. This is the route on Android and in
+// a headset, where a file manager cannot easily reach the mods folder.
+void RequestModFileImport();
+
 // Mod Menu "Generate Mod from ROM" button. Opens a ROM picker, extracts a slim
 // mod o2r into the mods folder on a worker thread, then closes Lighthouse so
 // the new archive loads at boot. Mirrors Starship's GenAssetFile menu flow.
