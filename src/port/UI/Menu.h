@@ -64,4 +64,8 @@ private:
     float windowWidth;
     UIWidgets::Colors menuThemeIndex;
 };
+
+// False where a popped-out window has nowhere to go: mobile, and a headset, where the window would
+// draw outside the picture.
+bool PopoutWindowsUsable();
 } // namespace Ship

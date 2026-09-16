@@ -288,6 +288,17 @@ std::unordered_map<uint32_t, disabledInfo>& Menu::GetDisabledMap() {
     return disabledMap;
 }
 
+// A popped-out window needs a desktop window manager to put it in and a monitor to look at it on.
+// Mobile has neither, and in a headset the window draws outside the picture: the menu page then
+// looks empty and nothing on it answers a click.
+bool PopoutWindowsUsable() {
+#ifdef LIGHTHOUSE_MOBILE
+    return false;
+#else
+    return !IsHeadsetWindow();
+#endif
+}
+
 void Menu::MenuDrawItem(WidgetInfo& widget, uint32_t width, UIWidgets::Colors menuThemeIndex) {
     disabledTempTooltip = "This setting is disabled because: \n";
     disabledValue = false;
@@ -499,6 +510,15 @@ void Menu::MenuDrawItem(WidgetInfo& widget, uint32_t width, UIWidgets::Colors me
                 }
                 auto options = std::static_pointer_cast<UIWidgets::WindowButtonOptions>(widget.options);
                 options->color = menuThemeIndex;
+                if (!PopoutWindowsUsable()) {
+                    if (window->IsVisible()) {
+                        window->Hide();
+                    }
+                    if (options->embedWindow) {
+                        window->DrawElement();
+                    }
+                    break;
+                }
                 if (options->showButton) {
                     UIWidgets::WindowButton(widget.name.c_str(), widget.cVar, window, *options);
                 }
@@ -567,7 +587,38 @@ void Menu::Draw() {
 }
 
 static bool freshOpen = true;
+// Close a popout saved before the platform changed, or saved by a press on a build that still
+// offered the button. Without this the menu stays unusable across restarts.
+static void CloseUnusablePopoutWindows(const std::unordered_map<std::string, MainMenuEntry>& entries) {
+    auto gui = Ship::Context::GetRawInstance()->GetWindow()->GetGui();
+    if (gui == nullptr) {
+        return;
+    }
+    for (const auto& [headerName, entry] : entries) {
+        for (const auto& [sidebarName, sidebar] : entry.sidebars) {
+            for (const auto& column : sidebar.columnWidgets) {
+                for (const auto& widget : column) {
+                    if (widget.type != WIDGET_WINDOW_BUTTON || widget.windowName == nullptr) {
+                        continue;
+                    }
+                    auto window = gui->GetGuiWindow(widget.windowName);
+                    if (window != nullptr && window->IsVisible()) {
+                        window->Hide();
+                    }
+                }
+            }
+        }
+    }
+}
+
 void Menu::DrawElement() {
+    static bool popoutsWereUsable = true;
+    const bool popoutsUsable = PopoutWindowsUsable();
+    if (!popoutsUsable && popoutsWereUsable) {
+        CloseUnusablePopoutWindows(menuEntries);
+    }
+    popoutsWereUsable = popoutsUsable;
+
     for (auto& [reason, info] : disabledMap) {
         info.active = info.evaluation(info);
     }
@@ -590,7 +641,7 @@ void Menu::DrawElement() {
     windowHeight = ImGui::GetMainViewport()->WorkSize.y;
     windowWidth = ImGui::GetMainViewport()->WorkSize.x;
     auto windowFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
-    bool popout = CVarGetInteger(CVAR_SETTING("Menu.Popout"), 0) && allowPopout;
+    bool popout = CVarGetInteger(CVAR_SETTING("Menu.Popout"), 0) && allowPopout && popoutsUsable;
     if (popout) {
         windowFlags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoDocking;
     }
