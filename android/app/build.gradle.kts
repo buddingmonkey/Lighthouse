@@ -95,6 +95,11 @@ android {
     packaging {
         jniLibs.useLegacyPackaging = false
     }
+
+    // An o2r is already a deflated zip; a second pass only costs build time.
+    androidResources {
+        noCompress += "o2r"
+    }
 }
 
 val fetchGameControllerDb by tasks.registering {
@@ -113,11 +118,23 @@ val fetchGameControllerDb by tasks.registering {
     }
 }
 
+val bundleRom: String? = providers.gradleProperty("bundleRom").orNull
+val bundleMods: String? = providers.gradleProperty("bundleMods").orNull
+
 val stageLighthouseAssets by tasks.registering(Copy::class) {
     into(stagedAssets)
     from(repoRoot.resolve("config.yml"))
     from(repoRoot.resolve("assets/yaml")) { into("assets/yaml") }
     from(repoRoot.resolve("lighthouse.o2r"))
+    if (bundleRom != null) {
+        from(file(bundleRom)) { rename { "bk.o2r" } }
+    }
+    if (bundleMods != null) {
+        from(file(bundleMods)) {
+            into("mods")
+            include("**/*.o2r")
+        }
+    }
     doFirst {
         val o2r = repoRoot.resolve("lighthouse.o2r")
         if (!o2r.exists() || o2r.length() == 0L) {

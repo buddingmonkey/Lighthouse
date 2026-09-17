@@ -46,6 +46,12 @@ public class LighthouseActivity extends SDLActivity {
         "assets/yaml",
     };
 
+    // A preloaded build carries these too; a normal build has neither.
+    private static final String[] BUNDLED = {
+        "bk.o2r",
+        "mods",
+    };
+
     private volatile File dataDir;
 
     @Override
@@ -322,6 +328,9 @@ public class LighthouseActivity extends SDLActivity {
         for (String path : SHIPPED) {
             copyAsset(assets, path, new File(target, path));
         }
+        for (String path : BUNDLED) {
+            copyAssetIfPresent(assets, path, new File(target, path));
+        }
         writeText(stamp, fingerprint);
         Log.i(TAG, "Unpacked shipped assets " + fingerprint);
     }
@@ -337,6 +346,9 @@ public class LighthouseActivity extends SDLActivity {
     }
 
     private String shippedFingerprint() throws IOException {
+        List<String> roots = new ArrayList<>();
+        Collections.addAll(roots, SHIPPED);
+        Collections.addAll(roots, BUNDLED);
         List<String> entries = new ArrayList<>();
         try (ZipFile apk = new ZipFile(getApplicationInfo().sourceDir)) {
             for (Enumeration<? extends ZipEntry> e = apk.entries(); e.hasMoreElements();) {
@@ -344,7 +356,7 @@ public class LighthouseActivity extends SDLActivity {
                 if (entry.isDirectory()) {
                     continue;
                 }
-                for (String root : SHIPPED) {
+                for (String root : roots) {
                     String prefix = "assets/" + root;
                     if (entry.getName().equals(prefix) || entry.getName().startsWith(prefix + "/")) {
                         entries.add(entry.getName() + ":" + entry.getSize() + ":" + entry.getCrc());
@@ -359,6 +371,14 @@ public class LighthouseActivity extends SDLActivity {
             digest.update(entry.getBytes(StandardCharsets.UTF_8));
         }
         return String.format("%08x.%d", digest.getValue(), entries.size());
+    }
+
+    private void copyAssetIfPresent(AssetManager assets, String path, File target) throws IOException {
+        try {
+            copyAsset(assets, path, target);
+        } catch (java.io.FileNotFoundException e) {
+            // Not in this build.
+        }
     }
 
     private void copyAsset(AssetManager assets, String path, File target) throws IOException {
