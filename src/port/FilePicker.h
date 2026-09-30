@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <string>
 
 #include "ship/window/gui/FileBrowserWindow.h"
 
@@ -33,5 +34,7 @@ namespace Lighthouse {
 void PickFile(Ship::FileBrowserRequest request, std::function<void(std::optional<std::filesystem::path>)> onResult);
 
 void PumpFilePicker();
+
+std::string FilesAppFolder();
 
 } // namespace Lighthouse

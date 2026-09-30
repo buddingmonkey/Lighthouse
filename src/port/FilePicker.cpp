@@ -12,6 +12,14 @@
 #include "spdlog/spdlog.h"
 #endif
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+#if defined(__IOS__) && !TARGET_OS_VISION
+#include <cstdlib>
+#include <sys/sysctl.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace Lighthouse {
@@ -156,6 +164,23 @@ void PumpFilePicker() {
     if (callback) {
         callback(result);
     }
+#endif
+}
+
+std::string FilesAppFolder() {
+#if defined(__IOS__) && TARGET_OS_VISION
+    return "Files > On My Apple Vision Pro > Lighthouse";
+#elif defined(__IOS__)
+    const char* model = std::getenv("SIMULATOR_MODEL_IDENTIFIER");
+    char machine[64] = {};
+    size_t size = sizeof(machine) - 1;
+    if (model == nullptr && sysctlbyname("hw.machine", machine, &size, nullptr, 0) == 0) {
+        model = machine;
+    }
+    const bool iPhone = model != nullptr && std::string(model).rfind("iPhone", 0) == 0;
+    return std::string("Files > ") + (iPhone ? "On My iPhone" : "On My iPad") + " > Lighthouse";
+#else
+    return "";
 #endif
 }
 

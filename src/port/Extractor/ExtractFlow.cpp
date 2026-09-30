@@ -472,6 +472,10 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                         const bool romO2RExists = AnyRomArchiveExists();
 
                         if (!romO2RExists) {
+#ifdef __IOS__
+                            promptStep = PS_LOCAL;
+                            continue;
+#endif
                             LighthouseGui::RegisterPopup(
                                 "No O2R Files", "No O2R files found. Generate one now?", "Yes", "No",
                                 [&]() { promptStep = PS_LOCAL; }, [&]() { ShutdownAndExit(0, &threadPool, context); });
@@ -532,6 +536,15 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                                 });
                                 continue;
                             }
+#ifdef __IOS__
+                            promptStep = PS_WAIT;
+                            LighthouseGui::RegisterPopup("No ROM Found",
+                                                         "Lighthouse did not find a ROM.\n\nPut your ROM file in\n" +
+                                                             Lighthouse::FilesAppFolder() +
+                                                             ".\n\nThen select Search Again.",
+                                                         "Search Again", "", [&]() { promptStep = PS_LOCAL; });
+                            continue;
+#endif
                             romResultReady = false;
                             romLoaded = false;
                             extract.SelectGameFromUI([&](bool ok) {
