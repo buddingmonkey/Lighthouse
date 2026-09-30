@@ -143,6 +143,8 @@ val stageLighthouseAssets by tasks.registering(Copy::class) {
                     "  cmake -H. -Bbuild-cmake -GNinja && cmake --build build-cmake --target GeneratePortO2R"
             )
         }
+        stagedAssets.resolve("bk.o2r").delete()
+        stagedAssets.resolve("mods").deleteRecursively()
     }
 }
 
