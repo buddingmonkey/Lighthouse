@@ -151,7 +151,7 @@ void DrawSubframe(Fast::Interpreter* interpreter, const std::shared_ptr<Ship::Wi
         auto runT0 = Clock::now();
         gui->StartDraw();
         interpreter->StartFrame();
-        interpreter->Run(commands, replacements);
+        wnd->RunViewCommands(view, commands, replacements);
         if (OS_ViBlackActive()) {
             interpreter->mGfxFrameBuffer = 0;
             auto rapi = interpreter->GetCurrentRenderingAPI();
