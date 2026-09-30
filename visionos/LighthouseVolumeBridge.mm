@@ -374,6 +374,12 @@ void* LighthouseVolumeTexture(int eye) {
     return Fast::GetVisionOSReadyGameTexture(eye);
 }
 
+void LighthouseVolumeSetScenePhase(int phase) {
+    std::lock_guard<std::mutex> lock(gVolume.Mutex);
+    gVolume.Latest.ScenePhase = phase;
+    gVolume.Active = phase == 2;
+}
+
 void LighthouseVolumeRestartTracking(void) {
     if (!gVolume.Started || gVolume.Stopped || !gVolume.Active || gVolume.ActiveUpdates < kSettleUpdates) {
         return;

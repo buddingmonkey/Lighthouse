@@ -52,6 +52,8 @@ void* LighthouseVolumeTexture(int eye);
 
 void LighthouseVolumeRestartTracking(void);
 
+void LighthouseVolumeSetScenePhase(int phase);
+
 void LighthouseVolumeNoteHoverLayout(int rebuilt);
 
 void LighthouseVolumeNoteCopySkipped(void);
