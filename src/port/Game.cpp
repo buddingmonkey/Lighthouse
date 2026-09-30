@@ -34,6 +34,7 @@
 #include "Network/Anchor/Anchor.h"
 #include "OS/OS.h"
 #include "Patches/Patches.h"
+#include "ShaderPrewarm.h"
 #include "ShipUtils.h"
 #include "ShipInit.hpp"
 #include "src/port/Enhancements/Events/Hooks/Events.h"
@@ -376,6 +377,22 @@ extern "C" void Graphics_PushFrame(Gfx* data) {
     sFrameRendered = true;
 }
 
+static void PrewarmShaders() {
+    auto interpreter = GameEngine_GetInterpreter();
+    if (interpreter == nullptr) {
+        return;
+    }
+    constexpr size_t total = sizeof(kLighthouseShaderPrewarmList) / sizeof(kLighthouseShaderPrewarmList[0]);
+    const auto started = std::chrono::steady_clock::now();
+    size_t done = 0;
+    while (done < total) {
+        done = interpreter->PrewarmShadersSlice(kLighthouseShaderPrewarmList, total, done, 50);
+    }
+    SPDLOG_INFO(
+        "Prewarmed {} shader programs in {} ms", total,
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count());
+}
+
 void push_frame() {
     static int sTitleCounter = 0;
     const auto iterationStart = std::chrono::steady_clock::now();
@@ -457,6 +474,7 @@ int SDL_main(int argc, char* argv[]) {
 #endif
 
     GameEngine::Create(argc, argv);
+    PrewarmShaders();
     // Both threads are created during core1_init, so allowlist them first.
     OS_EnableThreadEntry((void*)viMgr_entry);
     EnableThread5();
