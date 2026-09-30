@@ -7,6 +7,7 @@ import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.ResultReceiver;
 import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.View;
@@ -14,6 +15,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -53,6 +55,7 @@ public class LighthouseActivity extends SDLActivity {
     };
 
     private volatile File dataDir;
+    private volatile int softKeyboardResult = -1;
 
     @Override
     protected String[] getLibraries() {
@@ -75,6 +78,31 @@ public class LighthouseActivity extends SDLActivity {
             return view.onApplyWindowInsets(insets);
         });
         mLayout.requestApplyInsets();
+    }
+
+    public void probeSoftKeyboard() {
+        softKeyboardResult = -1;
+        runOnUiThread(() -> {
+            InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm == null || mTextEdit == null) {
+                softKeyboardResult = InputMethodManager.RESULT_UNCHANGED_HIDDEN;
+                return;
+            }
+            imm.showSoftInput(mTextEdit, 0, new ResultReceiver(null) {
+                @Override
+                protected void onReceiveResult(int resultCode, Bundle resultData) {
+                    softKeyboardResult = resultCode;
+                }
+            });
+        });
+    }
+
+    public int softKeyboardResult() {
+        return softKeyboardResult;
+    }
+
+    public int systemKeyboardTakesFocus() {
+        return getPackageManager().hasSystemFeature("oculus.software.overlay_keyboard") ? 1 : 0;
     }
 
     @Override
