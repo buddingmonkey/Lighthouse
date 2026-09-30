@@ -18,6 +18,12 @@
 #pragma comment(lib, "winmm.lib")
 #endif
 #include <SDL2/SDL.h>
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+#ifdef LIGHTHOUSE_MOBILE
+#include <unistd.h>
+#endif
 
 #include "Controller/TouchControls.h"
 #include "DevTools/ThreadWatchdog.h"
@@ -57,6 +63,7 @@ thread_local bool tIsGameThread = false;
 
 #ifdef LIGHTHOUSE_MOBILE
 std::atomic<bool> sAppOnScreen{ true };
+std::atomic<bool> sAppTerminating{ false };
 std::atomic<bool> sLowMemory{ false };
 
 int SDLCALL LifecycleWatch(void* userdata, SDL_Event* event) {
@@ -66,12 +73,14 @@ int SDLCALL LifecycleWatch(void* userdata, SDL_Event* event) {
             sAppOnScreen.store(false, std::memory_order_release);
             break;
         case SDL_APP_DIDENTERFOREGROUND:
-            sAppOnScreen.store(true, std::memory_order_release);
+            sAppOnScreen.store(!sAppTerminating.load(std::memory_order_acquire), std::memory_order_release);
             break;
         case SDL_APP_LOWMEMORY:
             sLowMemory.store(true, std::memory_order_release);
             break;
         case SDL_APP_TERMINATING:
+            sAppTerminating.store(true, std::memory_order_release);
+            sAppOnScreen.store(false, std::memory_order_release);
             SPDLOG_WARN("[mobile] The system is terminating the app");
             if (const auto& logger = Ship::Context::GetRawInstance()->GetLogger()) {
                 logger->flush();
@@ -153,7 +162,7 @@ extern "C" int port_appIsOnScreen(void) {
 
 extern "C" void port_setAppOnScreen(int onScreen) {
 #ifdef LIGHTHOUSE_MOBILE
-    sAppOnScreen.store(onScreen != 0, std::memory_order_release);
+    sAppOnScreen.store(onScreen != 0 && !sAppTerminating.load(std::memory_order_acquire), std::memory_order_release);
 #else
     (void)onScreen;
 #endif
@@ -548,7 +557,24 @@ int SDL_main(int argc, char* argv[]) {
 #ifdef _WIN32
     timeEndPeriod(1);
 #endif
+#ifdef LIGHTHOUSE_MOBILE
+    if (sAppTerminating.load(std::memory_order_acquire)) {
+        auto context = Ship::Context::GetRawInstance();
+        if (context->GetWindow() != nullptr) {
+            context->GetWindow()->SaveWindowToConfig();
+        }
+        if (context->GetConfig() != nullptr) {
+            context->GetConfig()->Save();
+        }
+        SPDLOG_INFO("[mobile] The system ends the app; the process ends now");
+        spdlog::shutdown();
+        _exit(0);
+    }
+#endif
     GameEngine::Instance->Destroy();
     GameEngine::RelaunchIfRequested(argc, argv);
+#if defined(__IOS__) && !TARGET_OS_VISION
+    exit(0);
+#endif
     return 0;
 }
