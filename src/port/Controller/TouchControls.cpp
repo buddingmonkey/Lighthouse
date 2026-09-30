@@ -28,6 +28,7 @@ bool TouchControls_Active() {
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <vector>
 
 #ifdef __ANDROID__
@@ -35,8 +36,18 @@ bool TouchControls_Active() {
 #include <jni.h>
 #endif
 
+#if defined(__IOS__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(__IOS__) && !TARGET_OS_VISION
+#include "SafeAreaIos.h"
+#endif
+
 #include <SDL2/SDL.h>
 #include <imgui.h>
+#include <spdlog/spdlog.h>
+#include <fast/Fast3dGui.h>
 #include <fast/Fast3dWindow.h>
 #include <libultraship/bridge/consolevariablebridge.h>
 #include <libultraship/libultra/controller.h>
@@ -72,6 +83,36 @@ struct Bounds {
     float left = 0.0f;
     float right = 0.0f;
     float bottom = 0.0f;
+};
+
+struct Rect {
+    float left = 0.0f;
+    float top = 0.0f;
+    float right = 0.0f;
+    float bottom = 0.0f;
+
+    bool operator==(const Rect&) const = default;
+};
+
+constexpr int kMaxKeepOuts = 4;
+
+struct KeepOuts {
+    int count = 0;
+    std::array<Rect, kMaxKeepOuts> rects{};
+
+    bool operator==(const KeepOuts&) const = default;
+};
+
+struct GroupShift {
+    float railLeft = 0.0f;
+    float railRight = 0.0f;
+    float clusterLeft = 0.0f;
+    float clusterRight = 0.0f;
+};
+
+struct Split {
+    float gameBottom = 0.0f;
+    float bandTop = 0.0f;
 };
 
 enum DeviceClass {
@@ -197,14 +238,18 @@ bool MenuVisible() {
     return ctx->GetWindow()->GetGui()->GetMenuOrMenubarVisible();
 }
 
-bool PadActive() {
-    if (!Lighthouse::TouchControls_Active() || MenuVisible() || IsHeadsetWindow()) {
+bool PadWanted() {
+    if (!Lighthouse::TouchControls_Active() || IsHeadsetWindow()) {
         return false;
     }
     if (CVarGetInteger(CVAR_TOUCH("HideWithGamepad"), 1) && sGamepadPresent) {
         return false;
     }
     return true;
+}
+
+bool PadActive() {
+    return PadWanted() && !MenuVisible();
 }
 
 void AddButton(Layout& l, PadControl id, Vec2 center, float radius, uint16_t mask, const char* label) {
@@ -243,8 +288,9 @@ enum InsetEdge {
 std::atomic<int> sInsetPx[INSET_COUNT] = {};
 #endif
 
-Insets SafeArea(float pointHeight) {
-#ifdef __ANDROID__
+Insets SafeArea(float pointHeight, KeepOuts* keepOuts) {
+    *keepOuts = {};
+#if defined(__ANDROID__)
     if (pointHeight <= 0.0f) {
         return {};
     }
@@ -252,14 +298,24 @@ Insets SafeArea(float pointHeight) {
         return sInsetPx[which].load(std::memory_order_relaxed) / pointHeight;
     };
     const Insets in = { edge(INSET_LEFT), edge(INSET_RIGHT), edge(INSET_TOP), edge(INSET_BOTTOM) };
+#elif defined(__IOS__) && !TARGET_OS_VISION
+    (void)pointHeight;
+    const TouchControlsSafeArea area = TouchControls_IosSafeArea();
+    const Insets in = { std::max(area.left, 0.0f), std::max(area.right, 0.0f), std::max(area.top, 0.0f),
+                        std::max(area.bottom, 0.0f) };
+    keepOuts->count = std::clamp(area.keepOutCount, 0, std::min(kMaxKeepOuts, kTouchControlsMaxKeepOuts));
+    for (int i = 0; i < keepOuts->count; i++) {
+        const TouchControlsKeepOut& k = area.keepOuts[i];
+        keepOuts->rects[i] = { k.left, k.top, k.right, k.bottom };
+    }
+#else
+    (void)pointHeight;
+    const Insets in;
+#endif
     if (in.left + in.right >= 0.5f || in.top + in.bottom >= 0.5f) {
         return {};
     }
     return in;
-#else
-    (void)pointHeight;
-    return {};
-#endif
 }
 
 constexpr float kMmPerInch = 25.4f;
@@ -416,26 +472,82 @@ struct LayoutKey {
     float reach = 0.0f;
     float margin = 0.0f;
     Insets insets;
+    KeepOuts keepOuts;
     int device = 0;
     int dpad = 0;
     int mirror = 0;
     int scheme = 0;
-    int padHidden = 0;
+    int gameTop = 0;
 
     bool operator==(const LayoutKey&) const = default;
 };
 
-void BuildLayout(const LayoutKey& key) {
+constexpr float kMinSize = 0.4f;
+constexpr float kPortraitAspect = 1.0f;
+constexpr float kGameAspectStandard = 4.0f / 3.0f;
+constexpr float kGameAspectWide = 16.0f / 9.0f;
+
+Split GameTopSplit(const LayoutKey& key, float unit, bool modern) {
+    if (key.gameTop == 0 || key.aspect >= kPortraitAspect) {
+        return {};
+    }
+    const float need =
+        key.size * unit * ((modern ? kModernFaceMm : kFaceMm) + kRailMm) + 2.0f * key.margin * unit + key.insets.bottom;
+    float game = key.aspect / kGameAspectStandard;
+    if (1.0f - game < need) {
+        game = key.aspect / kGameAspectWide;
+    }
+    return { game, game };
+}
+
+struct Extent {
+    float min = FLT_MAX;
+    float max = -FLT_MAX;
+
+    void Add(float lo, float hi) {
+        min = std::min(min, lo);
+        max = std::max(max, hi);
+    }
+    void Add(const Button& b) {
+        if (b.enabled) {
+            Add(b.center.x - b.halfExtent.x, b.center.x + b.halfExtent.x);
+        }
+    }
+};
+
+float RowFit(const Extent& leftGroup, const Extent& rightGroup, const Bounds& edge, float gap) {
+    if (leftGroup.min > leftGroup.max || rightGroup.min > rightGroup.max) {
+        return 1.0f;
+    }
+    const float need = (leftGroup.max - edge.left) + (edge.right - rightGroup.min);
+    const float room = edge.right - edge.left - gap;
+    return need > room && need > 0.0f ? std::max(room, 0.0f) / need : 1.0f;
+}
+
+float SideFit(float extent, float room) {
+    return extent > room && extent > 0.0f ? std::max(room, 0.0f) / extent : 1.0f;
+}
+
+float RowFitAround(const Extent& leftGroup, const Extent& rightGroup, const Bounds& edge, float gap, float obstacleMin,
+                   float obstacleMax) {
+    float fit = 1.0f;
+    if (leftGroup.min <= leftGroup.max) {
+        fit = std::min(fit, SideFit(leftGroup.max - edge.left, obstacleMin - gap - edge.left));
+    }
+    if (rightGroup.min <= rightGroup.max) {
+        fit = std::min(fit, SideFit(edge.right - rightGroup.min, edge.right - obstacleMax - gap));
+    }
+    return fit;
+}
+
+Layout BuildLayoutAt(const LayoutKey& key, DeviceClass device, float unit, float size, const GroupShift& shift,
+                     const Split& split, float* widthFit) {
     Layout l;
     l.aspect = key.aspect;
 
-    const DeviceClass device = DeviceClassFor(key.pointHeight, key.device);
-    const float unit = PointsPerMm(device) / key.pointHeight;
-
     const bool modern = key.scheme == CONTROL_SCHEME_MODERN;
-    const float railMm = device == DEVICE_PHONE ? kRailMm : 0.0f;
-    const float budget = (1.0f - key.insets.top - key.insets.bottom) / unit - 2.0f * key.margin;
-    const float size = std::max(std::min(key.size, budget / ((modern ? kModernFaceMm : kFaceMm) + railMm)), 0.4f);
+    const bool portrait = key.aspect < kPortraitAspect;
+    const bool band = split.bandTop > 0.0f;
 
     const auto mm = [unit](float millimetres) { return millimetres * unit; };
     const auto sz = [unit, size](float millimetres) { return millimetres * unit * size; };
@@ -445,9 +557,14 @@ void BuildLayout(const LayoutKey& key) {
     const float side = margin + std::max(key.insets.left, key.insets.right);
     const float left = side;
     const float right = key.aspect - side;
-    const float top = margin + key.insets.top;
+    const float screenTop = margin + key.insets.top;
     const float bottom = 1.0f - margin - key.insets.bottom;
-    const Bounds edge = { left, right, bottom };
+    const float faceMm = modern ? kModernFaceMm : kFaceMm;
+    const float top = band       ? std::max(screenTop, split.bandTop + margin)
+                      : portrait ? std::max(screenTop, bottom - sz(faceMm + kRailMm))
+                                 : screenTop;
+    const Bounds railEdge = { left + shift.railLeft, right - shift.railRight, bottom };
+    const Bounds edge = { left + shift.clusterLeft, right - shift.clusterRight, bottom };
 
     const Vec2 shoulder = { sz(7.0f), sz(4.2f) };
     const Vec2 zPill = { sz(8.5f), sz(kZPillHalfYMm) };
@@ -458,30 +575,34 @@ void BuildLayout(const LayoutKey& key) {
     l.menuHalfExtent = { menuHalf, menuHalf };
     const float menuStack = menuHalf * 2.0f + railGap;
 
-    const bool sideRail = device == DEVICE_TABLET && bottom - arc(75.0f) >= top + menuStack + railTop;
-    const bool cornerMenu = sideRail || key.padHidden != 0;
-    l.menuCenter = { cornerMenu ? left + menuHalf : key.aspect * 0.5f, top + menuHalf };
-    const float railCeiling = cornerMenu ? top + menuStack : top;
+    const bool sideRail = !portrait && device == DEVICE_TABLET && bottom - arc(75.0f) >= top + menuStack + railTop;
+    const bool menuInRow = !sideRail && (!portrait || band);
+    l.menuCenter = { menuInRow ? key.aspect * 0.5f : left + menuHalf,
+                     (portrait && !band ? screenTop : top) + menuHalf };
+    const float railCeiling = sideRail ? top + menuStack : top;
 
     float railBottom = top;
     if (!sideRail) {
         railBottom = top + zPill.y * 2.0f;
-        AddPill(l, CTRL_Z, { left + zPill.x, top + zPill.y }, zPill, BTN_Z, "Z");
-        AddPill(l, CTRL_L, { left + zPill.x * 2.0f + railGap + shoulder.x, top + shoulder.y }, shoulder, BTN_L, "L");
-        AddPill(l, CTRL_R, { right - shoulder.x, top + shoulder.y }, shoulder, BTN_R, "R");
-        AddPill(l, CTRL_START, { right - shoulder.x * 3.0f - railGap, top + shoulder.y }, shoulder, BTN_START, "START");
+        AddPill(l, CTRL_Z, { railEdge.left + zPill.x, top + zPill.y }, zPill, BTN_Z, "Z");
+        AddPill(l, CTRL_L, { railEdge.left + zPill.x * 2.0f + railGap + shoulder.x, top + shoulder.y }, shoulder, BTN_L,
+                "L");
+        AddPill(l, CTRL_R, { railEdge.right - shoulder.x, top + shoulder.y }, shoulder, BTN_R, "R");
+        AddPill(l, CTRL_START, { railEdge.right - shoulder.x * 3.0f - railGap, top + shoulder.y }, shoulder, BTN_START,
+                "START");
     } else {
         const float anchor =
             std::clamp(bottom - arc(75.0f), railCeiling + railTop, std::max(railCeiling + railTop, bottom - zPill.y));
-        AddPill(l, CTRL_Z, { left + zPill.x, anchor }, zPill, BTN_Z, "Z");
-        AddPill(l, CTRL_L, { left + shoulder.x, anchor - zPill.y - railGap - shoulder.y }, shoulder, BTN_L, "L");
-        AddPill(l, CTRL_R, { right - shoulder.x, anchor }, shoulder, BTN_R, "R");
-        AddPill(l, CTRL_START, { right - shoulder.x, anchor - shoulder.y * 2.0f - railGap }, shoulder, BTN_START,
-                "START");
+        AddPill(l, CTRL_Z, { railEdge.left + zPill.x, anchor }, zPill, BTN_Z, "Z");
+        AddPill(l, CTRL_L, { railEdge.left + shoulder.x, anchor - zPill.y - railGap - shoulder.y }, shoulder, BTN_L,
+                "L");
+        AddPill(l, CTRL_R, { railEdge.right - shoulder.x, anchor }, shoulder, BTN_R, "R");
+        AddPill(l, CTRL_START, { railEdge.right - shoulder.x, anchor - shoulder.y * 2.0f - railGap }, shoulder,
+                BTN_START, "START");
     }
 
     const float pivotDrop = sz(kARadiusMm);
-    const Vec2 rightPivot = { right, bottom + pivotDrop };
+    const Vec2 rightPivot = { edge.right, bottom + pivotDrop };
     const Vec2 a = Arc(rightPivot, -1.0f, arc(22.5f), 44.0f);
     AddButton(l, CTRL_A, a, sz(kARadiusMm), BTN_A, "A");
     AddButton(l, CTRL_B, { a.x - sz(15.0f), a.y - sz(1.5f) }, sz(5.8f), BTN_B, "B");
@@ -512,7 +633,7 @@ void BuildLayout(const LayoutKey& key) {
         l.buttons[i].enabled = !modern || i == CTRL_CUP || i == CTRL_CDOWN;
     }
 
-    const Vec2 leftPivot = { left, bottom + pivotDrop };
+    const Vec2 leftPivot = { edge.left, bottom + pivotDrop };
     l.stickBase = sz(10.5f);
     l.stickKnob = sz(5.0f);
     l.stickHome = Arc(leftPivot, 1.0f, arc(26.0f), 52.0f);
@@ -534,25 +655,163 @@ void BuildLayout(const LayoutKey& key) {
 
     const float clusterCeiling = railBottom + sz(kRailGapMm);
     for (int i = CTRL_Z; i <= CTRL_START; i++) {
-        FitRange(l, i, i, edge, top);
+        FitRange(l, i, i, railEdge, top);
     }
     FitRange(l, CTRL_A, CTRL_CRIGHT, edge, clusterCeiling, true);
     FitRange(l, CTRL_DUP, CTRL_DRIGHT, edge, clusterCeiling);
 
     const float sweep = arc(60.0f);
-    l.stickZoneMin = { 0.0f, std::max(bottom - sweep, 0.28f) };
-    l.stickZoneMax = { std::min(left + sweep, key.aspect * 0.45f), 1.0f };
+    l.stickZoneMin = { 0.0f, std::max(bottom - sweep, portrait ? top : 0.28f) };
+    l.stickZoneMax = { std::min(edge.left + sweep, key.aspect * 0.45f), 1.0f };
     if (dpad) {
         const float dpadBottom = l.buttons[CTRL_DDOWN].center.y + dRad;
         l.stickZoneMin.y = std::max(l.stickZoneMin.y, dpadBottom + sz(1.0f));
     }
 
+    Extent railLeft;
+    Extent railRight;
+    railLeft.Add(l.buttons[CTRL_Z]);
+    railLeft.Add(l.buttons[CTRL_L]);
+    railRight.Add(l.buttons[CTRL_R]);
+    railRight.Add(l.buttons[CTRL_START]);
+    Extent clusterLeft;
+    Extent clusterRight;
+    clusterLeft.Add(l.stickHome.x - l.stickBase, l.stickHome.x + l.stickBase);
+    for (int i = CTRL_DUP; i <= CTRL_DRIGHT; i++) {
+        clusterLeft.Add(l.buttons[i]);
+    }
+    for (int i = CTRL_A; i <= CTRL_CRIGHT; i++) {
+        clusterRight.Add(l.buttons[i]);
+    }
+    if (l.rightStick) {
+        clusterRight.Add(l.rightStickHome.x - l.rightStickBase, l.rightStickHome.x + l.rightStickBase);
+    }
+    const float gap = sz(kRailGapMm);
+    const float railFit = menuInRow ? RowFitAround(railLeft, railRight, railEdge, gap, l.menuCenter.x - menuHalf,
+                                                   l.menuCenter.x + menuHalf)
+                                    : RowFit(railLeft, railRight, railEdge, gap);
+    *widthFit = std::min(railFit, RowFit(clusterLeft, clusterRight, edge, gap));
+
     if (key.mirror != 0) {
         MirrorLayout(l);
+    }
+    return l;
+}
+
+Layout FitLayout(const LayoutKey& key, DeviceClass device, float unit, float size, const GroupShift& shift,
+                 const Split& split) {
+    float widthFit = 1.0f;
+    Layout l = BuildLayoutAt(key, device, unit, size, shift, split, &widthFit);
+    if (widthFit < 1.0f && size > kMinSize) {
+        l = BuildLayoutAt(key, device, unit, std::max(size * widthFit, kMinSize), shift, split, &widthFit);
+    }
+    return l;
+}
+
+constexpr int kKeepOutPasses = 3;
+
+Rect GroupBox(const Layout& l, std::initializer_list<int> ids) {
+    Rect box = { FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX };
+    for (int id : ids) {
+        const Button& b = l.buttons[id];
+        if (!b.enabled) {
+            continue;
+        }
+        box.left = std::min(box.left, b.center.x - b.halfExtent.x);
+        box.top = std::min(box.top, b.center.y - b.halfExtent.y);
+        box.right = std::max(box.right, b.center.x + b.halfExtent.x);
+        box.bottom = std::max(box.bottom, b.center.y + b.halfExtent.y);
+    }
+    return box;
+}
+
+void AddCircle(Rect& box, Vec2 center, float radius) {
+    box.left = std::min(box.left, center.x - radius);
+    box.top = std::min(box.top, center.y - radius);
+    box.right = std::max(box.right, center.x + radius);
+    box.bottom = std::max(box.bottom, center.y + radius);
+}
+
+float InwardNeed(const Rect& box, const KeepOuts& keepOuts, float aspect, float gap) {
+    if (box.left > box.right) {
+        return 0.0f;
+    }
+    const bool onLeft = box.left + box.right < aspect;
+    float need = 0.0f;
+    for (int i = 0; i < keepOuts.count; i++) {
+        const Rect& r = keepOuts.rects[i];
+        if ((r.left + r.right < aspect) != onLeft) {
+            continue;
+        }
+        if (box.left >= r.right + gap || box.right <= r.left - gap || box.top >= r.bottom + gap ||
+            box.bottom <= r.top - gap) {
+            continue;
+        }
+        need = std::max(need, onLeft ? r.right + gap - box.left : box.right - (r.left - gap));
+    }
+    return need;
+}
+
+GroupShift KeepOutShift(const Layout& l, const KeepOuts& keepOuts, float gap) {
+    const Rect railLeft = GroupBox(l, { CTRL_Z, CTRL_L });
+    const Rect railRight = GroupBox(l, { CTRL_R, CTRL_START });
+    Rect clusterLeft = GroupBox(l, { CTRL_DUP, CTRL_DDOWN, CTRL_DLEFT, CTRL_DRIGHT });
+    AddCircle(clusterLeft, l.stickHome, l.stickBase);
+    Rect clusterRight = GroupBox(l, { CTRL_A, CTRL_B, CTRL_CUP, CTRL_CDOWN, CTRL_CLEFT, CTRL_CRIGHT });
+    if (l.rightStick) {
+        AddCircle(clusterRight, l.rightStickHome, l.rightStickBase);
+    }
+    return { InwardNeed(railLeft, keepOuts, l.aspect, gap), InwardNeed(railRight, keepOuts, l.aspect, gap),
+             InwardNeed(clusterLeft, keepOuts, l.aspect, gap), InwardNeed(clusterRight, keepOuts, l.aspect, gap) };
+}
+
+void ApplyGameView(float fraction) {
+    static float sApplied = 0.0f;
+    if (fraction == sApplied) {
+        return;
+    }
+    auto ctx = Ship::Context::GetRawInstance();
+    if (ctx == nullptr || ctx->GetWindow() == nullptr) {
+        return;
+    }
+    auto gui = std::dynamic_pointer_cast<Fast::Fast3dGui>(ctx->GetWindow()->GetGui());
+    if (gui == nullptr) {
+        return;
+    }
+    gui->SetGameViewTopFraction(fraction);
+    sApplied = fraction;
+    SPDLOG_INFO("Game view uses the top {:.3f} of the window", fraction);
+}
+
+void BuildLayout(const LayoutKey& key) {
+    const DeviceClass device = DeviceClassFor(std::min(key.pointHeight, key.pointHeight * key.aspect), key.device);
+    const float unit = PointsPerMm(device) / key.pointHeight;
+
+    const bool modern = key.scheme == CONTROL_SCHEME_MODERN;
+    const Split split = GameTopSplit(key, unit, modern);
+    const float railMm = device == DEVICE_PHONE ? kRailMm : 0.0f;
+    const float ceiling = split.bandTop > 0.0f ? split.bandTop : key.insets.top;
+    const float budget = (1.0f - ceiling - key.insets.bottom) / unit - 2.0f * key.margin;
+    float size = std::max(std::min(key.size, budget / ((modern ? kModernFaceMm : kFaceMm) + railMm)), kMinSize);
+
+    GroupShift shift;
+    Layout l = FitLayout(key, device, unit, size, shift, split);
+    const float gap = kRailGapMm * unit;
+    for (int pass = 0; pass < kKeepOutPasses && key.keepOuts.count > 0; pass++) {
+        const GroupShift need = KeepOutShift(l, key.keepOuts, gap);
+        if (need.railLeft <= 0.0f && need.railRight <= 0.0f && need.clusterLeft <= 0.0f && need.clusterRight <= 0.0f) {
+            break;
+        }
+        shift.railLeft += need.railLeft;
+        shift.railRight += need.railRight;
+        shift.clusterLeft += need.clusterLeft;
+        shift.clusterRight += need.clusterRight;
+        l = FitLayout(key, device, unit, size, shift, split);
     }
 
     sLayout = l;
     sLayoutValid = true;
+    ApplyGameView(split.gameBottom);
 }
 
 LayoutKey sBuiltKey;
@@ -564,12 +823,12 @@ void EnsureLayout(float aspect, float pointHeight) {
     key.size = std::clamp(CVarGetFloat(CVAR_TOUCH("Scale"), 1.0f), 0.7f, 1.4f);
     key.reach = std::clamp(CVarGetFloat(CVAR_TOUCH("Reach"), 1.0f), 0.8f, 1.25f);
     key.margin = std::clamp(CVarGetFloat(CVAR_TOUCH("EdgeMargin"), 3.0f), 0.0f, 10.0f);
-    key.insets = SafeArea(pointHeight);
+    key.insets = SafeArea(pointHeight, &key.keepOuts);
     key.device = CVarGetInteger(CVAR_TOUCH("Layout"), 0);
     key.dpad = CVarGetInteger(CVAR_TOUCH("ShowDPad"), 0);
     key.mirror = CVarGetInteger(CVAR_TOUCH("Mirror"), 0);
     key.scheme = CVarGetInteger(CVAR_SETTING("Controls.Scheme"), CONTROL_SCHEME_RETRO);
-    key.padHidden = CVarGetInteger(CVAR_TOUCH("HideWithGamepad"), 1) && sGamepadPresent ? 1 : 0;
+    key.gameTop = PadWanted() ? 1 : 0;
     if (sLayoutValid && key == sBuiltKey) {
         return;
     }
@@ -664,6 +923,7 @@ extern "C" void TouchControls_Poll(void) {
         sStickHeld = false;
         sRightHeld = false;
         sMenuLatch = false;
+        ApplyGameView(0.0f);
         return;
     }
 
@@ -676,6 +936,7 @@ extern "C" void TouchControls_Poll(void) {
         sStickHeld = false;
         sRightHeld = false;
         sMenuLatch = false;
+        ApplyGameView(0.0f);
         return;
     }
     sGamepadPresent = GamepadConnected();
@@ -868,7 +1129,8 @@ void TouchControls_Draw() {
     if (h <= 0.0f || !sLayoutValid) {
         return;
     }
-    const auto px = [h](const Vec2& v) { return ImVec2(v.x * h, v.y * h); };
+    const ImVec2 origin = ImGui::GetMainViewport()->Pos;
+    const auto px = [h, origin](const Vec2& v) { return ImVec2(origin.x + v.x * h, origin.y + v.y * h); };
 
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     const float alpha = std::clamp(CVarGetFloat(CVAR_TOUCH("Opacity"), 0.4f), 0.05f, 1.0f);

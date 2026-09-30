@@ -278,6 +278,7 @@ if (LIGHTHOUSE_APPLE_MOBILE)
         set(APPLE_ASSET_CATALOG ${CMAKE_CURRENT_SOURCE_DIR}/visionos/Assets.xcassets)
     else()
         set(APPLE_INFO_PLIST ${IOS_DIR}/Info.plist.in)
+        list(APPEND ALL_FILES src/port/Controller/SafeAreaIos.mm)
         set(APPLE_ASSET_CATALOG ${IOS_DIR}/Assets.xcassets)
     endif()
 
