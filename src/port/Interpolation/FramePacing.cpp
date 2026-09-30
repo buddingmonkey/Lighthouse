@@ -504,6 +504,8 @@ void ApplyHeadsetSettings(Fast::Fast3dWindow* wnd) {
 
 #ifdef ENABLE_XR_WINDOW
     Fast::SetXrDioramaDepth(CVarGetFloat(CVAR_SETTING("XrDioramaDepth"), 2.0f));
+    Fast::SetXrDepthLimit(CVarGetFloat(CVAR_SETTING("XrDepthLimit"), 1.0f));
+    Fast::SetXrSteadyDepth(CVarGetInteger(CVAR_SETTING("XrSteadyDepth"), 1) != 0);
 #endif
 
 #ifdef ENABLE_OPENXR

@@ -128,6 +128,7 @@ void func_802E39D0(Gfx **gfx, Mtx **mtx, Vtx **vtx, s32 framebuffer_idx, bool ar
     setupFramebufferForGamemode(gfx, framebuffer_idx);
     D_8037E8E0.unkC = false;
     port_mirror_beginScene();
+    port_xr_setSubjectDistance();
     gsworld_draw(gfx, mtx, vtx);
     CALL_EVENT(OnWorldDraw, gfx, mtx, vtx);
     port_mirror_endScene();

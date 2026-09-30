@@ -234,6 +234,7 @@ void port_xr_endFlat(Gfx** gfx);
 
 void port_xr_beginParticlePass(Gfx** gfx);
 void port_xr_endParticlePass(Gfx** gfx);
+void port_xr_setSubjectDistance(void);
 
 #ifdef __cplusplus
 }
