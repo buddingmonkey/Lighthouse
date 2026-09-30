@@ -2,11 +2,6 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <chrono>
-#include <future>
-#if defined(ENABLE_DEBUG_TOOLS) && defined(__ANDROID__)
-#include <android/log.h>
-#endif
 #if defined(__linux__) || defined(__APPLE__)
 #include <unistd.h>
 #include <cerrno>
@@ -40,9 +35,6 @@
 #include "Extractor/GameExtractor.h"
 #include "ship/window/gui/FileBrowserWindow.h"
 #include "port/FilePicker.h"
-#include "Interpolation/FrameInterpolation.h"
-#include "Nametag/Nametag.h"
-#include "OS/OS.h"
 #include "Network/Anchor/Anchor.h"
 #include "port/Enhancements/Events/PortEnhancements.h"
 #include "port/Patches/Patches.h"
@@ -55,6 +47,8 @@
 #include "Resource/Importers/DialogFactory.h"
 #include "Resource/Importers/MapFactory.h"
 #include "Resource/Importers/ModelFactory.h"
+#include "Resource/Importers/MusicFactory.h"
+#include "Resource/Importers/SoundFactory.h"
 #include "Resource/Importers/SpriteFactory.h"
 #include "src/port/Enhancements/Events/Hooks/Events.h"
 #include "UI/LighthouseGui.hpp"
@@ -68,7 +62,6 @@
 // Engine constants
 
 #define SAMPLES_PER_FRAME (560 * 2 * 2)
-#define gVIsPerFrame 2 // 30 Hz
 
 const float imguiScaleOptionToValue[4] = { 0.75f, 1.0f, 1.5f, 2.0f };
 
@@ -157,16 +150,6 @@ const char* sOtrSignature = "__OTR__";
 // Attract-demo audio hold
 std::atomic<bool> sHoldAudio{ false };
 int sHoldFramesRemaining = 0;
-std::vector<std::shared_ptr<Ship::IResource>> sSoundfontResources;
-
-// Frame pacing and rendering
-bool sInterpolationRecorded = false;
-std::vector<std::future<void>> sMapBuildFutures;
-long long sPassBudgetNs = 0;
-
-long long sFilteredSubFrameNs = 0;
-int sDeliveredSubFrames = 0;
-int sOverBudgetRun = 0;
 } // namespace
 
 std::shared_ptr<Fast::Fast3dWindow> lhFast3dWindow;
@@ -184,14 +167,6 @@ extern s32 D_80275610;
 
 bool prevAltAssets = false;
 // bool gEnableGammaBoost = true;
-
-// Soundfont symbols
-u8* soundfont1ctl_ROM_START = NULL;
-u8* soundfont1ctl_ROM_END = NULL;
-u8* soundfont1tbl_ROM_START = NULL;
-u8* soundfont2ctl_ROM_START = NULL;
-u8* soundfont2ctl_ROM_END = NULL;
-u8* soundfont2tbl_ROM_START = NULL;
 }
 
 std::vector<uint8_t*> MemoryPool;
@@ -290,6 +265,12 @@ static void RegisterResourceFactories(const std::shared_ptr<Ship::ResourceLoader
                                     static_cast<uint32_t>(Torch::ResourceType::BKDemoInput), 0);
     loader->RegisterResourceFactory(std::make_shared<Factories::ResourceFactoryBinaryBKMapV0>(), RESOURCE_FORMAT_BINARY,
                                     "BKMap", static_cast<uint32_t>(Torch::ResourceType::BKMap), 0);
+    loader->RegisterResourceFactory(std::make_shared<Factories::ResourceFactoryBinaryBKSoundV0>(),
+                                    RESOURCE_FORMAT_BINARY, "BKSound", Factories::kBKSoundResourceType, 0);
+    loader->RegisterResourceFactory(std::make_shared<Factories::ResourceFactoryBinaryBKSoundBankV0>(),
+                                    RESOURCE_FORMAT_BINARY, "BKSoundBank", Factories::kBKSoundBankResourceType, 0);
+    loader->RegisterResourceFactory(std::make_shared<Factories::ResourceFactoryBinaryBKMusicV0>(),
+                                    RESOURCE_FORMAT_BINARY, "BKMusic", Factories::kBKMusicResourceType, 0);
     loader->RegisterResourceFactory(std::make_shared<Fast::ResourceFactoryBinaryTextureV0>(), RESOURCE_FORMAT_BINARY,
                                     "Texture", static_cast<uint32_t>(Fast::ResourceType::Texture), 0);
     loader->RegisterResourceFactory(std::make_shared<Fast::ResourceFactoryBinaryTextureV1>(), RESOURCE_FORMAT_BINARY,
@@ -336,12 +317,22 @@ static void LoadLanguagePacks() {
     if (lang_path.empty() || !std::filesystem::is_directory(lang_path)) {
         return;
     }
-    for (const auto& p : std::filesystem::directory_iterator(lang_path)) {
-        if (p.is_regular_file() && p.path().extension() == ".o2r") {
-            SPDLOG_INFO("Loading language pack: {}", p.path().generic_string());
-            Ship::Context::GetRawInstance()->GetResourceManager()->GetArchiveManager()->AddArchive(
-                p.path().generic_string());
+    auto loadFrom = [](const std::filesystem::path& dir, const char* what) {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(dir, ec)) {
+            return;
         }
+        for (const auto& p : std::filesystem::directory_iterator(dir, ec)) {
+            if (p.is_regular_file() && p.path().extension() == ".o2r") {
+                SPDLOG_INFO("Loading {} language pack: {}", what, p.path().generic_string());
+                Ship::Context::GetRawInstance()->GetResourceManager()->GetArchiveManager()->AddArchive(
+                    p.path().generic_string());
+            }
+        }
+    };
+    loadFrom(lang_path, "base");
+    if (const std::string activeHack = GetActiveRomhackBasename(); !activeHack.empty()) {
+        loadFrom(std::filesystem::path(lang_path) / activeHack, activeHack.c_str());
     }
 }
 
@@ -362,6 +353,7 @@ void GameEngine::FinishInit() {
     UpdateModFiles(true);
     LoadLooseModDirectories(patches_path);
     LoadLanguagePacks();
+    ResourceHelpers_BuildOverlayRepoints();
 
 #if (_DEBUG)
     auto defaultLogLevel = spdlog::level::debug;
@@ -403,7 +395,6 @@ void GameEngine::FinishInit() {
     Lighthouse::RestoreModSelectionAfterLaunchHack();
     MaybeShowModConflictPopup();
     MaybeShowRomhackBaseMismatchPopup();
-    Instance->AudioInit();
     // Instance->LoadDictionary();
     // Instance->LoadPlayerAnims();
 #if defined(__SWITCH__) || defined(__WIIU__)
@@ -466,7 +457,6 @@ void GameEngine::ScaleImGui() {
 void GameEngine::Create(int argc, char* argv[]) {
     Lighthouse::ParseLaunchArgs(argc, argv);
     const auto instance = Instance = new GameEngine();
-    // instance->AudioInit();
     // DisplayListPatch::Run();
     // BK renders at 292x216, not the standard 320x240.
     GfxSetNativeDimensions(292, 216);
@@ -491,6 +481,7 @@ void GameEngine::Create(int argc, char* argv[]) {
 
 extern void ResourceHelpers_ClearRefCache();
 void ReleaseSoundfonts();
+extern "C" void port_alBnkfFreeAll();
 
 void GameEngine::Destroy() {
     if (Instance->context && Instance->context->GetControlDeck()) {
@@ -614,642 +605,7 @@ extern "C" int port_audioHeld(void) {
 }
 
 void ReleaseSoundfonts() {
-    sSoundfontResources.clear();
-}
-
-static void LoadSoundfonts() {
-    auto rm = Ship::Context::GetRawInstance()->GetResourceManager();
-    sSoundfontResources.clear();
-
-    auto loadBlob = [&rm](const char* path, uint8_t*& start, uint8_t*& end) {
-        auto res = rm->LoadResource(path);
-        if (res) {
-            start = (uint8_t*)res->GetRawPointer();
-            end = start + res->GetPointerSize();
-            AudioDma_Register(start, res->GetPointerSize());
-            sSoundfontResources.push_back(res);
-        } else {
-            SPDLOG_ERROR("[Audio] Failed to load soundfont '{}'", path);
-        }
-    };
-
-    loadBlob("soundfont/soundfont1ctl", soundfont1ctl_ROM_START, soundfont1ctl_ROM_END);
-    loadBlob("soundfont/soundfont2ctl", soundfont2ctl_ROM_START, soundfont2ctl_ROM_END);
-
-    // tbl assets don't need END — only START is referenced
-    auto loadTbl = [&rm](const char* path, uint8_t*& start) {
-        auto res = rm->LoadResource(path);
-        if (res) {
-            start = (uint8_t*)res->GetRawPointer();
-            AudioDma_Register(start, res->GetPointerSize());
-            sSoundfontResources.push_back(res);
-        } else {
-            SPDLOG_ERROR("[Audio] Failed to load soundfont '{}'", path);
-        }
-    };
-
-    loadTbl("soundfont/soundfont1tbl", soundfont1tbl_ROM_START);
-    loadTbl("soundfont/soundfont2tbl", soundfont2tbl_ROM_START);
-}
-
-void GameEngine::AudioInit() {
-    LoadSoundfonts();
-}
-
-// Frame pacing and rendering
-
-namespace {
-using Clock = std::chrono::steady_clock;
-inline long long NsSince(Clock::time_point t0) {
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count();
-}
-
-void ReportDrawTime(long long drawNs, uint32_t views, uint32_t drawCalls, uint32_t drawTextures, uint32_t markedCalls,
-                    uint32_t markedTextures, uint32_t* flushCauses) {
-#ifdef ENABLE_DEBUG_TOOLS
-    static auto since = std::chrono::steady_clock::now();
-    static long long total = 0;
-    static long long worst = 0;
-    static long long callTotal = 0;
-    static uint32_t callWorst = 0;
-    static uint32_t worstTextures = 0;
-    static uint32_t worstMarkedCalls = 0;
-    static uint32_t worstMarkedTextures = 0;
-    static int subframes = 0;
-
-    total += drawNs;
-    if (drawNs > worst) {
-        worst = drawNs;
-    }
-    callTotal += drawCalls;
-    if (drawCalls > callWorst) {
-        callWorst = drawCalls;
-        worstTextures = drawTextures;
-        worstMarkedCalls = markedCalls;
-        worstMarkedTextures = markedTextures;
-    }
-    subframes++;
-
-    const auto now = std::chrono::steady_clock::now();
-    const double seconds = std::chrono::duration<double>(now - since).count();
-    if (seconds < 5.0) {
-        return;
-    }
-
-    SPDLOG_INFO("draw {:.2f} ms a sub-frame, worst {:.2f} ms, {:.0f} draws a sub-frame, worst {} over {} textures "
-                "({} draws over {} textures in the marked pass), {} views, {:.1f} sub-frames a second",
-                total / (double)subframes / 1.0e6, worst / 1.0e6, (double)callTotal / subframes, callWorst,
-                worstTextures, worstMarkedCalls, worstMarkedTextures, views, subframes / seconds);
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
-                        "draw %.2f ms a sub-frame, worst %.2f ms, %.0f draws a sub-frame, worst %u over %u textures "
-                        "(%u draws over %u textures in the marked pass), %u views, %.1f sub-frames a second",
-                        total / (double)subframes / 1.0e6, worst / 1.0e6, (double)callTotal / subframes, callWorst,
-                        worstTextures, worstMarkedCalls, worstMarkedTextures, views, subframes / seconds);
-#endif
-    if (flushCauses != nullptr) {
-#ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
-                            "marked flush causes: depth %u decal %u vp %u sciss %u tex %u sfb %u samp %u shader %u "
-                            "alpha %u cap %u",
-                            flushCauses[0], flushCauses[1], flushCauses[2], flushCauses[3], flushCauses[4],
-                            flushCauses[5], flushCauses[6], flushCauses[7], flushCauses[8], flushCauses[9]);
-#endif
-        for (int i = 0; i < 10; i++) {
-            flushCauses[i] = 0;
-        }
-    }
-
-    since = now;
-    total = 0;
-    worst = 0;
-    callTotal = 0;
-    callWorst = 0;
-    worstTextures = 0;
-    worstMarkedCalls = 0;
-    worstMarkedTextures = 0;
-    subframes = 0;
-#else
-    (void)drawNs;
-    (void)views;
-    (void)drawCalls;
-    (void)drawTextures;
-    (void)markedCalls;
-    (void)markedTextures;
-    (void)flushCauses;
-#endif
-}
-
-} // namespace
-
-void GameEngine::RunCommands(Gfx* Commands, const std::vector<std::unordered_map<Mtx*, MtxF>>& mtx_replacements,
-                             size_t frameCount, float blendBase, float blendStep) {
-    auto wnd = std::dynamic_pointer_cast<Fast::Fast3dWindow>(Ship::Context::GetRawInstance()->GetWindow());
-    if (wnd == nullptr) {
-        return;
-    }
-    auto interpreter = wnd->GetInterpreterWeak().lock().get();
-    wnd->HandleEvents();
-    interpreter->mInterpolationIndex = 0;
-    auto wndBase = Ship::Context::GetRawInstance()->GetWindow();
-    const auto passT0 = Clock::now();
-    sDeliveredSubFrames = 0;
-    for (size_t frameIdx = 0; frameIdx < frameCount; frameIdx++) {
-        if (frameIdx >= 1 && frameIdx - 1 < sMapBuildFutures.size()) {
-            sMapBuildFutures[frameIdx - 1].wait();
-        }
-        if (frameIdx > 0 && sFilteredSubFrameNs > 0 && (sPassBudgetNs - NsSince(passT0)) < sFilteredSubFrameNs) {
-            break;
-        }
-        const auto& m = mtx_replacements[frameIdx];
-        const float subframeBlend = (blendStep > 0.0f && frameCount > 1)
-                                        ? std::min(blendBase + (float)(frameIdx + 1) * blendStep, 1.0f)
-                                        : ((frameCount > 1) ? (float)(frameIdx + 1) / (float)frameCount : 1.0f);
-        if (frameCount > 1) {
-            FrameInterpolation_ApplyAnimVertices(subframeBlend);
-        }
-        Nametag::SetSubframeBlend(subframeBlend);
-        bool isFinalFrame = (frameIdx == frameCount - 1);
-        if (frameCount > 1 || wndBase->IsFrameReady()) {
-            auto gui = wndBase->GetGui();
-            wndBase->GetMouseStateManager()->StartFrame();
-            const uint32_t views = wnd->BeginRenderFrame();
-            long long drawNs = 0;
-#ifdef ENABLE_DEBUG_TOOLS
-            interpreter->mDrawCallCount = 0;
-            interpreter->mMarkedDrawCount = 0;
-            interpreter->mDrawTextures.clear();
-            interpreter->mMarkedTextures.clear();
-#endif
-            for (uint32_t view = 0; view < views; view++) {
-                wnd->BeginRenderView(view);
-                auto runT0 = Clock::now();
-                gui->StartDraw();
-                interpreter->StartFrame();
-                interpreter->Run(Commands, m);
-                if (OS_ViBlackActive()) {
-                    interpreter->mGfxFrameBuffer = 0;
-                    auto rapi = interpreter->GetCurrentRenderingAPI();
-                    rapi->StartDrawToFramebuffer(0, 1.0f);
-                    rapi->ClearFramebuffer(true, false);
-                }
-                gui->EndDraw();
-                drawNs += NsSince(runT0);
-                interpreter->EndFrame();
-            }
-            long long sample = drawNs;
-            bool believe = true;
-            if (sPassBudgetNs > 0 && drawNs > sPassBudgetNs) {
-                sample = sPassBudgetNs;
-                believe = ++sOverBudgetRun > 1;
-            } else {
-                sOverBudgetRun = 0;
-            }
-            if (believe) {
-                if (sample > sFilteredSubFrameNs) {
-                    sFilteredSubFrameNs = sample;
-                } else {
-                    sFilteredSubFrameNs += (sample - sFilteredSubFrameNs) / 8;
-                }
-            }
-            sDeliveredSubFrames++;
-#ifdef ENABLE_DEBUG_TOOLS
-            ReportDrawTime(drawNs, views, interpreter->mDrawCallCount, (uint32_t)interpreter->mDrawTextures.size(),
-                           interpreter->mMarkedDrawCount, (uint32_t)interpreter->mMarkedTextures.size(),
-                           interpreter->mMarkedFlushCauses);
-#else
-            ReportDrawTime(drawNs, views, 0, 0, 0, 0, nullptr);
-#endif
-            CALL_EVENT(FrameDrawEnd);
-        }
-        interpreter->mInterpolationIndex++;
-    }
-    bool curAltAssets = CVarGetInteger(CVAR_SETTING("Mods.AlternateAssets"), 1);
-    if (prevAltAssets != curAltAssets) {
-        prevAltAssets = curAltAssets;
-        Ship::Context::GetRawInstance()->GetResourceManager()->SetAltAssetsEnabled(curAltAssets);
-        gfx_texture_cache_clear();
-    }
-}
-
-void GameEngine::SetInterpolationRecorded(bool recorded) {
-    sInterpolationRecorded = recorded;
-}
-
-namespace {
-struct SubframePacing {
-    int subframes;
-    int fps;
-    int viPerTick;
-    long long budgetNs;
-    float blendBase;
-    float blendStep;
-};
-
-constexpr int RATE_SETTLE_TICKS = 90;
-
-void SelectDisplayRefreshRate(Fast::Fast3dWindow* wnd) {
-    if (!IsHeadsetWindow()) {
-        return;
-    }
-    const int cap = CVarGetInteger(CVAR_SETTING("XrMaxRate"), 120);
-
-    const float logicRate = 60.0f / gVIsPerFrame;
-    std::vector<float> rates;
-    for (float rate : wnd->GetSupportedRefreshRates()) {
-        const float multiple = rate / logicRate;
-        if (fabsf(multiple - roundf(multiple)) < 0.01f && rate <= (float)cap) {
-            rates.push_back(rate);
-        }
-    }
-    if (rates.empty()) {
-        return;
-    }
-    std::sort(rates.begin(), rates.end(), std::greater<float>());
-
-    static int askedCap = -1;
-    static float asked = 0.0f;
-    static int waited = 0;
-    if (askedCap != cap) {
-        askedCap = cap;
-        asked = 0.0f;
-        waited = 0;
-    }
-
-    if (asked <= 0.0f) {
-        asked = rates.front();
-        wnd->SetRefreshRate(asked);
-        waited = 0;
-        return;
-    }
-
-    if (fabsf((float)wnd->GetCurrentRefreshRate() - asked) < 0.5f) {
-        waited = 0;
-        return;
-    }
-    if (++waited < RATE_SETTLE_TICKS) {
-        return;
-    }
-    waited = 0;
-    for (size_t i = 0; i + 1 < rates.size(); i++) {
-        if (fabsf(rates[i] - asked) < 0.5f) {
-            asked = rates[i + 1];
-            wnd->SetRefreshRate(asked);
-            return;
-        }
-    }
-}
-
-void ReportTickRate(int subframes, int delivered) {
-#ifdef ENABLE_DEBUG_TOOLS
-    static auto since = std::chrono::steady_clock::now();
-    static int ticks = 0;
-    static long long subframeTotal = 0;
-    static long long deliveredTotal = 0;
-
-    ticks++;
-    subframeTotal += subframes;
-    deliveredTotal += delivered;
-
-    const auto now = std::chrono::steady_clock::now();
-    const double seconds = std::chrono::duration<double>(now - since).count();
-    if (seconds < 5.0) {
-        return;
-    }
-
-    uint32_t rate = 0;
-    auto window = Ship::Context::GetRawInstance()->GetWindow();
-    if (window != nullptr) {
-        rate = window->GetCurrentRefreshRate();
-    }
-    SPDLOG_INFO("game ticks {:.2f} of {} a second, {:.2f} sub-frames a tick asked and {:.2f} drawn, display {} Hz",
-                ticks / seconds, 60 / gVIsPerFrame, (double)subframeTotal / ticks, (double)deliveredTotal / ticks,
-                rate);
-#ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "LighthouseXR",
-                        "game ticks %.2f of %d a second, %.2f sub-frames a tick asked and %.2f drawn, display %u Hz",
-                        ticks / seconds, 60 / gVIsPerFrame, (double)subframeTotal / ticks,
-                        (double)deliveredTotal / ticks, rate);
-#endif
-
-    since = now;
-    ticks = 0;
-    subframeTotal = 0;
-    deliveredTotal = 0;
-#else
-    (void)subframes;
-    (void)delivered;
-#endif
-}
-
-constexpr int PACING_PROBE_TICKS = 30;
-
-constexpr int PACING_GAP_TICKS = 8;
-
-constexpr int PACING_WORK_MARGIN = 2;
-
-int CurrentViPerTick() {
-    int viPerTick = port_getDemoViCount();
-    if (viPerTick <= 0) {
-        viPerTick = gVIsPerFrame + port_getCutsceneExtraVis();
-    }
-    if (viPerTick < gVIsPerFrame) {
-        viPerTick = gVIsPerFrame;
-    }
-    // Clamp to 15 for demo playbacks.
-    if (viPerTick > 15) {
-        viPerTick = 15;
-    }
-    return viPerTick;
-}
-
-int EffectiveLogicFps() {
-    int fps = 60 / CurrentViPerTick();
-    return (fps < 1) ? 1 : fps;
-}
-
-int SubframesForTarget(int targetFps) {
-    int subframes = targetFps / EffectiveLogicFps();
-    return (subframes < 1) ? 1 : subframes;
-}
-
-SubframePacing ComputeSubframePacing() {
-    int target_fps = (int)GameEngine::Instance->GetInterpolationFPS();
-    int viPerTick = CurrentViPerTick();
-    int subframesPerTick = SubframesForTarget(target_fps);
-
-    float blendStep = 0.0f;
-    int slotCount = 0;
-    static float sSlotCarry = 0.0f;
-    if (IsHeadsetWindow() && target_fps > 0) {
-        const float slots = (float)target_fps * (float)viPerTick / 60.0f;
-        if (slots >= 2.0f) {
-            if (fabsf(slots - roundf(slots)) <= 0.05f) {
-                subframesPerTick = (int)roundf(slots);
-            } else {
-                blendStep = 1.0f / slots;
-                slotCount = (int)floorf((1.0f - sSlotCarry) * slots + 0.0001f);
-                if (slotCount >= 2) {
-                    subframesPerTick = slotCount;
-                } else {
-                    blendStep = 0.0f;
-                    slotCount = 0;
-                }
-            }
-        }
-    }
-
-    if (!sInterpolationRecorded) {
-        subframesPerTick = 1;
-    }
-
-    if (IsHeadsetWindow()) {
-        static int allowed = 0;
-        static int probeCountdown = 0;
-        static int asked = 0;
-        static bool wasShort = false;
-        static int scaledVi = 0;
-
-        if (allowed < 1) {
-            allowed = subframesPerTick;
-        }
-
-        if (scaledVi > 0 && viPerTick != scaledVi) {
-            allowed = (allowed * viPerTick + scaledVi - 1) / scaledVi;
-        }
-        scaledVi = viPerTick;
-
-        static Clock::time_point lastTick;
-        const bool resumed = lastTick.time_since_epoch().count() != 0 && sPassBudgetNs > 0 &&
-                             NsSince(lastTick) > sPassBudgetNs * PACING_GAP_TICKS;
-        lastTick = Clock::now();
-        if (resumed) {
-            sFilteredSubFrameNs = 0;
-            sDeliveredSubFrames = 0;
-            sOverBudgetRun = 0;
-            wasShort = false;
-        }
-
-        const bool isShort = asked > 0 && sDeliveredSubFrames > 0 && sDeliveredSubFrames < asked;
-        const bool fitsTick = sFilteredSubFrameNs <= 0 || sPassBudgetNs <= 0 ||
-                              sFilteredSubFrameNs * PACING_WORK_MARGIN * asked < sPassBudgetNs;
-        if (isShort && wasShort && !fitsTick) {
-            allowed = asked - 1;
-            probeCountdown = PACING_PROBE_TICKS;
-        } else if (!isShort && --probeCountdown <= 0) {
-            allowed++;
-            probeCountdown = PACING_PROBE_TICKS;
-        }
-        wasShort = isShort;
-
-        if (allowed < 1) {
-            allowed = 1;
-        }
-        if (allowed > subframesPerTick + 1) {
-            allowed = subframesPerTick + 1;
-        }
-        asked = (allowed < subframesPerTick) ? allowed : subframesPerTick;
-        subframesPerTick = asked;
-    }
-
-    float blendBase = 0.0f;
-    if (blendStep > 0.0f && subframesPerTick == slotCount) {
-        blendBase = sSlotCarry;
-        sSlotCarry += (float)slotCount * blendStep - 1.0f;
-        if (fabsf(sSlotCarry) < 0.001f) {
-            sSlotCarry = 0.0f;
-        }
-    } else {
-        blendStep = 0.0f;
-        sSlotCarry = 0.0f;
-    }
-
-#ifdef ENABLE_XR_WINDOW
-    {
-        static double nextReport = 0.0;
-        static double windowStart = 0.0;
-        static int ticks = 0;
-        static int askedTotal = 0;
-        static int deliveredTotal = 0;
-        static int viTotal = 0;
-        const double now = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::steady_clock::now().time_since_epoch())
-                               .count() /
-                           1000.0;
-        ++ticks;
-        askedTotal += subframesPerTick;
-        deliveredTotal += sDeliveredSubFrames;
-        viTotal += viPerTick;
-        if (now >= nextReport) {
-            const double window = now - windowStart;
-            if (nextReport > 0.0 && ticks > 0 && window > 0.0) {
-                SPDLOG_INFO("xr pacing: target {} Hz, ticks {:.1f}/s, vi {:.2f}, asked {:.2f}, delivered {:.2f}, "
-                            "work {:.2f} ms",
-                            target_fps, (double)ticks / window, (double)viTotal / ticks, (double)askedTotal / ticks,
-                            (double)deliveredTotal / ticks, (double)sFilteredSubFrameNs / 1e6);
-            }
-            nextReport = now + 1.0;
-            windowStart = now;
-            ticks = 0;
-            askedTotal = 0;
-            deliveredTotal = 0;
-            viTotal = 0;
-        }
-    }
-#endif
-
-    int fps = subframesPerTick * 60 / viPerTick;
-    if (fps < 1) {
-        fps = 1;
-    }
-
-    const long long budgetNs =
-        (blendStep > 0.0f) ? 1000000000LL * subframesPerTick / target_fps : 1000000000LL * viPerTick / 60;
-
-    return { subframesPerTick, fps, viPerTick, budgetNs, blendBase, blendStep };
-}
-
-#ifdef ENABLE_OPENXR
-bool SyncXrSetting(const char* cVar, float low, float high, float defaultValue, float& pushed, float held,
-                   void (*apply)(float), float (*convert)(float)) {
-    const float shown = std::clamp(CVarGetFloat(cVar, defaultValue), low, high);
-    if (shown != pushed) {
-        apply(convert(shown));
-        pushed = shown;
-        return false;
-    }
-    const float left = std::clamp(convert(held), low, high);
-    if (fabsf(left - shown) > 0.001f) {
-        CVarSetFloat(cVar, left);
-        pushed = left;
-        return true;
-    }
-    return false;
-}
-#endif
-} // namespace
-
-bool GameEngine::IsInterpolationEnabled() {
-    return (int)GetInterpolationFPS() > EffectiveLogicFps();
-}
-
-void GameEngine::ProcessGfxCommands(Gfx* commands) {
-    auto wnd = std::dynamic_pointer_cast<Fast::Fast3dWindow>(Ship::Context::GetRawInstance()->GetWindow());
-
-    if (wnd == nullptr) {
-        return;
-    }
-
-    SelectDisplayRefreshRate(wnd.get());
-
-#ifdef ENABLE_XR_WINDOW
-    Fast::SetXrDioramaDepth(CVarGetFloat(CVAR_SETTING("XrDioramaDepth"), 2.0f));
-#endif
-
-#ifdef ENABLE_OPENXR
-    static float pushedRange = 0.0f;
-    static float pushedScale = 0.0f;
-    const bool rangeMoved =
-        SyncXrSetting(CVAR_SETTING("XrWindowRange"), 0.5f, 4.0f, 1.3f, pushedRange, Fast::GetXrWindowDistance(),
-                      Fast::SetXrWindowDistance, [](float value) { return value; });
-    const bool scaleMoved =
-        SyncXrSetting(CVAR_SETTING("XrWindowScale"), 0.5f, 8.0f, 2.6f, pushedScale, Fast::GetXrWindowScale(),
-                      Fast::SetXrWindowScale, [](float value) { return value; });
-
-    static bool wasMoving = false;
-    const bool moving = rangeMoved || scaleMoved;
-    if (wasMoving && !moving) {
-        CVarSave();
-    }
-    wasMoving = moving;
-#endif
-
-#ifdef ENABLE_OPENXR
-    wnd->SetResolutionMultiplier(CVarGetFloat(CVAR_INTERNAL_RESOLUTION, 1.0f));
-
-    Fast::SetXrStereo(CVarGetInteger(CVAR_SETTING("XrStereo"), 1) != 0);
-    Fast::SetXrEdgeSoftness(CVarGetFloat(CVAR_SETTING("XrEdgeSoftness"), 0.36f));
-    Fast::SetXrEdgeFloat(CVarGetFloat(CVAR_SETTING("XrEdgeFloat"), 0.15f));
-#endif
-
-    // if(gEnableGammaBoost) {
-    //     wnd->EnableSRGBMode();
-    // }
-    wnd->SetRendererUCode(UcodeHandlers::ucode_f3dex);
-
-    static std::vector<std::unordered_map<Mtx*, MtxF>> mtx_replacements;
-
-    const SubframePacing pacing = ComputeSubframePacing();
-    const int subframesPerTick = pacing.subframes;
-    const int fps = pacing.fps;
-
-    if ((int)mtx_replacements.size() < subframesPerTick) {
-        mtx_replacements.resize(subframesPerTick);
-    }
-    size_t activeFrames = 0;
-    sMapBuildFutures.clear();
-    for (int i = 1; i <= subframesPerTick; i++) {
-        const float t = (pacing.blendStep > 0.0f) ? pacing.blendBase + (float)i * pacing.blendStep
-                                                  : (float)i / (float)subframesPerTick;
-        if (t < 0.9995f) {
-            if (i == 1) {
-                FrameInterpolation_Interpolate(t, mtx_replacements[activeFrames]);
-            } else {
-                auto* map = &mtx_replacements[activeFrames];
-                sMapBuildFutures.push_back(
-                    std::async(std::launch::async, [t, map] { FrameInterpolation_Interpolate(t, *map); }));
-            }
-        } else {
-            mtx_replacements[activeFrames].clear();
-        }
-        activeFrames++;
-    }
-
-    sPassBudgetNs = pacing.budgetNs;
-
-    if (wnd != nullptr) {
-        wnd->SetTargetFps(fps);
-        wnd->SetMaximumFrameLatency(2);
-    }
-
-    if (GfxDebuggerIsDebugging()) {
-        if (mtx_replacements.empty()) {
-            mtx_replacements.emplace_back();
-        }
-        mtx_replacements[0].clear();
-        activeFrames = 1;
-    }
-
-    RunCommands(commands, mtx_replacements, activeFrames, pacing.blendBase, pacing.blendStep);
-    ReportTickRate(pacing.subframes, sDeliveredSubFrames);
-
-    for (auto& f : sMapBuildFutures) {
-        if (f.valid()) {
-            f.wait();
-        }
-    }
-    sMapBuildFutures.clear();
-}
-
-uint32_t GameEngine::GetInterpolationFPS() {
-    if (CVarGetInteger(CVAR_SETTING("MatchRefreshRate"), IsHeadsetWindow() ? 1 : 0)) {
-        return Ship::Context::GetRawInstance()->GetWindow()->GetCurrentRefreshRate();
-
-    } else if (CVarGetInteger(CVAR_VSYNC_ENABLED, 1) ||
-               !Ship::Context::GetRawInstance()->GetWindow()->CanDisableVerticalSync()) {
-        return std::min<uint32_t>(Ship::Context::GetRawInstance()->GetWindow()->GetCurrentRefreshRate(),
-                                  CVarGetInteger(CVAR_SETTING("InterpolationFPS"), 60));
-    }
-
-    return CVarGetInteger(CVAR_SETTING("InterpolationFPS"), 30);
-}
-
-uint32_t GameEngine::GetInterpolationFrameCount() {
-    return static_cast<uint32_t>(SubframesForTarget((int)GetInterpolationFPS()));
-}
-
-extern "C" uint32_t GameEngine_GetInterpolationFrameCount() {
-    return GameEngine::GetInterpolationFrameCount();
+    port_alBnkfFreeAll();
 }
 
 // Version reporting and message boxes

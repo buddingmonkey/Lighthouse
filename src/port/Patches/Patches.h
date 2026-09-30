@@ -13,6 +13,7 @@ extern "C" {
 void port_thread5_onSubmit(void* taskData);
 // Runs fn on the window thread when the tick is on its own thread.
 void port_runOnRenderThread(void (*fn)(void*), void* arg);
+void port_serviceRenderRequests(void);
 // Waits for in-flight display lists before freeing or reading what they use.
 void port_pipelineSyncPoint(void);
 
@@ -20,6 +21,8 @@ void port_pipelineSyncPoint(void);
 
 int port_getDemoViCount(void);
 void port_setDemoViCount(int viCount);
+unsigned port_getDemoViSerial(void);
+int port_waitDemoViSerial(unsigned seen, int timeoutUs);
 int port_getDemoDisplayViCount(int rawViCount);
 void port_tickCutsceneStutter(void);
 int port_getCutsceneExtraVis(void);
@@ -34,6 +37,7 @@ void port_setPrintScale(float scale);
 
 void port_dialogFontHd_rebuild(void);        // rebuild the HD glyph textures for the current base
 void port_refreshDialogFontGlyphCount(void); // re-read the reachable glyph count from the active font
+int port_dialogFontUsesShiftedCodes(void);   // format codes shifted past the extended (PAL) glyph range
 
 // Framebuffer (FramebufferPatches.cpp)
 
@@ -209,12 +213,12 @@ int32_t port_mapFlag_wasSetRemotely(int32_t index);
 
 #define ANCHOR_COUNT_CCW_EYRIE_FED 0
 #define ANCHOR_COUNT_CCW_NABNUT_ACORNS 1
-void port_puzzleCount_add(int32_t counterId, int32_t delta);
+int32_t port_puzzleCount_add(int32_t counterId, int32_t localCount, int32_t delta);
 int32_t port_puzzleCount_get(int32_t counterId);
 
 void port_hutSmash_record(int32_t x, int32_t y, int32_t z, int32_t loot);
 int32_t port_hutSmash_get(int32_t x, int32_t y, int32_t z);
-int32_t port_hutSmash_countForCurrentLevel(void);
+int32_t port_hutSmash_countForCurrentLevel(int32_t localCount);
 
 void port_jiggyCrane_broadcast(int32_t stage);
 void port_jiggyCrane_remoteApply(int32_t stage);

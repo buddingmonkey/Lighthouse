@@ -183,6 +183,13 @@ Japanese ROM gives Japanese.
 Many romhacks can be extracted from a patched ROM and used as mods, from *Settings → Romhacks*.
 Only US v1.0 is supported as the base, inherited from Banjo's Backpack.
 
+Romhacks also support language packs, scoped the same as mods are. Craft a language pack and add it to `mods/~lang/<hack>/` to see it in the dropdown menu. `<hack>` is a folder of the romhack's filename without the o2r extension; Lighthouse creates it for you when the romhack is enabled. Note that language packs for romhacks can work two ways:
+
+- A complete language pack includes every dialog, so it stands on its own.
+- A delta language pack only includes the dialogs the hack modified; everything else falls back to the base game's language, or to a base game language pack if one is installed for the same language.
+
+A base game language pack in `mods/~lang/` does not appear in the dropdown while a romhack is loaded, since on its own it would leave every line the hack replaced untranslated.
+
 ## Anchor multiplayer
 
 Off on iOS, Android and the headsets. SDL2_net is not part of the mobile dependency set.

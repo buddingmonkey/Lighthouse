@@ -596,6 +596,11 @@ static s32 _gczoombox_findLineBreak(char *string, s32 line_length){
      if((u8)string[0] == 0xFD && (u8)string[1] == 0x6A){
           return gczoombox_strlen(string);
      }
+     // [port] PAL: a segment that already fits in glyphs is returned whole.
+     i = gczoombox_strlen(string);
+     if(!(line_length < __get_str_print_len(string, i))){
+          return i;
+     }
      for(i = gczoombox_strlen(string); (line_length < (__get_str_print_len(string, i)) || (' ' != string[i] )); i--);
      return i;
 }

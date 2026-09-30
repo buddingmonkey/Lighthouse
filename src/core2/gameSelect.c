@@ -210,6 +210,7 @@ void setGameInformationZoombox(s32 gamenum){
     static u8 *sJigsawLabel[] = { " JIGSAW",  " PI" "\x63" "CE",  " PUZZLETEIL" };
     static u8 *sJigsawPlural[] = { "S", "S", "E" };
     static u8 *sNoteLabel[]   = { " NOTE",    " NOTE",    " NOTE" };
+    static u8 *sNotePlural[]  = { "S", "S", "N" };
     static u8 *sEmptyLabel[]  = { ": EMPTY",  ": VIDE",   ": LEER" };
     s32 lang = code94620_func_8031B5B0();
 
@@ -249,7 +250,8 @@ void setGameInformationZoombox(s32 gamenum){
         strIToA(lowerTextLine, itemscore_noteScores_getTotal());
         strcat(lowerTextLine, sNoteLabel[lang]);
         if(itemscore_noteScores_getTotal() != 1){
-            strcat(lowerTextLine, "S");
+//          strcat(lowerTextLine, "S");
+            strcat(lowerTextLine, sNotePlural[lang]);
         }
         strcat(lowerTextLine, ".");
         strcat(lowerTextLine, "");
@@ -457,6 +459,15 @@ void gameSelect_update(Actor *this){
                     if(anctrl_isStopped(this->anctrl)){
                         chBottlesBonus_resetCompleted();
                         gameFile_load(gSelectedGameNum);
+                        // [port] Rando refuses a new file whose seed failed to generate
+                        if(!EventSystem_Should(VB_GAMESELECT_START_GAME, true, sp84)){
+                            coMusicPlayer_playMusic(COMUSIC_2C_BUZZER, 22000);
+                            if(sp84 == CH_GAME_SELECT_SAVEFILE_0_BED)
+                                func_802C75A0(this, 1);
+                            subaddie_set_state(this, 1);
+                            actor_loopAnimation(this);
+                            break;
+                        }
                         port_syncBottlesBonusIndex();
                         CALL_EVENT(OnGameStart);
                         if(EventSystem_Should(VB_GAMESELECT_START_NEW_GAME, !gameFile_isNotEmpty(sp84), sp84)){
