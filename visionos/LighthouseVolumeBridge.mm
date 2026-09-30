@@ -32,6 +32,7 @@ const float kNominalIPD = 0.063f;
 const int kHeadUnreported = -3;
 const int kHeadNoTracking = -2;
 const int kHeadNoQuad = -1;
+const int kSettleUpdates = 45;
 
 struct Sample {
     simd_float3 Head = { 0.0f, 0.0f, kRangeDefault };
@@ -48,6 +49,8 @@ struct VolumeState {
     id<MTLCommandQueue> Queue = nil;
     ar_session_t Session = nullptr;
     ar_world_tracking_provider_t TrackingProvider = nullptr;
+    std::atomic<bool> Active{ true };
+    int ActiveUpdates = 0;
     ar_device_anchor_t DeviceAnchor = nullptr;
     dispatch_semaphore_t Frame = nullptr;
     std::mutex Mutex;
@@ -159,6 +162,10 @@ void VolumePollState() {
     }
     sPhase = phase;
     port_setAppOnScreen(phase == 2 ? 1 : 0);
+    if (phase != 2 && gVolume.Session != nullptr && !gVolume.Stopped) {
+        ar_session_stop(gVolume.Session);
+        Fast::ReportVisionOS("world tracking is stopped while the scene is not active");
+    }
     char line[80];
     snprintf(line, sizeof(line), "the scene phase is %d, where 2 is active and 0 is background", phase);
     Fast::ReportVisionOS(line);
@@ -277,8 +284,21 @@ void LighthouseVolumeUpdate(LighthouseVolumeFrame frame) {
     sample.ScenePhase = frame.ScenePhase;
     sample.QuadValid = frame.HasQuad;
 
+    const bool active = frame.ScenePhase == 2;
+    if (active != gVolume.Active.exchange(active)) {
+        gVolume.ActiveUpdates = 0;
+    }
+    if (active && gVolume.ActiveUpdates < kSettleUpdates) {
+        gVolume.ActiveUpdates++;
+        if (gVolume.ActiveUpdates == kSettleUpdates) {
+            LighthouseVolumeRestartTracking();
+        }
+    }
+    const bool tracking = gVolume.TrackingProvider != nullptr &&
+                          ar_data_provider_get_state(gVolume.TrackingProvider) == ar_data_provider_state_running;
+
     int headState;
-    if (gVolume.TrackingProvider == nullptr) {
+    if (!active || gVolume.ActiveUpdates < kSettleUpdates || !tracking) {
         headState = kHeadNoTracking;
     } else if (!frame.HasQuad) {
         headState = kHeadNoQuad;
@@ -352,4 +372,53 @@ void LighthouseVolumeSetStereo(bool stereo) {
 
 void* LighthouseVolumeTexture(int eye) {
     return Fast::GetVisionOSReadyGameTexture(eye);
+}
+
+void LighthouseVolumeRestartTracking(void) {
+    if (!gVolume.Started || gVolume.Stopped || !gVolume.Active || gVolume.ActiveUpdates < kSettleUpdates) {
+        return;
+    }
+    if (gVolume.TrackingProvider != nullptr &&
+        ar_data_provider_get_state(gVolume.TrackingProvider) == ar_data_provider_state_running) {
+        return;
+    }
+    if (gVolume.Session != nullptr) {
+        ar_session_stop(gVolume.Session);
+    }
+    StartTracking();
+    Fast::ReportVisionOS("world tracking is started again");
+}
+
+void LighthouseVolumeNoteHoverLayout(int rebuilt) {
+#ifdef ENABLE_DEBUG_TOOLS
+    static int sRuns = 0;
+    static int sRebuilt = 0;
+    static double sSince = 0.0;
+    const double now = CACurrentMediaTime();
+    if (sSince == 0.0) {
+        sSince = now;
+    }
+    ++sRuns;
+    sRebuilt += rebuilt;
+    if (now - sSince >= 5.0) {
+        char line[96];
+        snprintf(line, sizeof(line), "hover layout ran %d times and rebuilt %d plates in %.1f s", sRuns, sRebuilt,
+                 now - sSince);
+        Fast::ReportVisionOS(line);
+        sRuns = 0;
+        sRebuilt = 0;
+        sSince = now;
+    }
+#endif
+}
+
+void LighthouseVolumeNoteCopySkipped(void) {
+#ifdef ENABLE_DEBUG_TOOLS
+    static uint32_t sSkipped = 0;
+    if (sSkipped++ % 90 == 0) {
+        char line[96];
+        snprintf(line, sizeof(line), "picture copy held back while the scene is not active (%u)", sSkipped);
+        Fast::ReportVisionOS(line);
+    }
+#endif
 }

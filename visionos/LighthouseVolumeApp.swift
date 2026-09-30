@@ -35,6 +35,7 @@ private let kHoverStep = Float(0.0001)
         if case .opened = await gOpenSpace?(id: kSpaceId) {
             gSpaceOpen = true
             note("the immersive space is open")
+            LighthouseVolumeRestartTracking()
         } else {
             note("the immersive space did not open")
         }
@@ -44,6 +45,12 @@ private let kHoverStep = Float(0.0001)
         note("the immersive space is given back")
     }
     gSpaceBusy = false
+}
+
+@MainActor private func spaceClosed() {
+    guard gSpaceOpen, !gSpaceBusy else { return }
+    gSpaceOpen = false
+    note("the immersive space was closed by the system; the next pinch or return opens it again")
 }
 
 @MainActor private func leave() {
@@ -85,6 +92,21 @@ private func note(_ text: String) {
         done
     }
 
+    private var views: [ObjectIdentifier: any MTLTexture] = [:]
+
+    private func sourceView(of texture: any MTLTexture, format: MTLPixelFormat) -> (any MTLTexture)? {
+        if texture.pixelFormat == format {
+            return texture
+        }
+        let key = ObjectIdentifier(texture)
+        if let view = views[key], view.pixelFormat == format {
+            return view
+        }
+        let view = texture.makeTextureView(pixelFormat: format)
+        views[key] = view
+        return view
+    }
+
     func run(queue: any MTLCommandQueue, texture: LowLevelTexture) {
         let started = CACurrentMediaTime()
         guard let buffer = queue.makeCommandBuffer() else { return }
@@ -93,7 +115,8 @@ private func note(_ text: String) {
         if let blit = buffer.makeBlitCommandEncoder() {
             for eye in 0..<eyes {
                 guard let raw = LighthouseVolumeTexture(Int32(eye)),
-                      let source = Unmanaged<AnyObject>.fromOpaque(raw).takeUnretainedValue() as? any MTLTexture
+                      let texture = Unmanaged<AnyObject>.fromOpaque(raw).takeUnretainedValue() as? any MTLTexture,
+                      let source = sourceView(of: texture, format: destination.pixelFormat)
                 else {
                     continue
                 }
@@ -249,13 +272,14 @@ private final class VolumeState {
                                   item: rect.Identifier != 0))
         }
         if next != hoverShown || quadSize != hoverQuad {
+            let previous = quadSize == hoverQuad ? hoverShown : []
             hoverShown = next
             hoverQuad = quadSize
-            layOutHover(next)
+            layOutHover(next, previous: previous)
         }
     }
 
-    private func layOutHover(_ rects: [HoverRect]) {
+    private func layOutHover(_ rects: [HoverRect], previous: [HoverRect]) {
         guard let quad, let material = hoverMaterial, quadSize.x > 0.0, quadSize.y > 0.0 else { return }
         while hoverEntities.count < rects.count {
             let entity = ModelEntity()
@@ -263,12 +287,18 @@ private final class VolumeState {
             quad.addChild(entity)
             hoverEntities.append(entity)
         }
+        var rebuilt = 0
+        defer { LighthouseVolumeNoteHoverLayout(Int32(rebuilt)) }
         for (index, entity) in hoverEntities.enumerated() {
             guard index < rects.count else {
                 entity.isEnabled = false
                 continue
             }
             let rect = rects[index]
+            if index < previous.count, previous[index] == rect {
+                continue
+            }
+            rebuilt += 1
             let width = Float(rect.frame.width) / Float(kEyeWidth) * quadSize.x
             let height = Float(rect.frame.height) / Float(kTextureHeight) * quadSize.y
             guard width > 0.0, height > 0.0 else {
@@ -301,12 +331,26 @@ private final class VolumeState {
         }
     }
 
+    private var held: SIMD2<Float>?
+
     func point(_ value: EntityTargetValue<DragGesture.Value>, pressed: Bool) {
         guard let quad, quadSize.x > 0.0, quadSize.y > 0.0 else { return }
         let local = value.convert(value.location3D, from: .local, to: quad)
         let u = min(max(local.x / quadSize.x + 0.5, 0.0), 1.0)
         let v = min(max(0.5 - local.y / quadSize.y, 0.0), 1.0)
-        LighthouseVolumePoint(u * Float(kEyeWidth), v * Float(kTextureHeight), pressed)
+        let place = SIMD2(u * Float(kEyeWidth), v * Float(kTextureHeight))
+        if pressed, held == nil {
+            Task { await holdSpace(phase == 2) }
+        }
+        held = pressed ? place : nil
+        LighthouseVolumePoint(place.x, place.y, pressed)
+    }
+
+    func lift() {
+        guard let place = held else { return }
+        held = nil
+        LighthouseVolumeNote("a pinch ended with no end event; the press is released")
+        LighthouseVolumePoint(place.x, place.y, false)
     }
 
     private func quadLost(_ quad: ModelEntity) {
@@ -357,7 +401,11 @@ private final class VolumeState {
             eyeNote = nil
             note(line)
         }
-        gPictureCopy.run(queue: queue, texture: texture)
+        if phase == 2 {
+            gPictureCopy.run(queue: queue, texture: texture)
+        } else {
+            LighthouseVolumeNoteCopySkipped()
+        }
     }
 }
 
@@ -366,6 +414,7 @@ private struct LighthouseVolumeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @GestureState private var pinching = false
 
     var body: some View {
         GeometryReader3D { proxy in
@@ -381,9 +430,15 @@ private struct LighthouseVolumeView: View {
             .gesture(
                 DragGesture(minimumDistance: 0.0)
                     .targetedToAnyEntity()
+                    .updating($pinching) { _, pinching, _ in pinching = true }
                     .onChanged { state.point($0, pressed: true) }
                     .onEnded { state.point($0, pressed: false) }
             )
+            .onChange(of: pinching) { was, now in
+                if was && !now {
+                    state.lift()
+                }
+            }
         }
         .handlesGameControllerEvents(matching: .gamepad)
         .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .top) {
@@ -414,6 +469,12 @@ private struct LighthouseVolumeView: View {
                                   Unmanaged.passUnretained(state.queue as AnyObject).toOpaque(),
                                   UInt32(kEyeWidth), UInt32(kTextureHeight))
         }
+        .onDisappear {
+            state.phase = 0
+            LighthouseVolumeNote("the volume is closed; the game waits until it opens again")
+            LighthouseVolumeSetScenePhase(0)
+            Task { await holdSpace(false) }
+        }
         .onChange(of: scenePhase, initial: true) { _, phase in
             switch phase {
             case .background: state.phase = 0
@@ -439,6 +500,7 @@ struct LighthouseVolumeApp: App {
 
         ImmersiveSpace(id: kSpaceId) {
             RealityView { _ in }
+                .onDisappear { spaceClosed() }
         }
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
     }

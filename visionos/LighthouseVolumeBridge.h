@@ -50,6 +50,12 @@ void LighthouseVolumeSetStereo(bool stereo);
 
 void* LighthouseVolumeTexture(int eye);
 
+void LighthouseVolumeRestartTracking(void);
+
+void LighthouseVolumeNoteHoverLayout(int rebuilt);
+
+void LighthouseVolumeNoteCopySkipped(void);
+
 #ifdef __cplusplus
 }
 #endif
