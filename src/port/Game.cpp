@@ -10,6 +10,7 @@
 #include <mutex>
 #include <thread>
 
+#include <fast/Fast3dWindow.h>
 #include <fast/interpreter.h>
 #include <libultraship.h>
 #ifdef _WIN32
@@ -35,7 +36,10 @@
 #include "Network/Anchor/Anchor.h"
 #include "OS/OS.h"
 #include "Patches/Patches.h"
+#include "Extractor/ExtractFlow.h"
 #include "ShaderPrewarm.h"
+#include "UI/LighthouseGui.hpp"
+#include "UI/UIWidgets.hpp"
 #include "ShipUtils.h"
 #include "ShipInit.hpp"
 #include "src/port/Enhancements/Events/Hooks/Events.h"
@@ -378,6 +382,39 @@ extern "C" void Graphics_PushFrame(Gfx* data) {
     sFrameRendered = true;
 }
 
+static void DrawPrewarmFrame(float progress) {
+    lhFast3dWindow->HandleEvents();
+    if (!port_appIsOnScreen() || !lhFast3dWindow->IsFrameReady()) {
+        SDL_Delay(16);
+        return;
+    }
+    GameEngine::ScaleImGui();
+    auto gui = lhFast3dWindow->GetGui();
+    gui->StartDraw();
+    lhFast3dWindow->StartFrame();
+    lhFast3dWindow->RunGuiOnly();
+    if (!ImGui::IsPopupOpen("Preparing Shaders")) {
+        ImGui::OpenPopup("Preparing Shaders");
+    }
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    auto color = UIWidgets::ColorValues.at(THEME_COLOR);
+    ImGui::PushStyleColor(ImGuiCol_TitleBgActive, color);
+    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(color.x, color.y, color.z, 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
+    if (ImGui::BeginPopupModal("Preparing Shaders", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove |
+                                   ImGuiWindowFlags_NoSavedSettings)) {
+        ImGui::Text("Compiling shaders for this device...");
+        ImGui::ProgressBar(progress, ImVec2(600.0f, 50.0f));
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(2);
+    gui->EndDraw();
+    lhFast3dWindow->EndFrame();
+}
+
 static void PrewarmShaders() {
     auto interpreter = GameEngine_GetInterpreter();
     if (interpreter == nullptr) {
@@ -386,11 +423,15 @@ static void PrewarmShaders() {
     constexpr size_t total = sizeof(kLighthouseShaderPrewarmList) / sizeof(kLighthouseShaderPrewarmList[0]);
     const auto started = std::chrono::steady_clock::now();
     size_t done = 0;
-    while (done < total) {
+    while (done < total && std::chrono::steady_clock::now() - started < std::chrono::milliseconds(400)) {
         done = interpreter->PrewarmShadersSlice(kLighthouseShaderPrewarmList, total, done, 50);
     }
+    while (done < total && WindowIsRunning() && lhFast3dWindow != nullptr) {
+        DrawPrewarmFrame((float)done / (float)total);
+        done = interpreter->PrewarmShadersSlice(kLighthouseShaderPrewarmList, total, done, 25);
+    }
     SPDLOG_INFO(
-        "Prewarmed {} shader programs in {} ms", total,
+        "Prewarmed {} of {} shader programs in {} ms", done, total,
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count());
 }
 
