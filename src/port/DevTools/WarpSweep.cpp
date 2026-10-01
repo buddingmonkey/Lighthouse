@@ -158,7 +158,7 @@ bool sActive = false;
 } // namespace
 
 void WarpSweepTick() {
-#if defined(LIGHTHOUSE_MOBILE) && !defined(ENABLE_DEBUG_TOOLS)
+#if defined(LIGHTHOUSE_MOBILE) && !defined(ENABLE_DEBUG_TOOLS) && !defined(LIGHTHOUSE_WARP_SWEEP)
     return;
 #endif
     sTick++;

@@ -519,6 +519,11 @@ if (LIGHTHOUSE_APPLE_MOBILE OR CMAKE_SYSTEM_NAME STREQUAL "Android")
     target_compile_definitions(${PROJECT_NAME} PRIVATE LIGHTHOUSE_MOBILE=1 LIGHTHOUSE_TOUCH_CONTROLS=1)
 endif()
 
+option(LIGHTHOUSE_WARP_SWEEP "Let a mobile build without debug tools run the warp sweep" OFF)
+if (LIGHTHOUSE_WARP_SWEEP)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE LIGHTHOUSE_WARP_SWEEP=1)
+endif()
+
 if(USE_NETWORKING)
     if(MSVC)
         vcpkg_install_packages(sdl2-net)
