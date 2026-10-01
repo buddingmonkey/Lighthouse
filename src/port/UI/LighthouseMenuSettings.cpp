@@ -484,16 +484,16 @@ void LighthouseMenu::AddMenuSettings() {
                               "world stays behind the window; a smaller limit makes all of it less "
                               "deep.\n\nAt 1 degree or less, most people can play for a long time with "
                               "no eye strain. If the depth is not strong enough, increase this limit, or the "
-                              "Diorama Depth if it is the smaller of the two.")
-                     .Min(0.25f)
+                              "Diorama Depth if it is the smaller of the two.\n\n0 turns the limit off.")
+                     .Min(0.0f)
                      .Max(3.0f)
-                     .DefaultValue(1.0f)
+                     .DefaultValue(0.0f)
                      .Format("%.2f degrees"));
     AddWidget(path, "Steady Depth", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_SETTING("XrSteadyDepth"))
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) { info.isHidden = !IsHeadsetWindow(); })
-        .Options(CheckboxOptions().DefaultValue(true).Tooltip(
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
             "The nearest thing that the camera sees always sits on the window. When the camera "
             "goes near a wall or into grass, the rest of the world moves back. With this "
             "setting, the world becomes less deep at that time instead, and Banjo and the other "
