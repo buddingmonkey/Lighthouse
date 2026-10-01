@@ -321,38 +321,62 @@ void UpdateModFiles(bool init, bool reset) {
     modScopeHack.clear();
     bool changed = false;
     std::string modsPath = Ship::Context::GetPathRelativeToAppDirectory("mods");
+    std::vector<std::string> modRoots;
+    std::vector<std::string> rootCandidates = { modsPath };
+#ifdef __IOS__
+    rootCandidates.push_back(Ship::Context::GetPathRelativeToAppBundle("mods"));
+#endif
+    for (const std::string& root : rootCandidates) {
+        std::error_code ec;
+        if (root.empty() || !std::filesystem::is_directory(root, ec)) {
+            continue;
+        }
+        const std::string canonical = std::filesystem::weakly_canonical(root, ec).generic_string();
+        bool seen = false;
+        for (const std::string& known : modRoots) {
+            seen = seen || std::filesystem::weakly_canonical(known, ec).generic_string() == canonical;
+        }
+        if (!seen) {
+            modRoots.push_back(root);
+        }
+    }
     std::map<std::string, std::string> tempMods;
-    if (modsPath.length() > 0 && std::filesystem::exists(modsPath)) {
+    if (!modRoots.empty()) {
         std::vector<std::filesystem::path> enabledFiles;
-        if (std::filesystem::is_directory(modsPath)) {
-            std::vector<std::filesystem::path> candidates;
+        {
+            std::vector<std::pair<std::string, std::filesystem::path>> candidates;
             std::set<std::string> hackNames;
             std::set<std::string> overlayPaths;
-            for (const std::filesystem::directory_entry& p : std::filesystem::recursive_directory_iterator(
-                     modsPath, std::filesystem::directory_options::follow_directory_symlink)) {
-                if (p.is_directory()) {
-                    continue;
-                }
-                if (!IsValidExtension(p.path().extension().generic_string())) {
-                    continue;
-                }
-                // Skip reserved folders (e.g. mods/~lang/ language packs) — they
-                // aren't user-toggleable mods and must not appear in either menu.
-                if (IsReservedModPath(modsPath, p.path())) {
-                    continue;
-                }
-                candidates.push_back(p.path());
-                if (ArchiveHasGameConfig(p.path())) {
-                    hackNames.insert(p.path().stem().generic_string());
-                    overlayPaths.insert(p.path().generic_string());
+            for (const std::string& root : modRoots) {
+                for (const std::filesystem::directory_entry& p : std::filesystem::recursive_directory_iterator(
+                         root, std::filesystem::directory_options::follow_directory_symlink)) {
+                    if (p.is_directory()) {
+                        continue;
+                    }
+                    if (!IsValidExtension(p.path().extension().generic_string())) {
+                        continue;
+                    }
+                    // Skip reserved folders (e.g. mods/~lang/ language packs) — they
+                    // aren't user-toggleable mods and must not appear in either menu.
+                    if (IsReservedModPath(root, p.path())) {
+                        continue;
+                    }
+                    candidates.emplace_back(root, p.path());
+                    if (ArchiveHasGameConfig(p.path())) {
+                        hackNames.insert(p.path().stem().generic_string());
+                        overlayPaths.insert(p.path().generic_string());
+                    }
                 }
             }
 
-            for (const std::filesystem::path& path : candidates) {
+            for (const auto& [root, path] : candidates) {
                 std::string filename = path.stem().generic_string();
+                if (filePaths.count(filename) > 0) {
+                    continue;
+                }
                 std::string scopeHack;
                 bool isOverlay = overlayPaths.count(path.generic_string()) > 0;
-                ModCategory category = CategorizeMod(modsPath, path, isOverlay, hackNames, scopeHack);
+                ModCategory category = CategorizeMod(root, path, isOverlay, hackNames, scopeHack);
                 modCategory[filename] = category;
                 modScopeHack[filename] = scopeHack;
                 bool enabled =

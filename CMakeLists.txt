@@ -519,6 +519,9 @@ if (LIGHTHOUSE_APPLE_MOBILE OR CMAKE_SYSTEM_NAME STREQUAL "Android")
     target_compile_definitions(${PROJECT_NAME} PRIVATE LIGHTHOUSE_MOBILE=1 LIGHTHOUSE_TOUCH_CONTROLS=1)
 endif()
 
+set(LIGHTHOUSE_BUNDLE_ROM "" CACHE FILEPATH "Apple test builds only: a bk.o2r from the in-app extractor to carry in the app")
+set(LIGHTHOUSE_BUNDLE_MODS "" CACHE PATH "Apple test builds only: a folder of .o2r mods to carry in the app")
+
 option(LIGHTHOUSE_WARP_SWEEP "Let a mobile build without debug tools run the warp sweep" OFF)
 if (LIGHTHOUSE_WARP_SWEEP)
     target_compile_definitions(${PROJECT_NAME} PRIVATE LIGHTHOUSE_WARP_SWEEP=1)
@@ -950,6 +953,8 @@ if(LIGHTHOUSE_APPLE_MOBILE)
                 -DBUNDLE=$<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>
                 -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
                 -DBINARY_DIR=${CMAKE_BINARY_DIR}
+                -DBUNDLE_ROM=${LIGHTHOUSE_BUNDLE_ROM}
+                -DBUNDLE_MODS=${LIGHTHOUSE_BUNDLE_MODS}
                 -P ${CMAKE_SOURCE_DIR}/cmake/ios-bundle-resources.cmake
         COMMENT "Copying Lighthouse assets into the app bundle"
     )
