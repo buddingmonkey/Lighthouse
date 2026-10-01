@@ -27,6 +27,7 @@
 
 #include "Controller/TouchControls.h"
 #include "DevTools/ThreadWatchdog.h"
+#include "DevTools/WarpSweep.h"
 #include "FilePicker.h"
 #include "GameStatus.h"
 #include "Interpolation/FrameInterpolation.h"
@@ -406,6 +407,7 @@ void push_frame() {
     }
 
     GameEngine::Instance->StartFrame();
+    Lighthouse::DevTools::WarpSweepTick();
     port_animVtx_beginTick();
     const bool recordInterpolation = GameEngine::IsInterpolationEnabled();
     if (recordInterpolation) {
