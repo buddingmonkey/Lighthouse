@@ -55,6 +55,10 @@ OTRVersion ReadPortVersionFromOTR(std::string otrPath) {
             version.major = reader->ReadUInt16();
             version.minor = reader->ReadUInt16();
             version.patch = reader->ReadUInt16();
+            if (!archive->HasFile("assets/sfx_bank")) {
+                SPDLOG_WARN("O2R predates the per-sound soundfont: {}", otrPath);
+                version = {};
+            }
         } else {
             SPDLOG_WARN("Failed to read portVersion file from O2R: {}", otrPath);
         }
