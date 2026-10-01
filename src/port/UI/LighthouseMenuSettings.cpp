@@ -487,13 +487,13 @@ void LighthouseMenu::AddMenuSettings() {
                               "Diorama Depth if it is the smaller of the two.\n\n0 turns the limit off.")
                      .Min(0.0f)
                      .Max(3.0f)
-                     .DefaultValue(0.0f)
+                     .DefaultValue(1.0f)
                      .Format("%.2f degrees"));
     AddWidget(path, "Steady Depth", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_SETTING("XrSteadyDepth"))
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) { info.isHidden = !IsHeadsetWindow(); })
-        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+        .Options(CheckboxOptions().DefaultValue(true).Tooltip(
             "The nearest thing that the camera sees always sits on the window. When the camera "
             "goes near a wall or into grass, the rest of the world moves back. With this "
             "setting, the world becomes less deep at that time instead, and Banjo and the other "
