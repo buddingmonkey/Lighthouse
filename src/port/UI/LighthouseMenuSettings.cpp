@@ -68,9 +68,9 @@ static const std::unordered_map<int32_t, const char*> controlSchemeLabels = {
 };
 
 #ifdef __ANDROID__
-static const std::unordered_map<int32_t, const char*> gameScreenLabels = {
-    { 0, "Main Screen" },
-    { 1, "Second Screen" },
+static const std::vector<const char*> gameScreenLabels = {
+    "Main Screen",
+    "Second Screen",
 };
 
 static const std::vector<const char*> screenArtLabels = {
@@ -598,16 +598,19 @@ void LighthouseMenu::AddMenuSettings() {
 #endif
 #endif
 #ifdef __ANDROID__
-    AddWidget(path, "Game Screen", WIDGET_CVAR_COMBOBOX)
-        .CVar(CVAR_SETTING("GameScreen"))
+    AddWidget(path, "Game Screen", WIDGET_CUSTOM)
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) { info.isHidden = Lighthouse::GameScreenCount() < 2 || IsHeadsetWindow(); })
-        .Callback([](WidgetInfo& info) { Lighthouse::ShowGameScreen(CVarGetInteger(CVAR_SETTING("GameScreen"), 0)); })
-        .Options(ComboboxOptions()
-                     .ComboMap(gameScreenLabels)
-                     .DefaultIndex(0)
-                     .Tooltip("Selects the screen that shows the game. On a dual-screen device, the main screen "
-                              "is the top screen."));
+        .CustomFunction([](WidgetInfo& info) {
+            if (UIWidgets::CVarCombobox(info.name.c_str(), CVAR_SETTING("GameScreen"), gameScreenLabels,
+                                        ComboboxOptions()
+                                            .Color(WIDGET_COLOR)
+                                            .DefaultIndex(0)
+                                            .Tooltip("Selects the screen that shows the game. On a dual-screen "
+                                                     "device, the main screen is the top screen."))) {
+                Lighthouse::ShowGameScreen(CVarGetInteger(CVAR_SETTING("GameScreen"), 0));
+            }
+        });
     AddWidget(path, "Other Screen Image", WIDGET_CUSTOM)
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) { info.isHidden = Lighthouse::GameScreenCount() < 2 || IsHeadsetWindow(); })
