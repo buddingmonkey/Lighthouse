@@ -68,6 +68,8 @@ public class LighthouseActivity extends SDLActivity {
     private volatile File dataDir;
     private volatile int softKeyboardResult = -1;
     private int wantedScreen = -1;
+    private int screenArt = -1;
+    private boolean started;
     private int loggedOrientation = -1;
     private DisplayManager.DisplayListener screenListener;
 
@@ -199,6 +201,29 @@ public class LighthouseActivity extends SDLActivity {
             showOnScreen(screens.get(wanted));
         } else if (!mBrokenLibraries) {
             nativeGameScreens(screens.size(), Math.max(current, 0));
+            showScreenArt(screens);
+        }
+    }
+
+    public void setScreenArt(int index) {
+        runOnUiThread(() -> {
+            screenArt = index;
+            showScreenArt(gameScreens());
+        });
+    }
+
+    private void showScreenArt(List<Display> screens) {
+        Display free = null;
+        for (Display display : screens) {
+            if (display.getDisplayId() != currentDisplayId()) {
+                free = display;
+                break;
+            }
+        }
+        if (started && free != null && ScreenArtActivity.hasImage(screenArt)) {
+            ScreenArtActivity.show(this, currentDisplayId(), free, screenArt);
+        } else {
+            ScreenArtActivity.hide();
         }
     }
 
@@ -248,7 +273,22 @@ public class LighthouseActivity extends SDLActivity {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
             goImmersive();
+            showScreenArt(gameScreens());
         }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        started = true;
+        showScreenArt(gameScreens());
+    }
+
+    @Override
+    protected void onStop() {
+        started = false;
+        ScreenArtActivity.hide();
+        super.onStop();
     }
 
     @Override
@@ -258,6 +298,7 @@ public class LighthouseActivity extends SDLActivity {
         if (screenListener != null) {
             getSystemService(DisplayManager.class).unregisterDisplayListener(screenListener);
         }
+        ScreenArtActivity.hide();
         super.onDestroy();
         if (relaunch) {
             Log.i(TAG, "Configuration change needs a new activity; starting a new process on screen " + displayId);

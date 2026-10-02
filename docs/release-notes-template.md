@@ -10,6 +10,7 @@ For Windows, Linux and macOS, use the release from the main Lighthouse project a
 
 - **Foldables (Pixel Fold, Galaxy Z Fold):** on the large inner screen, the game turns with the device. In portrait, the game is at the top and the touch controls are in the space below. The outer screen stays in landscape.
 - **Dual-screen phones (Ayn Thor):** the game starts on the main screen. To move it to the other screen, go to **Settings > Graphics > Game Screen**. The app keeps your choice.
+- **Dual-screen phones (Ayn Thor):** the screen that does not show the game shows the original box art. To show a different image or a black screen, go to **Settings > Graphics > Other Screen Image**.
 
 ### Menu access
 

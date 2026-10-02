@@ -72,6 +72,10 @@ static const std::unordered_map<int32_t, const char*> gameScreenLabels = {
     { 0, "Main Screen" },
     { 1, "Second Screen" },
 };
+
+static const std::vector<const char*> screenArtLabels = {
+    "Cover Art", "Hero", "Jiggies", "Poster", "Cover Back", "Box", "Black",
+};
 #endif
 
 #ifdef LIGHTHOUSE_TOUCH_CONTROLS
@@ -604,6 +608,18 @@ void LighthouseMenu::AddMenuSettings() {
                      .DefaultIndex(0)
                      .Tooltip("Selects the screen that shows the game. On a dual-screen device, the main screen "
                               "is the top screen."));
+    AddWidget(path, "Other Screen Image", WIDGET_CUSTOM)
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = Lighthouse::GameScreenCount() < 2 || IsHeadsetWindow(); })
+        .CustomFunction([](WidgetInfo& info) {
+            if (UIWidgets::CVarCombobox(info.name.c_str(), CVAR_SETTING("ScreenArt"), screenArtLabels,
+                                        ComboboxOptions()
+                                            .Color(WIDGET_COLOR)
+                                            .DefaultIndex(0)
+                                            .Tooltip("Selects the image on the screen that does not show the game."))) {
+                Lighthouse::ShowScreenArt();
+            }
+        });
 #endif
     AddWidget(path, "Renderer API (Needs reload)", WIDGET_VIDEO_BACKEND).RaceDisable(false);
     AddWidget(path, "Enable Vsync", WIDGET_CVAR_CHECKBOX)

@@ -7,6 +7,7 @@
 #include <spdlog/spdlog.h>
 #include <libultraship/bridge/consolevariablebridge.h>
 #include "port/UI/cvar_prefixes.h"
+#include "port/Engine.h"
 #endif
 
 #ifdef __ANDROID__
@@ -37,26 +38,38 @@ int GameScreenCount() {
 #endif
 }
 
-void ShowGameScreen(int index) {
 #ifdef __ANDROID__
+static void CallActivity(const char* method, int value) {
     JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
     jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
     if (env == nullptr || activity == nullptr) {
         return;
     }
     jclass activityClass = env->GetObjectClass(activity);
-    jmethodID show = env->GetMethodID(activityClass, "setGameScreen", "(I)V");
-    if (show != nullptr) {
-        SPDLOG_INFO("Game screen {} requested", index);
-        env->CallVoidMethod(activity, show, index);
+    jmethodID call = env->GetMethodID(activityClass, method, "(I)V");
+    if (call != nullptr) {
+        SPDLOG_INFO("LighthouseActivity.{}({})", method, value);
+        env->CallVoidMethod(activity, call, value);
     } else {
         env->ExceptionClear();
-        SPDLOG_ERROR("LighthouseActivity.setGameScreen is missing");
+        SPDLOG_ERROR("LighthouseActivity.{} is missing", method);
     }
     env->DeleteLocalRef(activityClass);
     env->DeleteLocalRef(activity);
+}
+#endif
+
+void ShowGameScreen(int index) {
+#ifdef __ANDROID__
+    CallActivity("setGameScreen", index);
 #else
     (void)index;
+#endif
+}
+
+void ShowScreenArt() {
+#ifdef __ANDROID__
+    CallActivity("setScreenArt", IsHeadsetWindow() ? -1 : CVarGetInteger(CVAR_SETTING("ScreenArt"), 0));
 #endif
 }
 
@@ -65,6 +78,7 @@ void PumpGameScreen() {
     if (!sRequested) {
         sRequested = true;
         ShowGameScreen(CVarGetInteger(CVAR_SETTING("GameScreen"), 0));
+        ShowScreenArt();
         return;
     }
     if (sChanged.exchange(false) && sCount > 1) {

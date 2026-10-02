@@ -65,6 +65,14 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ScreenArtActivity"
+            android:configChanges="colorMode|density|fontScale|fontWeightAdjustment|grammaticalGender|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity="com.harbormasters.lighthouse.screenart"
+            android:theme="@style/LighthouseTheme" />
+
     </application>
 
 </manifest>
