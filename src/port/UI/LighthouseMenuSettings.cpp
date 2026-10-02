@@ -1,6 +1,7 @@
 #include "LighthouseMenu.h"
 #include "port/build.h"
 #include "port/Engine.h"
+#include "port/GameScreen.h"
 #include "Notification.h"
 #include "LighthouseInputEditorWindow.h"
 #include "LighthouseModals.h"
@@ -65,6 +66,13 @@ static const std::unordered_map<int32_t, const char*> controlSchemeLabels = {
     { CONTROL_SCHEME_MODERN, "Modern" },
     { CONTROL_SCHEME_POCKET, "Pocket" },
 };
+
+#ifdef __ANDROID__
+static const std::unordered_map<int32_t, const char*> gameScreenLabels = {
+    { 0, "Main Screen" },
+    { 1, "Second Screen" },
+};
+#endif
 
 #ifdef LIGHTHOUSE_TOUCH_CONTROLS
 static const std::unordered_map<int32_t, const char*> touchLayoutLabels = {
@@ -584,6 +592,18 @@ void LighthouseMenu::AddMenuSettings() {
                               "for both eyes, which costs half as much and sends one layer to the compositor.")
                      .DefaultValue(true));
 #endif
+#endif
+#ifdef __ANDROID__
+    AddWidget(path, "Game Screen", WIDGET_CVAR_COMBOBOX)
+        .CVar(CVAR_SETTING("GameScreen"))
+        .RaceDisable(false)
+        .PreFunc([](WidgetInfo& info) { info.isHidden = Lighthouse::GameScreenCount() < 2 || IsHeadsetWindow(); })
+        .Callback([](WidgetInfo& info) { Lighthouse::ShowGameScreen(CVarGetInteger(CVAR_SETTING("GameScreen"), 0)); })
+        .Options(ComboboxOptions()
+                     .ComboMap(gameScreenLabels)
+                     .DefaultIndex(0)
+                     .Tooltip("Selects the screen that shows the game. On a dual-screen device, the main screen "
+                              "is the top screen."));
 #endif
     AddWidget(path, "Renderer API (Needs reload)", WIDGET_VIDEO_BACKEND).RaceDisable(false);
     AddWidget(path, "Enable Vsync", WIDGET_CVAR_CHECKBOX)

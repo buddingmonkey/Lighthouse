@@ -30,6 +30,7 @@
 #include "DevTools/ThreadWatchdog.h"
 #include "DevTools/WarpSweep.h"
 #include "FilePicker.h"
+#include "GameScreen.h"
 #include "GameStatus.h"
 #include "Interpolation/FrameInterpolation.h"
 #include "Nametag/Nametag.h"
@@ -559,6 +560,7 @@ int SDL_main(int argc, char* argv[]) {
         Lighthouse::PumpFilePicker();
         TouchControls_Poll();
         TouchControls_PollMenuCombo();
+        Lighthouse::PumpGameScreen();
         OS_SiService();
         if (!WindowIsRunning()) {
             releaseGameThread();

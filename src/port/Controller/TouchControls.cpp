@@ -978,6 +978,7 @@ extern "C" void TouchControls_Poll(void) {
         sStickHeld = false;
         sRightHeld = false;
         sMenuLatch = false;
+        sLayoutValid = false;
         ApplyGameView(0.0f);
         return;
     }
