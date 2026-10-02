@@ -446,7 +446,7 @@ void LighthouseMenu::AddMenuSettings() {
                          "Higher sample count will result in smoother edges on models, but may reduce performance.")
                 .Min(1)
                 .Max(8)
-                .DefaultValue(1));
+                .DefaultValue(LIGHTHOUSE_DEFAULT_MSAA));
 #endif
     auto fps = CVarGetInteger(CVAR_SETTING("InterpolationFPS"), 30);
     const char* fpsFormat = fps == 30 ? "Original (%d)" : "%d";

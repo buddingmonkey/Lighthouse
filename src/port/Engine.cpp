@@ -196,6 +196,11 @@ GameEngine::GameEngine() {
 
     this->context->InitConfiguration();
     this->context->InitConsoleVariables();
+#ifdef LIGHTHOUSE_MOBILE
+    if (CVarGetInteger(CVAR_MSAA_VALUE, 0) == 0) {
+        CVarSetInteger(CVAR_MSAA_VALUE, LIGHTHOUSE_DEFAULT_MSAA);
+    }
+#endif
     assets_path = Ship::Context::LocateFileAcrossAppDirs("lighthouse.o2r");
     portArchiveVersionMatch = std::filesystem::exists(assets_path); // TODO: port archive versioning
 

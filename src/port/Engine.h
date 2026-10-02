@@ -5,6 +5,14 @@
                   : (GameEngine_OTRSigCheck((const char*)path) ? ResourceGetDataByName((const char*)path) : path))
 #define LOAD_ASSET_RAW(path) ResourceGetDataByName((const char*)path)
 
+#if defined(__ANDROID__)
+#define LIGHTHOUSE_DEFAULT_MSAA 2
+#elif defined(LIGHTHOUSE_MOBILE)
+#define LIGHTHOUSE_DEFAULT_MSAA 4
+#else
+#define LIGHTHOUSE_DEFAULT_MSAA 1
+#endif
+
 typedef enum {
     BK_VER_US_10 = 0x0693BFA4,
     BK_VER_US_11 = 0xAC5975CD,
