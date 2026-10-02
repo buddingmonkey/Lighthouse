@@ -12,6 +12,7 @@
 #else
 #define LIGHTHOUSE_DEFAULT_MSAA 1
 #endif
+#define LIGHTHOUSE_DEFAULT_MATCH_REFRESH_RATE 1
 
 typedef enum {
     BK_VER_US_10 = 0x0693BFA4,

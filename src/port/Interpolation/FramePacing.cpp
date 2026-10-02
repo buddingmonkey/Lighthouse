@@ -566,7 +566,7 @@ void GameEngine::ProcessGfxCommands(Gfx* commands) {
 }
 
 uint32_t GameEngine::GetInterpolationFPS() {
-    if (CVarGetInteger(CVAR_SETTING("MatchRefreshRate"), IsHeadsetWindow() ? 1 : 0)) {
+    if (CVarGetInteger(CVAR_SETTING("MatchRefreshRate"), LIGHTHOUSE_DEFAULT_MATCH_REFRESH_RATE)) {
         return Ship::Context::GetRawInstance()->GetWindow()->GetCurrentRefreshRate();
 
     } else if (CVarGetInteger(CVAR_VSYNC_ENABLED, 1) ||

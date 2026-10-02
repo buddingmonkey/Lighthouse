@@ -472,7 +472,7 @@ void LighthouseMenu::AddMenuSettings() {
         .RaceDisable(false)
         .Options(CheckboxOptions()
                      .Tooltip("Matches interpolation value to the refresh rate of your display.")
-                     .DefaultValue(IsHeadsetWindow()));
+                     .DefaultValue(LIGHTHOUSE_DEFAULT_MATCH_REFRESH_RATE));
 #ifdef ENABLE_XR_WINDOW
     AddWidget(path, "Diorama Depth", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("XrDioramaDepth"))

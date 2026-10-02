@@ -1,6 +1,7 @@
 #include "LighthouseMenu.h"
 #include "LighthouseInputEditorWindow.h"
 #include <fast/Fast3dWindow.h>
+#include "port/Engine.h"
 #include "port/ResourceHelpers.h"
 #include "port/Localization/Language.h"
 #include "port/Romhack/RomhackConfig.h"
@@ -171,7 +172,9 @@ void LighthouseMenu::InitElement() {
            },
             "Not Available on DirectX" } },
         { DISABLE_FOR_MATCH_REFRESH_RATE_ON,
-          { [](disabledInfo& info) -> bool { return CVarGetInteger(CVAR_SETTING("MatchRefreshRate"), 0); },
+          { [](disabledInfo& info) -> bool {
+               return CVarGetInteger(CVAR_SETTING("MatchRefreshRate"), LIGHTHOUSE_DEFAULT_MATCH_REFRESH_RATE);
+           },
             "Match Refresh Rate is Enabled" } },
         { DISABLE_FOR_ADVANCED_RESOLUTION_ON,
           { [](disabledInfo& info) -> bool { return CVarGetInteger(CVAR_PREFIX_ADVANCED_RESOLUTION ".Enabled", 0); },
