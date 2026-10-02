@@ -50,6 +50,7 @@ public class LighthouseActivity extends SDLActivity {
     private static final String FALLBACK_IMPORT_NAME = "import.tmp";
     private static final String FEATURE_HINGE_ANGLE = "android.hardware.sensor.hinge_angle";
     private static final int LARGE_SCREEN_DP = 600;
+    private static final long PICKER_FOCUS_CHECK_MS = 500;
 
     private static final String[] SHIPPED = {
         "lighthouse.o2r",
@@ -398,12 +399,22 @@ public class LighthouseActivity extends SDLActivity {
         if (requestCode != REQUEST_PICK_FILE) {
             return;
         }
+        mLayout.postDelayed(this::takeBackFocus, PICKER_FOCUS_CHECK_MS);
         Uri source = (resultCode == RESULT_OK && data != null) ? data.getData() : null;
         if (source == null) {
             nativeFilePicked(null);
             return;
         }
         new Thread(() -> nativeFilePicked(importDocument(source)), "FileImport").start();
+    }
+
+    private void takeBackFocus() {
+        if (hasWindowFocus() || isFinishing()) {
+            return;
+        }
+        Log.i(TAG, "No window focus after the file picker; bringing the game to the front");
+        ActivityOptions options = ActivityOptions.makeBasic().setLaunchDisplayId(currentDisplayId());
+        startActivity(new Intent(this, LighthouseActivity.class), options.toBundle());
     }
 
     private String importDocument(Uri source) {

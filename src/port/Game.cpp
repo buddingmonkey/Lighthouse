@@ -77,10 +77,19 @@ int SDLCALL LifecycleWatch(void* userdata, SDL_Event* event) {
     (void)userdata;
     switch (event->type) {
         case SDL_APP_WILLENTERBACKGROUND:
+            SPDLOG_INFO("[mobile] App enters the background");
             sAppOnScreen.store(false, std::memory_order_release);
             break;
         case SDL_APP_DIDENTERFOREGROUND:
+            SPDLOG_INFO("[mobile] App is in the foreground");
             sAppOnScreen.store(!sAppTerminating.load(std::memory_order_acquire), std::memory_order_release);
+            break;
+        case SDL_WINDOWEVENT:
+            if (event->window.event == SDL_WINDOWEVENT_FOCUS_GAINED ||
+                event->window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+                SPDLOG_INFO("[mobile] Window focus {}",
+                            event->window.event == SDL_WINDOWEVENT_FOCUS_GAINED ? "gained" : "lost");
+            }
             break;
         case SDL_APP_LOWMEMORY:
             sLowMemory.store(true, std::memory_order_release);

@@ -63,6 +63,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_harbormasters_lighthouse_LighthouseAc
             env->ReleaseStringUTFChars(path, chars);
         }
     }
+    SPDLOG_INFO("File picker returned {}", picked.has_value() ? picked->string() : std::string("nothing"));
     std::lock_guard<std::mutex> lock(sPickMutex);
     sPickResult = std::move(picked);
     sPickResultReady = true;
@@ -79,6 +80,7 @@ static bool OpenAndroidPicker() {
     jmethodID open = env->GetMethodID(activityClass, "openFilePicker", "()V");
     const bool found = open != nullptr;
     if (found) {
+        SPDLOG_INFO("Opening the system file picker");
         env->CallVoidMethod(activity, open);
     } else {
         env->ExceptionClear();
@@ -161,6 +163,7 @@ void PumpFilePicker() {
         result = std::move(sPickResult);
         sPickResult.reset();
     }
+    SPDLOG_INFO("File picker result goes to the caller");
     if (callback) {
         callback(result);
     }
