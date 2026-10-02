@@ -20,6 +20,8 @@ extern "C" int SDL_main(int argc, char* argv[]);
 extern "C" void SDL_SetMainReady(void);
 extern "C" void port_setAppOnScreen(int onScreen);
 extern "C" void TouchControls_OpenMenu(void);
+extern "C" bool TouchControls_LastMenuButtonShown(void);
+extern "C" bool TouchControls_LastMenuVisible(void);
 
 namespace {
 
@@ -345,6 +347,14 @@ void LighthouseVolumeNote(const char* text) {
 
 void LighthouseVolumeOpenMenu(void) {
     TouchControls_OpenMenu();
+}
+
+bool LighthouseVolumeMenuButtonShown(void) {
+    return TouchControls_LastMenuButtonShown();
+}
+
+bool LighthouseVolumeMenuVisible(void) {
+    return TouchControls_LastMenuVisible();
 }
 
 void LighthouseVolumePoint(float x, float y, bool pressed) {

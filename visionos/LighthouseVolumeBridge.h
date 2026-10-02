@@ -31,6 +31,10 @@ void LighthouseVolumeNote(const char* text);
 
 void LighthouseVolumeOpenMenu(void);
 
+bool LighthouseVolumeMenuButtonShown(void);
+
+bool LighthouseVolumeMenuVisible(void);
+
 void LighthouseVolumePoint(float x, float y, bool pressed);
 
 typedef struct {

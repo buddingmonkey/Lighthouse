@@ -153,6 +153,13 @@ private struct HoverRect: Identifiable, Equatable {
 }
 
 @MainActor
+@Observable
+private final class MenuButtonState {
+    var shown = true
+    var menuOpen = false
+}
+
+@MainActor
 private final class VolumeState {
     let device: any MTLDevice
     let queue: any MTLCommandQueue
@@ -176,6 +183,7 @@ private final class VolumeState {
     private var eyeNote: String?
 
     private var eyeMaterial: (any RealityKit.Material)?
+    let menuButton = MenuButtonState()
 
     init() {
         device = MTLCreateSystemDefaultDevice()!
@@ -368,6 +376,14 @@ private final class VolumeState {
     }
 
     func tick() {
+        let menuShown = LighthouseVolumeMenuButtonShown()
+        if menuShown != menuButton.shown {
+            menuButton.shown = menuShown
+        }
+        let menuOpen = LighthouseVolumeMenuVisible()
+        if menuOpen != menuButton.menuOpen {
+            menuButton.menuOpen = menuOpen
+        }
         guard let quad else { return }
         readHover()
         let shape = LighthouseVolumeAspect()
@@ -440,13 +456,15 @@ private struct LighthouseVolumeView: View {
                 }
             }
         }
-        .handlesGameControllerEvents(matching: .gamepad)
+        .handlesGameControllerEvents(matching: state.menuButton.menuOpen ? [] : .gamepad)
         .ornament(attachmentAnchor: .scene(.bottom), contentAlignment: .top) {
-            Button("Menu") {
-                LighthouseVolumeOpenMenu()
+            if state.menuButton.shown {
+                Button("Menu") {
+                    LighthouseVolumeOpenMenu()
+                }
+                .glassBackgroundEffect()
+                .padding(.top, kMenuGap)
             }
-            .glassBackgroundEffect()
-            .padding(.top, kMenuGap)
         }
         .task {
             await state.loadEyeMaterial()

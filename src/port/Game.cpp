@@ -558,6 +558,7 @@ int SDL_main(int argc, char* argv[]) {
         Ship::Context::GetRawInstance()->GetWindow()->HandleEvents();
         Lighthouse::PumpFilePicker();
         TouchControls_Poll();
+        TouchControls_PollMenuCombo();
         OS_SiService();
         if (!WindowIsRunning()) {
             releaseGameThread();

@@ -12,6 +12,14 @@ extern "C" void TouchControls_MergeInto(void*) {
 }
 extern "C" void TouchControls_OpenMenu(void) {
 }
+extern "C" void TouchControls_PollMenuCombo(void) {
+}
+extern "C" bool TouchControls_LastMenuButtonShown(void) {
+    return true;
+}
+extern "C" bool TouchControls_LastMenuVisible(void) {
+    return false;
+}
 
 namespace Lighthouse {
 void TouchControls_Draw() {
@@ -19,12 +27,16 @@ void TouchControls_Draw() {
 bool TouchControls_Active() {
     return false;
 }
+bool TouchControls_MenuButtonShown() {
+    return true;
+}
 } // namespace Lighthouse
 
 #else
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -32,7 +44,6 @@ bool TouchControls_Active() {
 #include <vector>
 
 #ifdef __ANDROID__
-#include <atomic>
 #include <jni.h>
 #endif
 
@@ -49,6 +60,9 @@ bool TouchControls_Active() {
 #include <spdlog/spdlog.h>
 #include <fast/Fast3dGui.h>
 #include <fast/Fast3dWindow.h>
+#ifdef ENABLE_OPENXR
+#include <fast/backends/gfx_xr_view.h>
+#endif
 #include <libultraship/bridge/consolevariablebridge.h>
 #include <libultraship/libultra/controller.h>
 #include <ship/Context.h>
@@ -202,11 +216,17 @@ struct State {
     bool menuPressed = false;
 };
 
+constexpr uint64_t kComboCooldownMs = 500;
+
 State sState;
 std::vector<Finger> sFingers;
 Layout sLayout;
 bool sLayoutValid = false;
 bool sMenuLatch = false;
+bool sComboLatch = false;
+uint64_t sComboToggledAt = 0;
+std::atomic<bool> sMenuButtonShown{ true };
+std::atomic<bool> sMenuVisible{ false };
 bool sGamepadPresent = false;
 bool sStickHeld = false;
 SDL_FingerID sStickFinger = 0;
@@ -227,6 +247,41 @@ bool GamepadConnected() {
             return true;
         }
     }
+    return false;
+}
+
+bool ControllerConnected() {
+    if (GamepadConnected()) {
+        return true;
+    }
+#ifdef ENABLE_OPENXR
+    Fast::XrPadState xr;
+    if (Fast::GetXrPad(&xr) && xr.thumbsticks) {
+        return true;
+    }
+#endif
+    return false;
+}
+
+bool StickComboHeld() {
+    const int count = SDL_NumJoysticks();
+    for (int i = 0; i < count; i++) {
+        if (!SDL_IsGameController(i)) {
+            continue;
+        }
+        SDL_GameController* controller = SDL_GameControllerFromInstanceID(SDL_JoystickGetDeviceInstanceID(i));
+        if (controller != nullptr && SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_LEFTSTICK) &&
+            SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_RIGHTSTICK)) {
+            return true;
+        }
+    }
+#ifdef ENABLE_OPENXR
+    constexpr uint32_t sticks = Fast::XR_PAD_LEFT_STICK | Fast::XR_PAD_RIGHT_STICK;
+    Fast::XrPadState xr;
+    if (Fast::GetXrPad(&xr) && (xr.buttons & sticks) == sticks) {
+        return true;
+    }
+#endif
     return false;
 }
 
@@ -943,7 +998,7 @@ extern "C" void TouchControls_Poll(void) {
     EnsureLayout(w / h, h);
 
     const bool padActive = PadActive();
-    const bool menuButtonActive = !MenuVisible() && !IsHeadsetWindow();
+    const bool menuButtonActive = !MenuVisible() && !IsHeadsetWindow() && Lighthouse::TouchControls_MenuButtonShown();
 
     std::vector<Finger> live;
     const int deviceCount = SDL_GetNumTouchDevices();
@@ -1061,6 +1116,27 @@ extern "C" void TouchControls_OpenMenu(void) {
     OpenMenu();
 }
 
+extern "C" void TouchControls_PollMenuCombo(void) {
+    const bool held = StickComboHeld();
+    const uint64_t now = SDL_GetTicks64();
+    if (held && !sComboLatch && (sComboToggledAt == 0 || now - sComboToggledAt >= kComboCooldownMs)) {
+        sComboToggledAt = now;
+        OpenMenu();
+        SPDLOG_INFO("Stick press (L3 + R3) toggled the menu");
+    }
+    sComboLatch = held;
+    sMenuButtonShown.store(Lighthouse::TouchControls_MenuButtonShown(), std::memory_order_relaxed);
+    sMenuVisible.store(MenuVisible(), std::memory_order_relaxed);
+}
+
+extern "C" bool TouchControls_LastMenuButtonShown(void) {
+    return sMenuButtonShown.load(std::memory_order_relaxed);
+}
+
+extern "C" bool TouchControls_LastMenuVisible(void) {
+    return sMenuVisible.load(std::memory_order_relaxed);
+}
+
 extern "C" void TouchControls_MergeInto(void* contPad) {
     if (contPad == nullptr || !PadActive()) {
         return;
@@ -1086,6 +1162,16 @@ namespace Lighthouse {
 
 bool TouchControls_Active() {
     return CVarGetInteger(CVAR_TOUCH("Enabled"), 1) != 0;
+}
+
+bool TouchControls_MenuButtonShown() {
+    if (!ControllerConnected()) {
+        return true;
+    }
+    if (IsHeadsetWindow()) {
+        return CVarGetInteger(CVAR_SETTING("XrMenuButtonWithController"), 1) != 0;
+    }
+    return CVarGetInteger(CVAR_TOUCH("MenuButtonWithGamepad"), 0) != 0;
 }
 
 namespace {
@@ -1135,7 +1221,7 @@ void TouchControls_Draw() {
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     const float alpha = std::clamp(CVarGetFloat(CVAR_TOUCH("Opacity"), 0.4f), 0.05f, 1.0f);
 
-    if (!MenuVisible() && !IsHeadsetWindow()) {
+    if (!MenuVisible() && !IsHeadsetWindow() && TouchControls_MenuButtonShown()) {
         const ImVec2 menuMin =
             px({ sLayout.menuCenter.x - sLayout.menuHalfExtent.x, sLayout.menuCenter.y - sLayout.menuHalfExtent.y });
         const ImVec2 menuMax =

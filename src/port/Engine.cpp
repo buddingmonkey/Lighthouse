@@ -2,6 +2,9 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #if defined(__linux__) || defined(__APPLE__)
 #include <unistd.h>
 #include <cerrno>
@@ -399,6 +402,9 @@ void GameEngine::FinishInit() {
     // Instance->LoadPlayerAnims();
 #if defined(__SWITCH__) || defined(__WIIU__)
     CVarRegisterInteger(CVAR_IMGUI_CONTROLLER_NAV, 1); // always enable controller nav on switch/wii u
+#endif
+#if defined(LIGHTHOUSE_MOBILE) && !(defined(__APPLE__) && TARGET_OS_VISION)
+    CVarRegisterInteger(CVAR_IMGUI_CONTROLLER_NAV, 1);
 #endif
 }
 
