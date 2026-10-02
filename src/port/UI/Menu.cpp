@@ -110,6 +110,9 @@ void Menu::UpdateWindowBackendObjects() {
     for (auto& backendId : *availableWindowBackends) {
         auto backend = static_cast<Fast::WindowBackend>(backendId);
         availableWindowBackendsMap[backend] = windowBackendsMap.at(backend);
+        if (backend == Fast::WindowBackend::FAST3D_OPENXR_OPENGL && !IsHeadsetWindow()) {
+            availableWindowBackendsMap[backend] = windowBackendsMap.at(Fast::WindowBackend::FAST3D_SDL_OPENGL);
+        }
     }
 }
 
