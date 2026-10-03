@@ -53,11 +53,15 @@ void RegisterTransitionPatches_Init() {
             gDPSetPrimColor((*ev->gfx)++, 0, 0, 255, 255, 255, 255);
         }
 
-        if (isJigsaw && aspectRatio > 1.01f) {
+        if (isJigsaw && (aspectRatio > 1.01f || aspectRatio < 0.99f)) {
             *ev->scale = 1.0f;
-            Mtx* xScaleMtx = (*ev->mtx)++;
-            guScale(xScaleMtx, aspectRatio, 1.0f, 1.0f);
-            gSPMatrix((*ev->gfx)++, xScaleMtx, G_MTX_PROJECTION | G_MTX_MUL | G_MTX_NOPUSH);
+            Mtx* scaleMtx = (*ev->mtx)++;
+            if (aspectRatio > 1.0f) {
+                guScale(scaleMtx, aspectRatio, 1.0f, 1.0f);
+            } else {
+                guScale(scaleMtx, 1.0f, 1.0f / aspectRatio, 1.0f);
+            }
+            gSPMatrix((*ev->gfx)++, scaleMtx, G_MTX_PROJECTION | G_MTX_MUL | G_MTX_NOPUSH);
         } else {
             *ev->scale = (aspectRatio > 1.01f) ? aspectRatio + 0.1f : 1.0f;
         }
