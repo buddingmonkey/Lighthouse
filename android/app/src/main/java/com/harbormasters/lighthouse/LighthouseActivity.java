@@ -14,6 +14,8 @@ import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ResultReceiver;
 import android.provider.OpenableColumns;
 import android.util.Log;
@@ -51,6 +53,7 @@ public class LighthouseActivity extends SDLActivity {
     private static final String FEATURE_HINGE_ANGLE = "android.hardware.sensor.hinge_angle";
     private static final int LARGE_SCREEN_DP = 600;
     private static final long PICKER_FOCUS_CHECK_MS = 500;
+    private static final long SCREEN_MOVE_TIMEOUT_MS = 2000;
 
     private static final String[] SHIPPED = {
         "lighthouse.o2r",
@@ -69,6 +72,13 @@ public class LighthouseActivity extends SDLActivity {
     private volatile int softKeyboardResult = -1;
     private int wantedScreen = -1;
     private int screenArt = -1;
+    private int movingTo = Display.INVALID_DISPLAY;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable moveTimeout = () -> {
+        Log.i(TAG, "The game did not move to screen " + movingTo);
+        movingTo = Display.INVALID_DISPLAY;
+        reportScreens();
+    };
     private boolean started;
     private int loggedOrientation = -1;
     private DisplayManager.DisplayListener screenListener;
@@ -186,20 +196,28 @@ public class LighthouseActivity extends SDLActivity {
     private void reportScreens() {
         List<Display> screens = gameScreens();
         int current = -1;
+        int moving = -1;
         StringBuilder names = new StringBuilder();
         for (int i = 0; i < screens.size(); i++) {
             Display display = screens.get(i);
             if (display.getDisplayId() == currentDisplayId()) {
                 current = i;
             }
+            if (display.getDisplayId() == movingTo) {
+                moving = i;
+            }
             names.append(i == 0 ? "" : ", ").append(display.getDisplayId()).append(' ').append(display.getName());
         }
         Log.i(TAG, "Game screens: " + names + "; game on screen " + current);
+        if (movingTo != Display.INVALID_DISPLAY && (moving < 0 || moving == current)) {
+            endMove();
+        }
         int wanted = wantedScreen;
         wantedScreen = -1;
-        if (wanted >= 0 && wanted < screens.size() && wanted != current) {
+        int target = movingTo != Display.INVALID_DISPLAY ? moving : current;
+        if (wanted >= 0 && wanted < screens.size() && wanted != target) {
             showOnScreen(screens.get(wanted));
-        } else if (!mBrokenLibraries) {
+        } else if (movingTo == Display.INVALID_DISPLAY && !mBrokenLibraries) {
             nativeGameScreens(screens.size(), Math.max(current, 0));
             showScreenArt(screens);
         }
@@ -213,6 +231,12 @@ public class LighthouseActivity extends SDLActivity {
     }
 
     private void showScreenArt(List<Display> screens) {
+        if (movingTo != Display.INVALID_DISPLAY) {
+            if (currentDisplayId() == movingTo) {
+                reportScreens();
+            }
+            return;
+        }
         Display free = null;
         for (Display display : screens) {
             if (display.getDisplayId() != currentDisplayId()) {
@@ -239,6 +263,15 @@ public class LighthouseActivity extends SDLActivity {
         ActivityOptions options = ActivityOptions.makeBasic().setLaunchDisplayId(display.getDisplayId());
         startActivity(new Intent(this, LighthouseActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                       options.toBundle());
+        movingTo = display.getDisplayId();
+        ScreenArtActivity.followGame(movingTo);
+        handler.removeCallbacks(moveTimeout);
+        handler.postDelayed(moveTimeout, SCREEN_MOVE_TIMEOUT_MS);
+    }
+
+    private void endMove() {
+        movingTo = Display.INVALID_DISPLAY;
+        handler.removeCallbacks(moveTimeout);
     }
 
     private static native void nativeGameScreens(int count, int current);
@@ -298,6 +331,7 @@ public class LighthouseActivity extends SDLActivity {
         if (screenListener != null) {
             getSystemService(DisplayManager.class).unregisterDisplayListener(screenListener);
         }
+        handler.removeCallbacks(moveTimeout);
         ScreenArtActivity.hide();
         super.onDestroy();
         if (relaunch) {

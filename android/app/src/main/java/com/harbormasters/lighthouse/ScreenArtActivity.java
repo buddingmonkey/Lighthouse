@@ -66,6 +66,13 @@ public class ScreenArtActivity extends Activity {
         context.startActivity(intent, options.toBundle());
     }
 
+    public static void followGame(int gameDisplayId) {
+        gameDisplay = gameDisplayId;
+        if (shown.get() == null && launchDisplay == gameDisplayId) {
+            hide();
+        }
+    }
+
     public static void hide() {
         ScreenArtActivity activity = shown.get();
         shown.clear();
