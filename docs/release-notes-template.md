@@ -6,25 +6,21 @@ For Windows, Linux and macOS, use the release from the main Lighthouse project a
 
 ## What is new in this release
 
-### Foldable and dual-screen phones
+For the changes in 1.1.3 (foldable and dual-screen phones, menu access with L3 + R3, and the new defaults), see the 1.1.3 release.
 
-- **Foldables (Pixel Fold, Galaxy Z Fold):** on the large inner screen, the game turns with the device. In portrait, the game is at the top and the touch controls are in the space below. The outer screen stays in landscape.
-- **Dual-screen phones (Ayn Thor):** the game starts on the main screen. To move it to the other screen, go to **Settings > Graphics > Game Screen**. The app keeps your choice.
-- **Dual-screen phones (Ayn Thor):** the screen that does not show the game shows the original box art. To show a different image or a black screen, go to **Settings > Graphics > Other Screen Image**.
+### Dual-screen phones (Ayn Thor)
 
-### Menu access
+- The screen that does not show the game now shows the original box art. To show a different image or a black screen, go to **Settings > Graphics > Other Screen Image**. The choices are Cover Art, Hero, Jiggies, Poster, Cover Back, Box and Black. The app keeps your choice.
+- When you move the game to the other screen with **Settings > Graphics > Game Screen**, the image moves to the screen that the game left. Your controller stays connected to the game.
 
-- Press both sticks in (**L3 + R3**) at the same time to open or close the menu. This works with a gamepad on a phone or tablet, with a gamepad on the Galaxy XR, and with the Touch controllers on the Meta Quest.
-- **Phone or tablet:** while a gamepad is connected, the menu button is hidden. To show it, go to **Settings > Controls > Menu Button > Show Menu Button With Gamepad**.
-- **Headsets:** the menu button stays on the window. To hide it while controllers are connected, clear **Settings > Controls > Menu Button > Show Menu Button With Controllers**.
-- You can use the menu with a gamepad: the D-pad moves from item to item, **A** selects and **B** goes back. This is on by default. To change it, go to **Settings > General > Menu Controller Navigation**.
+### Menu
 
-### Other changes
+- The lists in the menu now show their choices in a fixed order. Before, some lists on Android showed their choices in reverse order, for example **Second Screen** above **Main Screen**.
+- On a narrow screen or at a large menu scale, the top bar of the menu now wraps onto two rows. Before, **Rando** and **Search** were cut off, and you could not reach them by touch. The side bar is now wide enough for its labels. This applies, for example, to the second screen of the Ayn Thor.
 
-- **Frame rate:** the game now matches the refresh rate of your display by default. To change it, go to **Settings > Graphics > Match Refresh Rate**.
-- **Anti-aliasing:** the default MSAA is now 2. A value that you set before does not change.
-- **Renderer list:** **Settings > Graphics > Renderer API** now shows one OpenGL entry, not two.
-- **Meta Quest:** after you add a mod with **Add Mod from File**, the game takes input again. Before, the controllers stopped working after the file picker closed, and you had to restart the app.
+### Fixes
+
+- **Falling-jiggy transition:** on a screen narrower than 4:3, for example a foldable in portrait or the second screen of the Ayn Thor, the puzzle-piece transition showed streaks at the top and bottom of the screen. The transition now fills the screen correctly.
 
 ## Before you start
 
