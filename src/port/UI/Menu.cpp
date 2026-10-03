@@ -738,11 +738,12 @@ void Menu::DrawElement() {
     // Full screen menu with widths below 1280, heights below 800.
     // 5% of screen width/height padding on both sides above those resolutions.
     // Menu width will never exceed a 16:9 aspect ratio.
+    const float uiScale = std::max(ImGui::GetIO().FontGlobalScale, 1.0f);
     ImVec2 menuSize = { windowWidth, windowHeight };
-    if (windowWidth > 1280) {
+    if (windowWidth > 1280 * uiScale) {
         menuSize.x = std::fminf(windowWidth * 0.9f, (windowHeight * 1.77f));
     }
-    if (windowHeight > 800) {
+    if (windowHeight > 800 * uiScale) {
         menuSize.y = windowHeight * 0.9f;
     }
 
@@ -754,26 +755,47 @@ void Menu::DrawElement() {
                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar);
 
     std::unordered_map<std::string, SidebarEntry>* sidebar;
-    float headerHeight = headerSizes.at(0).y + style.FramePadding.y * 2;
+#if defined(LIGHTHOUSE_MOBILE) && !defined(__ANDROID__)
+    const bool showQuit = false;
+#elif defined(LIGHTHOUSE_MOBILE)
+    const bool showQuit = IsHeadsetWindow();
+#else
+    const bool showQuit = true;
+#endif
+    const float headerButtonSpan = showQuit ? 4.25f : 3.25f;
     ImVec2 buttonSize = ImGui::CalcTextSize(ICON_FA_TIMES_CIRCLE) + style.FramePadding * 2;
-    bool scrollbar = false;
-    if (headerWidth > menuSize.x - buttonSize.x * 3 - style.ItemSpacing.x * 3) {
-        headerHeight += style.ScrollbarSize;
-        scrollbar = true;
+    const float headerButtonsX = menuSize.x - (buttonSize.x * headerButtonSpan) - (style.ItemSpacing.x * 2);
+    const float headerSelWidth = headerButtonsX - style.ItemSpacing.x;
+    std::vector<float> headerItemWidths;
+    for (auto& size : headerSizes) {
+        headerItemWidths.push_back(size.x + style.FramePadding.x * 2);
     }
-    ImVec2 headerSelSize = { menuSize.x - buttonSize.x * 3 - style.ItemSpacing.x * 3, headerHeight };
-    ImGui::SetNextWindowSizeConstraints({ 0, headerHeight }, { headerSelSize.x, headerHeight });
-    if (scrollbar) {
-        headerSelSize.y += style.ScrollbarSize;
+    if (headerSearch) {
+        headerItemWidths.push_back(searchWidth);
     }
+    std::vector<bool> headerRowStart(headerItemWidths.size(), false);
+    int headerRows = 1;
+    float headerRowX = 0.0f;
+    for (size_t i = 0; i < headerItemWidths.size(); i++) {
+        if (headerRowX > 0.0f && headerRowX + headerItemWidths[i] > headerSelWidth) {
+            headerRowStart[i] = true;
+            headerRows++;
+            headerRowX = 0.0f;
+        }
+        headerRowX += headerItemWidths[i] + style.ItemSpacing.x;
+    }
+    float headerHeight =
+        (headerSizes.at(0).y + style.FramePadding.y * 2) * headerRows + style.ItemSpacing.y * (headerRows - 1);
+    ImVec2 headerSelSize = { headerSelWidth, headerHeight };
+    ImGui::SetNextWindowSizeConstraints({ 0, headerHeight }, headerSelSize);
     bool autoFocus = CVarGetInteger(CVAR_SETTING("Menu.SearchAutofocus"), 0);
     ImGui::BeginChild("Header Selection", headerSelSize,
                       ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize |
                           kMenuNavFlags,
-                      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_HorizontalScrollbar);
+                      ImGuiWindowFlags_NoTitleBar);
     uint8_t curIndex = 0;
     for (auto& label : menuOrder) {
-        if (curIndex != 0) {
+        if (curIndex != 0 && !headerRowStart[curIndex]) {
             ImGui::SameLine();
         }
         auto& entry = menuEntries.at(label);
@@ -804,7 +826,10 @@ void Menu::DrawElement() {
     }
     std::string menuSearchText = "";
     if (headerSearch) {
-        ImGui::SameLine();
+        if (!headerRowStart.back()) {
+            ImGui::SameLine();
+        }
+        const float searchX = ImGui::GetCursorPosX();
         if (autoFocus && freshOpen) {
             ImGui::SetKeyboardFocusHere();
         }
@@ -816,22 +841,15 @@ void Menu::DrawElement() {
         menuSearchText = menuSearch.InputBuf;
         menuSearchText.erase(std::remove(menuSearchText.begin(), menuSearchText.end(), ' '), menuSearchText.end());
         if (menuSearchText.length() < 1) {
-            ImGui::SameLine(headerWidth - searchWidth + style.ItemSpacing.x);
+            ImGui::SameLine(headerRows == 1 ? headerWidth - searchWidth + style.ItemSpacing.x
+                                            : searchX + style.FramePadding.x);
             ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 0.4f), "Search...");
         }
         ImGui::PopStyleVar();
         ImGui::PopStyleColor();
     }
     ImGui::EndChild();
-#if defined(LIGHTHOUSE_MOBILE) && !defined(__ANDROID__)
-    const bool showQuit = false;
-#elif defined(LIGHTHOUSE_MOBILE)
-    const bool showQuit = IsHeadsetWindow();
-#else
-    const bool showQuit = true;
-#endif
-    const float headerButtonSpan = showQuit ? 4.25f : 3.25f;
-    ImGui::SameLine(menuSize.x - (buttonSize.x * headerButtonSpan) - (style.ItemSpacing.x * 2));
+    ImGui::SameLine(headerButtonsX);
     UIWidgets::ButtonOptions options4 = {};
     std::string option4Tooltip =
         fmt::format("About Lighthouse \n"
@@ -913,6 +931,13 @@ void Menu::DrawElement() {
     if (menuSize.x > 1600) {
         sidebarWidth = menuSize.x * 0.15f;
     }
+    for (auto& [entryName, entry] : menuEntries) {
+        for (auto& sidebarLabel : entry.sidebarOrder) {
+            sidebarWidth = std::max(sidebarWidth, ImGui::CalcTextSize(sidebarLabel.c_str()).x +
+                                                      (style.FramePadding.x + style.ItemSpacing.x) * 2);
+        }
+    }
+    sidebarWidth = std::min(sidebarWidth, menuSize.x * 0.4f);
 
     const char* sidebarCvar = menuEntries.at(headerIndex).sidebarCvar;
 
@@ -960,7 +985,7 @@ void Menu::DrawElement() {
     std::string sectionMenuId = sectionIndex + " Settings";
     int columns = sidebar->at(sectionIndex).columnCount;
     size_t columnFuncs = sidebar->at(sectionIndex).columnWidgets.size();
-    if (windowWidth < 800) {
+    if (windowWidth < 800 * uiScale) {
         columns = 1;
     }
     float columnWidth = (sectionWidth - style.ItemSpacing.x * columns) / columns;
