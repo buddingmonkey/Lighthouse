@@ -8,9 +8,12 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Display;
+import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
@@ -47,8 +50,8 @@ public class ScreenArtActivity extends Activity {
         wantedImage = index;
         gameDisplay = gameDisplayId;
         ScreenArtActivity activity = shown.get();
-        if (activity != null && !activity.isFinishing() && activity.getDisplay() != null
-            && activity.getDisplay().getDisplayId() == display.getDisplayId()) {
+        if (activity != null && !activity.isFinishing()
+            && activity.getWindowManager().getDefaultDisplay().getDisplayId() == display.getDisplayId()) {
             activity.showImage(index);
             return;
         }
@@ -93,15 +96,21 @@ public class ScreenArtActivity extends Activity {
         }
         launchDisplay = Display.INVALID_DISPLAY;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
-        getWindow().setDecorFitsSystemWindows(false);
         view = new ImageView(this);
         view.setBackgroundColor(Color.BLACK);
         view.setScaleType(ImageView.ScaleType.CENTER_CROP);
         setContentView(view);
-        WindowInsetsController controller = getWindow().getInsetsController();
-        if (controller != null) {
-            controller.hide(WindowInsets.Type.systemBars());
-            controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(WindowInsets.Type.systemBars());
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            view.setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                       | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                       | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         }
         shown = new WeakReference<>(this);
         showImage(wantedImage);
@@ -140,7 +149,13 @@ public class ScreenArtActivity extends Activity {
             view.setImageDrawable(null);
             return;
         }
-        Rect bounds = getWindowManager().getCurrentWindowMetrics().getBounds();
+        Rect bounds;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            bounds = getWindowManager().getCurrentWindowMetrics().getBounds();
+        } else {
+            DisplayMetrics metrics = getResources().getDisplayMetrics();
+            bounds = new Rect(0, 0, Math.max(metrics.widthPixels, 1), Math.max(metrics.heightPixels, 1));
+        }
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inJustDecodeBounds = true;
         BitmapFactory.decodeResource(getResources(), IMAGES[index], options);
