@@ -30,13 +30,9 @@ namespace LighthouseGui {
 extern std::shared_ptr<LighthouseMenu> mLighthouseMenu;
 enum setting { UPDATE_aspectRatioX, UPDATE_aspectRatioY, UPDATE_verticalPixelCount };
 
-std::unordered_map<int32_t, const char*> aspectRatioPresetLabels = { { 0, "Off" },
-                                                                     { 1, "Custom" },
-                                                                     { 2, "Original (4:3)" },
-                                                                     { 3, "Widescreen (16:9)" },
-                                                                     { 4, "Nintendo 3DS (5:3)" },
-                                                                     { 5, "16:10 (8:5)" },
-                                                                     { 6, "Ultrawide (21:9)" } };
+const std::vector<const char*> aspectRatioPresetLabels = {
+    "Off", "Custom", "Original (4:3)", "Widescreen (16:9)", "Nintendo 3DS (5:3)", "16:10 (8:5)", "Ultrawide (21:9)",
+};
 const float aspectRatioPresetsX[] = { 0.0f, 16.0f, 4.0f, 16.0f, 5.0f, 16.0f, 21.0f };
 const float aspectRatioPresetsY[] = { 0.0f, 9.0f, 3.0f, 9.0f, 3.0f, 10.0f, 9.0f };
 const int default_aspectRatio = 1; // Default combo list option
@@ -446,15 +442,20 @@ void RegisterResolutionWidgets() {
         .SameLine(true)
         .Options(TextOptions().Color(Colors::Gray));
     // Presets
-    mLighthouseMenu->AddWidget(path, "Aspect Ratio", WIDGET_COMBOBOX)
-        .ValuePointer(&item_aspectRatio)
+    mLighthouseMenu->AddWidget(path, "Aspect Ratio", WIDGET_CUSTOM)
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) {
             if (mLighthouseMenu->GetDisabledMap().at(DISABLE_FOR_ADVANCED_RESOLUTION_OFF).active) {
                 info.activeDisables.push_back(DISABLE_FOR_ADVANCED_RESOLUTION_OFF);
             }
         })
-        .Callback([](WidgetInfo& info) {
+        .CustomFunction([](WidgetInfo& info) {
+            ComboboxOptions options = ComboboxOptions().Color(WIDGET_COLOR);
+            options.disabled = info.options->disabled;
+            options.disabledTooltip = info.options->disabledTooltip;
+            if (!UIWidgets::Combobox<int32_t>(info.name.c_str(), &item_aspectRatio, aspectRatioPresetLabels, options)) {
+                return;
+            }
             if (item_aspectRatio != default_aspectRatio) { // don't change anything if "Custom" is selected.
                 aspectRatioX = aspectRatioPresetsX[item_aspectRatio];
                 aspectRatioY = aspectRatioPresetsY[item_aspectRatio];
@@ -468,8 +469,7 @@ void RegisterResolutionWidgets() {
             }
             CVarSetInteger(CVAR_PREFIX_ADVANCED_RESOLUTION ".UIComboItem.AspectRatio", item_aspectRatio);
             Ship::Context::GetRawInstance()->GetWindow()->GetGui()->SaveConsoleVariablesNextFrame();
-        })
-        .Options(ComboboxOptions().ComboMap(aspectRatioPresetLabels));
+        });
     mLighthouseMenu->AddWidget(path, "AspectRatioCustom", WIDGET_CUSTOM)
         .RaceDisable(false)
         .CustomFunction([](WidgetInfo& info) {

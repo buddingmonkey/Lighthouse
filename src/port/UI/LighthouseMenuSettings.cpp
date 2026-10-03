@@ -27,11 +27,11 @@ extern std::shared_ptr<LighthouseMenu> mLighthouseMenu;
 extern std::shared_ptr<LighthouseModalWindow> mModalWindow;
 using namespace UIWidgets;
 
-static std::unordered_map<int32_t, const char*> imguiScaleOptions = {
-    { 0, "Small" },
-    { 1, "Normal" },
-    { 2, "Large" },
-    { 3, "X-Large" },
+static const std::vector<const char*> imguiScaleOptions = {
+    "Small",
+    "Normal",
+    "Large",
+    "X-Large",
 };
 
 static const std::unordered_map<int32_t, const char*> menuThemeOptions = {
@@ -51,20 +51,20 @@ static const std::unordered_map<int32_t, const char*> menuThemeOptions = {
     { UIWidgets::Colors::DarkGray, "Dark Gray" },
 };
 
-static const std::unordered_map<int32_t, const char*> textureFilteringMap = {
-    { Fast::FILTER_THREE_POINT, "Three-Point" },
-    { Fast::FILTER_LINEAR, "Linear" },
-    { Fast::FILTER_NONE, "None" },
+static const std::vector<const char*> textureFilteringMap = {
+    "Three-Point",
+    "Linear",
+    "None",
 };
 
-static const std::unordered_map<int32_t, const char*> notificationPosition = {
-    { 0, "Top Left" }, { 1, "Top Right" }, { 2, "Bottom Left" }, { 3, "Bottom Right" }, { 4, "Hidden" },
+static const std::vector<const char*> notificationPosition = {
+    "Top Left", "Top Right", "Bottom Left", "Bottom Right", "Hidden",
 };
 
-static const std::unordered_map<int32_t, const char*> controlSchemeLabels = {
-    { CONTROL_SCHEME_RETRO, "Retro" },
-    { CONTROL_SCHEME_MODERN, "Modern" },
-    { CONTROL_SCHEME_POCKET, "Pocket" },
+static const std::vector<const char*> controlSchemeLabels = {
+    "Retro",
+    "Modern",
+    "Pocket",
 };
 
 #ifdef __ANDROID__
@@ -79,24 +79,24 @@ static const std::vector<const char*> screenArtLabels = {
 #endif
 
 #ifdef LIGHTHOUSE_TOUCH_CONTROLS
-static const std::unordered_map<int32_t, const char*> touchLayoutLabels = {
-    { 0, "Automatic" },
-    { 1, "Phone" },
-    { 2, "Tablet" },
+static const std::vector<const char*> touchLayoutLabels = {
+    "Automatic",
+    "Phone",
+    "Tablet",
 };
 #endif
 
-static const std::unordered_map<int32_t, const char*> bootSequenceLabels = {
-    { BOOTSEQUENCE_DEFAULT, "Default" },
-    { BOOTSEQUENCE_AUTHENTIC, "Authentic" },
-    { BOOTSEQUENCE_FILESELECT, "File Select" },
+static const std::vector<const char*> bootSequenceLabels = {
+    "Default",
+    "Authentic",
+    "File Select",
 };
 
-static const std::unordered_map<int32_t, const char*> saveConvertSlotLabels = {
-    { SaveConverter::kSlotAll, "All games" },
-    { 1, "Game 1" },
-    { 2, "Game 2" },
-    { 3, "Game 3" },
+static const std::vector<const char*> saveConvertSlotLabels = {
+    "All games",
+    "Game 1",
+    "Game 2",
+    "Game 3",
 };
 
 static int32_t sAppliedControlScheme = -1;
@@ -221,33 +221,37 @@ void LighthouseMenu::AddMenuSettings() {
         .Options(filesFolderOptions);
 
     AddWidget(path, "Boot", WIDGET_SEPARATOR_TEXT);
-    AddWidget(path, "Boot Sequence", WIDGET_CVAR_COMBOBOX)
-        .CVar(CVAR_SETTING("BootSequence"))
+    AddWidget(path, "Boot Sequence", WIDGET_CUSTOM)
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) {
             if (mLighthouseMenu->disabledMap.at(DISABLE_FOR_BOOT_TO_DEBUG_WARP_SCREEN_ON).active)
                 info.activeDisables.push_back(DISABLE_FOR_BOOT_TO_DEBUG_WARP_SCREEN_ON);
         })
-        .Options(ComboboxOptions()
-                     .DefaultIndex(BOOTSEQUENCE_DEFAULT)
-                     .LabelPosition(LabelPositions::Far)
-                     .ComponentAlignment(ComponentAlignments::Right)
-                     .ComboMap(bootSequenceLabels)
-                     .Tooltip("Configure what happens when starting or resetting the game.\n\n"
-                              "Default: Replace the N64 branding with LUS branding\n"
-                              "Authentic: Keep the authentic N64 branding\n"
-                              "File Select: Skip to file select menu"));
+        .CustomFunction([](WidgetInfo& info) {
+            ComboboxOptions options = ComboboxOptions()
+                                          .Color(WIDGET_COLOR)
+                                          .DefaultIndex(BOOTSEQUENCE_DEFAULT)
+                                          .LabelPosition(LabelPositions::Far)
+                                          .ComponentAlignment(ComponentAlignments::Right)
+                                          .Tooltip("Configure what happens when starting or resetting the game.\n\n"
+                                                   "Default: Replace the N64 branding with LUS branding\n"
+                                                   "Authentic: Keep the authentic N64 branding\n"
+                                                   "File Select: Skip to file select menu");
+            options.disabled = info.options->disabled;
+            options.disabledTooltip = info.options->disabledTooltip;
+            UIWidgets::CVarCombobox(info.name.c_str(), CVAR_SETTING("BootSequence"), bootSequenceLabels, options);
+        });
 
     path.column = SECTION_COLUMN_2;
     AddWidget(path, "Save Conversion", WIDGET_SEPARATOR_TEXT);
-    AddWidget(path, "Save Slot", WIDGET_CVAR_COMBOBOX)
-        .CVar(CVAR_SETTING("SaveConvertSlot"))
-        .RaceDisable(false)
-        .Options(ComboboxOptions()
-                     .DefaultIndex(SaveConverter::kSlotAll)
-                     .ComboMap(saveConvertSlotLabels)
-                     .Tooltip("Which game the Import and Export buttons act on. \"All games\" covers every "
-                              "slot."));
+    AddWidget(path, "Save Slot", WIDGET_CUSTOM).RaceDisable(false).CustomFunction([](WidgetInfo& info) {
+        UIWidgets::CVarCombobox(info.name.c_str(), CVAR_SETTING("SaveConvertSlot"), saveConvertSlotLabels,
+                                ComboboxOptions()
+                                    .Color(WIDGET_COLOR)
+                                    .DefaultIndex(SaveConverter::kSlotAll)
+                                    .Tooltip("Which game the Import and Export buttons act on. \"All games\" "
+                                             "covers every slot."));
+    });
     AddWidget(path, "Import Save File", WIDGET_BUTTON)
         .RaceDisable(false)
         .Callback([](WidgetInfo& info) {
@@ -347,15 +351,15 @@ void LighthouseMenu::AddMenuSettings() {
 
     // Experimental Options
     AddWidget(path, "EXPERIMENTAL", WIDGET_SEPARATOR_TEXT).Options(TextOptions().Color(Colors::Orange));
-    AddWidget(path, "ImGui Menu Scaling", WIDGET_CVAR_COMBOBOX)
-        .CVar(CVAR_SETTING("ImGuiScale"))
-        .RaceDisable(false)
-        .Options(ComboboxOptions()
-                     .ComboMap(imguiScaleOptions)
-                     .Tooltip("Changes the scaling of the ImGui menu elements.")
-                     .DefaultIndex(DefaultImGuiScaleIndex())
-                     .ComponentAlignment(ComponentAlignments::Right)
-                     .LabelPosition(LabelPositions::Far));
+    AddWidget(path, "ImGui Menu Scaling", WIDGET_CUSTOM).RaceDisable(false).CustomFunction([](WidgetInfo& info) {
+        UIWidgets::CVarCombobox(info.name.c_str(), CVAR_SETTING("ImGuiScale"), imguiScaleOptions,
+                                ComboboxOptions()
+                                    .Color(WIDGET_COLOR)
+                                    .Tooltip("Changes the scaling of the ImGui menu elements.")
+                                    .DefaultIndex(DefaultImGuiScaleIndex())
+                                    .ComponentAlignment(ComponentAlignments::Right)
+                                    .LabelPosition(LabelPositions::Far));
+    });
     //.Callback([](WidgetInfo& info) { GameEngine::Instance->ScaleImGui(); });
 
     // Audio Settings
@@ -648,10 +652,15 @@ void LighthouseMenu::AddMenuSettings() {
         .Options(CheckboxOptions()
                      .Tooltip("Allows multiple windows to be opened at once. Requires a reload to take effect.")
                      .DefaultValue(true));
-    AddWidget(path, "Texture Filter (Needs reload)", WIDGET_CVAR_COMBOBOX)
-        .CVar(CVAR_TEXTURE_FILTER)
+    AddWidget(path, "Texture Filter (Needs reload)", WIDGET_CUSTOM)
         .RaceDisable(false)
-        .Options(ComboboxOptions().Tooltip("Sets the applied Texture Filtering.").ComboMap(textureFilteringMap));
+        .CustomFunction([](WidgetInfo& info) {
+            UIWidgets::CVarCombobox(info.name.c_str(), CVAR_TEXTURE_FILTER, textureFilteringMap,
+                                    ComboboxOptions()
+                                        .Color(WIDGET_COLOR)
+                                        .DefaultIndex(Fast::FILTER_THREE_POINT)
+                                        .Tooltip("Sets the applied Texture Filtering."));
+        });
 
     path.column = SECTION_COLUMN_2;
     AddWidget(path, "Advanced Graphics Options", WIDGET_SEPARATOR_TEXT);
@@ -686,15 +695,27 @@ void LighthouseMenu::AddMenuSettings() {
 
     path.column = SECTION_COLUMN_2;
     AddWidget(path, "Additional Control Settings", WIDGET_SEPARATOR_TEXT);
-    AddWidget(path, "Control Scheme", WIDGET_CVAR_COMBOBOX)
-        .CVar(CVAR_SETTING("Controls.Scheme"))
+    AddWidget(path, "Control Scheme", WIDGET_CUSTOM)
         .RaceDisable(false)
         .PreFunc([](WidgetInfo& info) {
             if (sAppliedControlScheme < 0) {
                 sAppliedControlScheme = CVarGetInteger(CVAR_SETTING("Controls.Scheme"), CONTROL_SCHEME_RETRO);
             }
         })
-        .Callback([](WidgetInfo& info) {
+        .CustomFunction([](WidgetInfo& info) {
+            if (!UIWidgets::CVarCombobox(
+                    info.name.c_str(), CVAR_SETTING("Controls.Scheme"), controlSchemeLabels,
+                    ComboboxOptions()
+                        .Color(WIDGET_COLOR)
+                        .DefaultIndex(CONTROL_SCHEME_RETRO)
+                        .Tooltip("Applies a preset gamepad layout (asks to confirm first).\n"
+                                 "Retro: Traditional N64 controls.\n"
+                                 "Modern: Xbox Live Arcade controls.\n"
+                                 "Pocket: D-Pad friendly controls.\n\n"
+                                 "Applying a scheme overwrites the gamepad bindings; you can still customize "
+                                 "them afterwards in the bindings window."))) {
+                return;
+            }
             int32_t selected = CVarGetInteger(CVAR_SETTING("Controls.Scheme"), CONTROL_SCHEME_RETRO);
             if (selected == sAppliedControlScheme) {
                 return;
@@ -707,16 +728,7 @@ void LighthouseMenu::AddMenuSettings() {
                     sAppliedControlScheme = selected;
                 },
                 []() { CVarSetInteger(CVAR_SETTING("Controls.Scheme"), sAppliedControlScheme); });
-        })
-        .Options(ComboboxOptions()
-                     .Tooltip("Applies a preset gamepad layout (asks to confirm first).\n"
-                              "Retro: Traditional N64 controls.\n"
-                              "Modern: Xbox Live Arcade controls.\n"
-                              "Pocket: D-Pad friendly controls.\n\n"
-                              "Applying a scheme overwrites the gamepad bindings; you can still customize "
-                              "them afterwards in the bindings window.")
-                     .ComboMap(controlSchemeLabels)
-                     .DefaultIndex(CONTROL_SCHEME_RETRO));
+        });
     AddWidget(path, "Toggle Talon Trot", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_SETTING("Controls.TalonTrotToggle"))
         .RaceDisable(false)
@@ -764,16 +776,17 @@ void LighthouseMenu::AddMenuSettings() {
         .RaceDisable(false)
         .Options(CheckboxOptions().DefaultValue(false).Tooltip(
             "Swaps the two halves of the pad, putting the stick under your right thumb."));
-    AddWidget(path, "Layout", WIDGET_CVAR_COMBOBOX)
-        .CVar(CVAR_SETTING("TouchControls.Layout"))
-        .RaceDisable(false)
-        .Options(ComboboxOptions()
-                     .Tooltip("Phone puts the shoulder buttons along the top edge, under the index fingers.\n"
-                              "Tablet moves them down the left and right edges, where a hand holding a "
-                              "larger screen can still reach them.\n\n"
-                              "Automatic picks from the screen size.")
-                     .ComboMap(touchLayoutLabels)
-                     .DefaultIndex(0));
+    AddWidget(path, "Layout", WIDGET_CUSTOM).RaceDisable(false).CustomFunction([](WidgetInfo& info) {
+        UIWidgets::CVarCombobox(
+            info.name.c_str(), CVAR_SETTING("TouchControls.Layout"), touchLayoutLabels,
+            ComboboxOptions()
+                .Color(WIDGET_COLOR)
+                .DefaultIndex(0)
+                .Tooltip("Phone puts the shoulder buttons along the top edge, under the index fingers.\n"
+                         "Tablet moves them down the left and right edges, where a hand holding a "
+                         "larger screen can still reach them.\n\n"
+                         "Automatic picks from the screen size."));
+    });
     AddWidget(path, "Control Size", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("TouchControls.Scale"))
         .RaceDisable(false)
@@ -827,13 +840,13 @@ void LighthouseMenu::AddMenuSettings() {
     path.sidebarName = "Notifications";
     path.column = SECTION_COLUMN_1;
     AddSidebarEntry("Settings", path.sidebarName, 3);
-    AddWidget(path, "Position", WIDGET_CVAR_COMBOBOX)
-        .CVar(CVAR_SETTING("Notifications.Position"))
-        .RaceDisable(false)
-        .Options(ComboboxOptions()
-                     .Tooltip("Which corner of the screen notifications appear in.")
-                     .ComboMap(notificationPosition)
-                     .DefaultIndex(3));
+    AddWidget(path, "Position", WIDGET_CUSTOM).RaceDisable(false).CustomFunction([](WidgetInfo& info) {
+        UIWidgets::CVarCombobox(info.name.c_str(), CVAR_SETTING("Notifications.Position"), notificationPosition,
+                                ComboboxOptions()
+                                    .Color(WIDGET_COLOR)
+                                    .DefaultIndex(3)
+                                    .Tooltip("Which corner of the screen notifications appear in."));
+    });
     AddWidget(path, "Duration (seconds):", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar(CVAR_SETTING("Notifications.Duration"))
         .RaceDisable(false)

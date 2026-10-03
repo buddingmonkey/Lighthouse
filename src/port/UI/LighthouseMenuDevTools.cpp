@@ -19,10 +19,8 @@ extern std::shared_ptr<LighthouseMenu> mLighthouseMenu;
 extern std::shared_ptr<LighthouseModalWindow> mModalWindow;
 using namespace UIWidgets;
 
-static const std::unordered_map<int32_t, const char*> logLevels = {
-    { DEBUG_LOG_TRACE, "Trace" }, { DEBUG_LOG_DEBUG, "Debug" }, { DEBUG_LOG_INFO, "Info" },
-    { DEBUG_LOG_WARN, "Warn" },   { DEBUG_LOG_ERROR, "Error" }, { DEBUG_LOG_CRITICAL, "Critical" },
-    { DEBUG_LOG_OFF, "Off" },
+static const std::vector<const char*> logLevels = {
+    "Trace", "Debug", "Info", "Warn", "Error", "Critical", "Off",
 };
 
 // static const std::unordered_map<int32_t, const char*> debugInfoPages = {
@@ -56,16 +54,19 @@ void LighthouseMenu::AddMenuDevTools() {
             "Not available on this device. There is no desktop window to put the menu in.");
     }
     AddWidget(path, "Popout Menu", WIDGET_CVAR_CHECKBOX).CVar(CVAR_SETTING("Menu.Popout")).Options(popoutMenuOptions);
-    AddWidget(path, "Log Level", WIDGET_CVAR_COMBOBOX)
-        .CVar(CVAR_DEVELOPER_TOOLS("LogLevel"))
-        .Options(ComboboxOptions()
-                     .Tooltip("The log level determines which messages are printed to the console."
-                              " This does not affect the log file output")
-                     .ComboMap(logLevels)
-                     .DefaultIndex(defaultLogLevel))
-        .Callback([](WidgetInfo& info) {
-            Ship::Context::GetRawInstance()->GetLogger()->set_level(
-                (spdlog::level::level_enum)CVarGetInteger(CVAR_DEVELOPER_TOOLS("LogLevel"), defaultLogLevel));
+    AddWidget(path, "Log Level", WIDGET_CUSTOM)
+        .CustomFunction([](WidgetInfo& info) {
+            ComboboxOptions options = ComboboxOptions()
+                                          .Color(WIDGET_COLOR)
+                                          .DefaultIndex(defaultLogLevel)
+                                          .Tooltip("The log level determines which messages are printed to the "
+                                                   "console. This does not affect the log file output");
+            options.disabled = info.options->disabled;
+            options.disabledTooltip = info.options->disabledTooltip;
+            if (UIWidgets::CVarCombobox(info.name.c_str(), CVAR_DEVELOPER_TOOLS("LogLevel"), logLevels, options)) {
+                Ship::Context::GetRawInstance()->GetLogger()->set_level(
+                    (spdlog::level::level_enum)CVarGetInteger(CVAR_DEVELOPER_TOOLS("LogLevel"), defaultLogLevel));
+            }
         })
         .PreFunc([](WidgetInfo& info) {
             info.isHidden = mLighthouseMenu->disabledMap.at(DISABLE_FOR_DEBUG_MODE_OFF).active;

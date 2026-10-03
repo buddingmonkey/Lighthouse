@@ -25,22 +25,20 @@ static Color_RGBA8 textColorDefault = { 255, 255, 255, 255 };
 static Color_RGBA8 range1ColorDefault = { 255, 178, 0, 255 };
 static Color_RGBA8 range2ColorDefault = { 0, 255, 0, 255 };
 
-static std::unordered_map<int32_t, const char*> buttonOutlineOptions = {
-    { BUTTON_OUTLINE_ALWAYS_SHOWN, "Always Shown" },
-    { BUTTON_OUTLINE_NOT_PRESSED, "Shown Only While Not Pressed" },
-    { BUTTON_OUTLINE_PRESSED, "Shown Only While Pressed" },
-    { BUTTON_OUTLINE_ALWAYS_HIDDEN, "Always Hidden" }
+static const std::vector<const char*> buttonOutlineOptions = {
+    "Always Shown",
+    "Shown Only While Not Pressed",
+    "Shown Only While Pressed",
+    "Always Hidden",
 };
-static std::unordered_map<int32_t, const char*> buttonOutlineOptionsVerbose = {
-    { BUTTON_OUTLINE_ALWAYS_SHOWN, "Outline Always Shown" },
-    { BUTTON_OUTLINE_NOT_PRESSED, "Outline Shown Only While Not Pressed" },
-    { BUTTON_OUTLINE_PRESSED, "Outline Shown Only While Pressed" },
-    { BUTTON_OUTLINE_ALWAYS_HIDDEN, "Outline Always Hidden" }
+static const std::vector<const char*> buttonOutlineOptionsVerbose = {
+    "Outline Always Shown",
+    "Outline Shown Only While Not Pressed",
+    "Outline Shown Only While Pressed",
+    "Outline Always Hidden",
 };
 
-static std::unordered_map<int32_t, const char*> stickModeOptions = { { STICK_MODE_ALWAYS_SHOWN, "Always" },
-                                                                     { STICK_MODE_HIDDEN_IN_DEADZONE, "While In Use" },
-                                                                     { STICK_MODE_ALWAYS_HIDDEN, "Never" } };
+static const std::vector<const char*> stickModeOptions = { "Always", "While In Use", "Never" };
 
 InputViewer::~InputViewer() {
     SPDLOG_TRACE("destruct input viewer");

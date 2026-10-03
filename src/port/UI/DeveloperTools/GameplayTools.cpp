@@ -481,9 +481,8 @@ void DrawGrantUnlocks() {
 }
 
 // Index 0 traces every space; the rest are ANCHOR_FLAGSPACE_* ids offset by one.
-static const std::unordered_map<int32_t, const char*> flagTraceSpaces = {
-    { 0, "All" },          { 1, "File Progress" }, { 2, "Volatile" }, { 3, "Level Specific" },
-    { 4, "Map Specific" }, { 5, "Rando Inf" },
+static const std::vector<const char*> flagTraceSpaces = {
+    "All", "File Progress", "Volatile", "Level Specific", "Map Specific", "Rando Inf",
 };
 
 void DrawFlagTracer() {
