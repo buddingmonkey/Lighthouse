@@ -1,0 +1,90 @@
+name: Retain latest release artifacts
+on:
+  workflow_run:
+    workflows: [GenerateBuilds]
+    types: [completed]
+  schedule:
+    - cron: '37 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Preview deletions without removing artifacts
+        type: boolean
+        default: false
+permissions:
+  actions: write
+concurrency:
+  group: retain-latest-release-artifacts
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    if: github.repository_owner == 'buddingmonkey'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Keep the latest successful release build
+        uses: actions/github-script@v8
+        env:
+          BUILD_WORKFLOW: main.yml
+          EXPECTED_ARTIFACTS: '["Lighthouse-windows", "Lighthouse-mac", "Lighthouse-linux", "Lighthouse-android"]'
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const expected = JSON.parse(process.env.EXPECTED_ARTIFACTS);
+            const workflow = process.env.BUILD_WORKFLOW;
+            const dryRun = context.payload.inputs?.dry_run === 'true';
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: workflow, event: 'push', status: 'success', per_page: 100
+            });
+            runs.sort((a, b) => b.run_number - a.run_number);
+            let release;
+            for (const run of runs) {
+              if (!run.head_branch?.startsWith('v')) continue;
+              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                owner, repo, run_id: run.id, filter: 'latest', per_page: 100
+              });
+              if (jobs.some(job => job.name === 'release' && job.conclusion === 'success')) {
+                release = run;
+                break;
+              }
+            }
+            if (!release) throw new Error('No successful version-tagged release build found. Nothing was deleted.');
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+              owner, repo, per_page: 100
+            });
+            const keep = new Set();
+            for (const name of expected) {
+              const matches = artifacts.filter(a => !a.expired && a.name === name && a.workflow_run?.id === release.id);
+              matches.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id);
+              if (!matches.length) throw new Error(`Latest release ${release.head_branch} is missing ${name}. Nothing was deleted.`);
+              keep.add(matches[0].id);
+            }
+            const candidates = artifacts.filter(a => !keep.has(a.id));
+            const completed = new Set();
+            for (const id of new Set(candidates.map(a => a.workflow_run?.id))) {
+              if (!id) continue;
+              const {data: run} = await github.rest.actions.getWorkflowRun({owner, repo, run_id: id});
+              if (run.status === 'completed') completed.add(id);
+            }
+            let count = 0;
+            let bytes = 0;
+            for (const artifact of candidates) {
+              const runId = artifact.workflow_run?.id;
+              if (!completed.has(runId)) continue;
+              const {data: run} = await github.rest.actions.getWorkflowRun({owner, repo, run_id: runId});
+              if (run.status !== 'completed') continue;
+              core.info(`${dryRun ? 'Would delete' : 'Deleting'} ${artifact.name} (${artifact.id}) from run ${runId}`);
+              if (!dryRun) {
+                try {
+                  await github.rest.actions.deleteArtifact({owner, repo, artifact_id: artifact.id});
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                }
+              }
+              count++;
+              bytes += artifact.size_in_bytes;
+            }
+            await core.summary.addHeading('Artifact retention').addRaw(
+              `Kept ${keep.size} platform artifacts from successful release ${release.head_branch} (run ${release.id}).\n\n` +
+              `${dryRun ? 'Would delete' : 'Deleted'} ${count} artifacts (${(bytes / 2 ** 30).toFixed(2)} GiB). Active runs were preserved.`
+            ).write();
